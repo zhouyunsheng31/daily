@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <!-- Daily 品牌色：从 daily.png 提取的蓝色系主色调 -->
+    <!-- 深端 #40A0FF (rgb 64,160,255) 是 daily.png 中频次最高的深蓝；
+         浅端 #2563EB 为色相一致的标准蓝，用于增强小尺寸下的对比度 -->
+    <linearGradient id="dailyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#40A0FF"/>
+      <stop offset="100%" stop-color="#2563EB"/>
+    </linearGradient>
+  </defs>
+  <!-- 蓝色圆形容器 + D 字内部白色镂空 (evenodd: 外圆填充, D 内部挖空) -->
+  <!-- D 内部形状: 左直右凸的 D 形负空间, 对应 daily.png 圆形 logo 中的 D 镂空区域 -->
+  <path fill="url(#dailyGrad)" fill-rule="evenodd" d="M 16 1 A 15 15 0 1 1 16 31 A 15 15 0 1 1 16 1 Z M 12 10 L 12 22 Q 20 22 20 16 Q 20 10 12 10 Z"/>
+  <!-- D 字内部蓝色小圆点: 呼应 daily.png 中 D 镂空区中心的蓝色装饰点 -->
+  <circle cx="16" cy="13" r="1.6" fill="url(#dailyGrad)"/>
+</svg>

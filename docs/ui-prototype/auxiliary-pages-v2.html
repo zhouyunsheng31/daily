@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daily 辅助页面 v2 - 高保真原型</title>
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        canvas: '#f5f5f7',
+        surface: '#ffffff',
+        elevated: '#f0f0f2',
+        primary: '#4A90E2',
+        'primary-light': '#6BA3E8',
+        'primary-dark': '#3A7BC2',
+        secondary: '#50E3C2',
+        accent: '#FF6B6B',
+        't-primary': '#1d1d1f',
+        't-secondary': '#86868b',
+        't-tertiary': '#adb5bd',
+      },
+      fontFamily: {
+        body: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', 'sans-serif'],
+        mono: ['SF Mono', 'Cascadia Code', 'JetBrains Mono', 'Consolas', 'monospace'],
+      },
+    }
+  }
+}
+</script>
+<style>
+:root {
+  --color-primary: #4A90E2;
+  --color-primary-light: #6BA3E8;
+  --color-primary-dark: #3A7BC2;
+  --color-primary-muted: rgba(74, 144, 226, 0.15);
+  --color-secondary: #50E3C2;
+  --color-accent: #FF6B6B;
+  --bg-canvas: #f5f5f7;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f0f0f2;
+  --bg-hover: rgba(0, 0, 0, 0.05);
+  --bg-active: rgba(0, 0, 0, 0.08);
+  --text-primary: #1d1d1f;
+  --text-secondary: #86868b;
+  --text-tertiary: #adb5bd;
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --border-default: rgba(0, 0, 0, 0.12);
+  --border-strong: rgba(0, 0, 0, 0.18);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.1), 0 2px 4px rgba(0,0,0,0.06);
+  --shadow-lg: 0 8px 28px rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.08);
+  --glass-bg: rgba(255,255,255,0.72);
+  --glass-blur: 20px;
+  --toolbar-bg: rgba(255,255,255,0.88);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+}
+[data-theme="dark"] {
+  --bg-canvas: #1a1a1c;
+  --bg-surface: #242426;
+  --bg-elevated: #2c2c2e;
+  --bg-hover: rgba(255,255,255,0.05);
+  --bg-active: rgba(255,255,255,0.08);
+  --text-primary: #f5f5f7;
+  --text-secondary: #98989d;
+  --text-tertiary: #636366;
+  --border-subtle: rgba(255,255,255,0.08);
+  --border-default: rgba(255,255,255,0.12);
+  --border-strong: rgba(255,255,255,0.18);
+  --glass-bg: rgba(36,36,38,0.72);
+  --toolbar-bg: rgba(36,36,38,0.88);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+.font-mono { font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', 'Consolas', monospace; }
+
+/* Toolbar button (matches existing index.css) */
+.dl-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 6px 12px; border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 12px; font-weight: 500; font-family: inherit;
+  cursor: pointer; transition: all var(--duration-fast) var(--ease-out);
+  white-space: nowrap;
+}
+.dl-btn:hover { border-color: var(--border-default); color: var(--text-primary); background: var(--bg-hover); }
+.dl-btn.primary { border-color: var(--color-primary); background: var(--color-primary); color: #fff; }
+.dl-btn.primary:hover { background: var(--color-primary-dark); border-color: var(--color-primary-dark); color: #fff; }
+.dl-btn.ghost { background: transparent; border-color: var(--border-default); color: var(--text-secondary); }
+.dl-btn.ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
+.dl-btn.danger { color: var(--color-accent); border-color: var(--border-default); }
+.dl-btn.danger:hover { background: rgba(255,107,107,0.1); border-color: var(--color-accent); }
+.dl-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Card */
+.dl-card {
+  background: var(--bg-surface);
+  border-radius: 16px;
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Input */
+.dl-input {
+  width: 100%; padding: 8px 12px; border-radius: 8px;
+  border: 1px solid var(--border-default);
+  font-size: 13px; font-family: inherit;
+  background: var(--bg-surface); color: var(--text-primary);
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+  outline: none;
+}
+.dl-input:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px var(--color-primary-muted); }
+.dl-input::placeholder { color: var(--text-tertiary); }
+
+/* Toggle switch (matches existing 42x24, radius 12px) */
+.dl-toggle { position: relative; width: 42px; height: 24px; cursor: pointer; flex-shrink: 0; display: inline-block; }
+.dl-toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+.dl-toggle-slider {
+  position: absolute; inset: 0;
+  background: var(--bg-canvas); border: 1px solid var(--border-default);
+  border-radius: 12px; transition: all var(--duration-fast) var(--ease-out);
+}
+.dl-toggle-slider::before {
+  content: ''; position: absolute; width: 18px; height: 18px; left: 2px; top: 2px;
+  background: var(--text-tertiary); border-radius: 50%;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+.dl-toggle input:checked + .dl-toggle-slider { background: var(--color-primary); border-color: var(--color-primary); }
+.dl-toggle input:checked + .dl-toggle-slider::before { transform: translateX(18px); background: #fff; }
+
+/* Top tabs (matches settings-nav: bottom 2px primary underline) */
+.dl-toptab {
+  padding: 8px 16px; background: transparent; border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary); font-size: 13px; font-weight: 500; font-family: inherit;
+  cursor: pointer; white-space: nowrap; margin-bottom: -1px;
+  transition: color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);
+}
+.dl-toptab:hover { color: var(--text-primary); }
+.dl-toptab.active { color: var(--color-primary); border-bottom-color: var(--color-primary); font-weight: 600; }
+
+/* Settings nav (same as existing) */
+.dl-settings-nav { display: flex; gap: 4px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 24px; overflow-x: auto; }
+.dl-settings-nav button {
+  padding: 8px 16px; background: transparent; border: none;
+  border-bottom: 2px solid transparent; color: var(--text-secondary);
+  font-size: 13px; font-weight: 500; font-family: inherit;
+  cursor: pointer; white-space: nowrap; margin-bottom: -1px;
+  transition: color var(--duration-fast), border-color var(--duration-fast);
+}
+.dl-settings-nav button:hover { color: var(--text-primary); }
+.dl-settings-nav button.active { color: var(--color-primary); border-bottom-color: var(--color-primary); font-weight: 600; }
+
+/* Modal */
+.dl-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 16px; }
+.dl-modal { background: var(--bg-surface); border-radius: 24px; box-shadow: var(--shadow-lg); width: 400px; max-width: 100%; position: relative; }
+
+/* Code block */
+.dl-code { background: #1e1e1e; color: #d4d4d4; border-radius: 8px; padding: 14px 16px; font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', 'Consolas', monospace; font-size: 12.5px; line-height: 1.6; overflow-x: auto; position: relative; }
+.dl-code .kw { color: #c586c0; } .dl-code .str { color: #ce9178; } .dl-code .cmt { color: #6a9955; }
+
+/* Drag area */
+.dl-drag { border: 2px dashed var(--border-default); border-radius: 16px; padding: 48px 24px; text-align: center; transition: border-color var(--duration-fast), background var(--duration-fast); cursor: pointer; }
+.dl-drag:hover { border-color: var(--color-primary); background: var(--color-primary-muted); }
+
+/* Range slider */
+.dl-range { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; background: var(--bg-elevated); border-radius: 2px; outline: none; }
+.dl-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; background: var(--color-primary); border-radius: 50%; cursor: pointer; }
+.dl-range::-moz-range-thumb { width: 16px; height: 16px; background: var(--color-primary); border-radius: 50%; cursor: pointer; border: none; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script id="app-source" type="text/plain">
+const { useState, useCallback, useMemo } = React;
+
+/* ===== SVG Icons (geometric line, no emoji) ===== */
+const Icon = ({ name, size = 16, className = "" }) => {
+  const props = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round", className };
+  const paths = {
+    close: <><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>,
+    search: <><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></>,
+    upload: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></>,
+    plus: <><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>,
+    back: <><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></>,
+    user: <><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></>,
+    lock: <><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>,
+    eye: <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>,
+    eyeOff: <><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></>,
+    read: <><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></>,
+    write: <><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></>,
+    edit: <><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></>,
+    bash: <><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></>,
+    grep: <><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="8" x2="14" y2="14"/></>,
+    find: <><path d="M3 6h18"/><path d="M3 12h18"/><path d="M3 18h18"/></>,
+    ls: <><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></>,
+    copy: <><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></>,
+    check: <><polyline points="20 6 9 17 4 12"/></>,
+    folder: <><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></>,
+    users: <><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></>,
+    layers: <><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></>,
+    globe: <><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></>,
+    book: <><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></>,
+    code: <><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></>,
+    terminal: <><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/><line x1="12" y1="5" x2="20" y2="5"/></>,
+    docker: <><rect x="2" y="8" width="20" height="9" rx="2"/><line x1="6" y1="8" x2="6" y2="5"/><line x1="10" y1="8" x2="10" y2="5"/><line x1="14" y1="8" x2="14" y2="5"/><line x1="18" y1="8" x2="18" y2="5"/></>,
+    palette: <><circle cx="12" cy="12" r="10"/><circle cx="8.5" cy="10.5" r="1.5"/><circle cx="15.5" cy="10.5" r="1.5"/><circle cx="12" cy="15" r="1.5"/></>,
+    sliders: <><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></>,
+    shield: <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></>,
+    link: <><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></>,
+    chevronDown: <><polyline points="6 9 12 15 18 9"/></>,
+  };
+  return <svg {...props}>{paths[name] || null}</svg>;
+};
+
+/* ===== Shared: Login Modal (弹出层 widget) ===== */
+function LoginModal({ onClose, title = "登录社区" }) {
+  const [mode, setMode] = useState("login");
+  const [user, setUser] = useState("");
+  const [pwd, setPwd] = useState("");
+  const [pwd2, setPwd2] = useState("");
+  const [showPwd, setShowPwd] = useState(false);
+
+  const submit = () => {
+    if (mode === "login" && user && pwd) onClose();
+    if (mode === "register" && user && pwd && pwd === pwd2) onClose();
+  };
+
+  return (
+    <div className="dl-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="dl-modal" style={{ padding: 32 }}>
+        <button onClick={onClose} style={{ position: "absolute", top: 16, right: 16, background: "transparent", border: "none", cursor: "pointer", color: "var(--text-secondary)", padding: 4 }}>
+          <Icon name="close" size={18} />
+        </button>
+        <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 4, color: "var(--text-primary)" }}>{title}</h2>
+        <p style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 20 }}>这是弹出层 HTML widget，不是独立页面。登录成功后关闭弹窗。</p>
+        <div className="dl-settings-nav" style={{ marginBottom: 20 }}>
+          <button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>登录</button>
+          <button className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>注册</button>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <label style={{ fontSize: 12, color: "var(--text-secondary)", display: "block", marginBottom: 6, fontWeight: 500 }}>用户名</label>
+            <input className="dl-input" value={user} onChange={(e) => setUser(e.target.value)} placeholder="输入用户名" />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: "var(--text-secondary)", display: "block", marginBottom: 6, fontWeight: 500 }}>密码</label>
+            <div style={{ position: "relative" }}>
+              <input className="dl-input" type={showPwd ? "text" : "password"} value={pwd} onChange={(e) => setPwd(e.target.value)} placeholder="输入密码" style={{ paddingRight: 36 }} />
+              <button onClick={() => setShowPwd(!showPwd)} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", cursor: "pointer", color: "var(--text-tertiary)", padding: 4 }}>
+                <Icon name={showPwd ? "eyeOff" : "eye"} size={15} />
+              </button>
+            </div>
+          </div>
+          {mode === "register" && (
+            <div>
+              <label style={{ fontSize: 12, color: "var(--text-secondary)", display: "block", marginBottom: 6, fontWeight: 500 }}>确认密码</label>
+              <input className="dl-input" type={showPwd ? "text" : "password"} value={pwd2} onChange={(e) => setPwd2(e.target.value)} placeholder="再次输入密码" />
+            </div>
+          )}
+          <button className="dl-btn primary" onClick={submit} style={{ marginTop: 4, padding: "8px 16px", fontSize: 13 }}>
+            {mode === "login" ? "登录" : "注册"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ===== Page 1: Login Page (登录弹层演示) ===== */
+function LoginPage() {
+  const [showModal, setShowModal] = useState(true);
+  return (
+    <div style={{ padding: 24 }}>
+      <div className="dl-card" style={{ padding: 24, marginBottom: 16 }}>
+        <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: "var(--text-primary)" }}>登录页（弹出层形式）</h3>
+        <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 16 }}>
+          登录窗口作为弹出层 HTML widget 显示在画布之上。背景半透明遮罩，弹窗卡片白色背景、圆角 24px、阴影 lg。
+          登录成功后自动关闭弹窗。
+        </p>
+        <button className="dl-btn primary" onClick={() => setShowModal(true)} style={{ padding: "8px 16px", fontSize: 13 }}>
+          <Icon name="lock" size={14} /> 打开登录弹窗
+        </button>
+      </div>
+      {/* 模拟画布背景 */}
+      <div style={{ position: "relative", height: 420, borderRadius: 16, background: "linear-gradient(135deg, #e8e8f0 0%, #dde0f0 50%, #e5e5ea 100%)", border: "1px solid var(--border-subtle)", overflow: "hidden" }}>
+        <div style={{ position: "absolute", top: 24, left: 24, width: 180, height: 120, background: "rgba(255,255,255,0.7)", borderRadius: 12, boxShadow: "var(--shadow-sm)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", fontSize: 12 }}>时钟组件</div>
+        <div style={{ position: "absolute", top: 24, right: 24, width: 220, height: 160, background: "rgba(255,255,255,0.7)", borderRadius: 12, boxShadow: "var(--shadow-sm)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", fontSize: 12 }}>天气组件</div>
+        <div style={{ position: "absolute", bottom: 24, left: 80, width: 160, height: 100, background: "rgba(255,255,255,0.7)", borderRadius: 12, boxShadow: "var(--shadow-sm)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", fontSize: 12 }}>待办组件</div>
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-tertiary)", fontSize: 13, pointerEvents: "none" }}>模拟画布（弹出层会覆盖在此之上）</div>
+      </div>
+      {showModal && <LoginModal onClose={() => setShowModal(false)} title="登录 Daily" />}
+    </div>
+  );
+}
+
+/* ===== Page 2: Settings ===== */
+function SettingsPage() {
+  const [tab, setTab] = useState("ai-tools");
+  const [tools, setTools] = useState({ read: false, write: false, edit: false, bash: false, grep: false, find: false, ls: false });
+  const [apiKey, setApiKey] = useState("");
+  const [showKey, setShowKey] = useState(false);
+  const [model, setModel] = useState("deepseek-v4-flash");
+  const [toolPerms, setToolPerms] = useState({ fs: false, browser: true, search: true });
+  const [engines, setEngines] = useState({ local: true, web: true, academic: false, github: false });
+  const [dockerCli, setDockerCli] = useState(false);
+  const [canvasCli, setCanvasCli] = useState(true);
+  const [maxZoom, setMaxZoom] = useState(2.0);
+  const [minZoom, setMinZoom] = useState(0.4);
+  const [accentColor, setAccentColor] = useState("#4A90E2");
+
+  const toolList = [
+    { key: "read", name: "read", desc: "读取文件内容", icon: "read" },
+    { key: "write", name: "write", desc: "写入文件内容", icon: "write" },
+    { key: "edit", name: "edit", desc: "编辑文件指定行", icon: "edit" },
+    { key: "bash", name: "bash", desc: "执行 shell 命令（沙箱内）", icon: "bash" },
+    { key: "grep", name: "grep", desc: "正则搜索文件内容", icon: "grep" },
+    { key: "find", name: "find", desc: "按名称查找文件", icon: "find" },
+    { key: "ls", name: "ls", desc: "列出目录内容", icon: "ls" },
+  ];
+
+  const users = [
+    { name: "alice", role: "admin", status: "active" },
+    { name: "bob", role: "member", status: "active" },
+    { name: "charlie", role: "member", status: "banned" },
+    { name: "diana", role: "member", status: "active" },
+    { name: "eve", role: "member", status: "active" },
+    { name: "frank", role: "member", status: "banned" },
+  ];
+
+  return (
+    <div style={{ maxWidth: 880, margin: "0 auto", padding: "24px 16px 32px" }}>
+      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, marginBottom: 24 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--text-primary)" }}>设置</h1>
+        <button className="dl-btn ghost"><Icon name="back" size={14} /> 返回画布</button>
+      </header>
+      <nav className="dl-settings-nav">
+        <button className={tab === "ai-tools" ? "active" : ""} onClick={() => setTab("ai-tools")}>AI 工具</button>
+        <button className={tab === "users" ? "active" : ""} onClick={() => setTab("users")}>用户管理</button>
+        <button className={tab === "ai-config" ? "active" : ""} onClick={() => setTab("ai-config")}>AI 配置</button>
+        <button className={tab === "tool-config" ? "active" : ""} onClick={() => setTab("tool-config")}>工具配置</button>
+        <button className={tab === "view" ? "active" : ""} onClick={() => setTab("view")}>视图设置</button>
+      </nav>
+      <div className="dl-card" style={{ padding: 24 }}>
+        {tab === "ai-tools" && (
+          <div>
+            <div style={{ background: "var(--color-primary-muted)", borderRadius: 12, padding: 12, marginBottom: 16, fontSize: 12, color: "var(--color-primary-dark)" }}>
+              PI agent 原本 7 个文件系统工具，默认关闭。开启后 AI 可在服务端沙箱内使用。
+            </div>
+            {toolList.map(t => (
+              <div key={t.key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: "1px solid var(--border-subtle)" }}>
+                <div style={{ width: 32, height: 32, borderRadius: 8, background: "var(--bg-elevated)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", flexShrink: 0 }}>
+                  <Icon name={t.icon} size={16} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>{t.name}</div>
+                  <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{t.desc}</div>
+                </div>
+                <label className="dl-toggle">
+                  <input type="checkbox" checked={tools[t.key]} onChange={(e) => setTools({ ...tools, [t.key]: e.target.checked })} />
+                  <span className="dl-toggle-slider"></span>
+                </label>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tab === "users" && (
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+              <h3 style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)" }}>用户管理</h3>
+              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--color-primary)", background: "var(--color-primary-muted)", padding: "2px 8px", borderRadius: 10 }}>管理员</span>
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--border-default)" }}>
+                  <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 12, fontWeight: 600, color: "var(--text-secondary)" }}>用户名</th>
+                  <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 12, fontWeight: 600, color: "var(--text-secondary)" }}>角色</th>
+                  <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 12, fontWeight: 600, color: "var(--text-secondary)" }}>状态</th>
+                  <th style={{ textAlign: "right", padding: "8px 12px", fontSize: 12, fontWeight: 600, color: "var(--text-secondary)" }}>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u, i) => (
+                  <tr key={i} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+                    <td style={{ padding: "10px 12px", fontSize: 13, color: "var(--text-primary)", display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ width: 24, height: 24, borderRadius: "50%", background: "var(--color-primary-muted)", color: "var(--color-primary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600 }}>{u.name[0].toUpperCase()}</div>
+                      {u.name}
+                    </td>
+                    <td style={{ padding: "10px 12px", fontSize: 13 }}>
+                      <span style={{ fontSize: 11, fontWeight: 500, padding: "2px 8px", borderRadius: 10, background: u.role === "admin" ? "var(--color-primary-muted)" : "var(--bg-elevated)", color: u.role === "admin" ? "var(--color-primary)" : "var(--text-secondary)" }}>{u.role}</span>
+                    </td>
+                    <td style={{ padding: "10px 12px", fontSize: 13 }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, color: u.status === "active" ? "#34C759" : "var(--color-accent)" }}>
+                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: u.status === "active" ? "#34C759" : "var(--color-accent)" }}></span>
+                        {u.status === "active" ? "正常" : "已封禁"}
+                      </span>
+                    </td>
+                    <td style={{ padding: "10px 12px", textAlign: "right" }}>
+                      <button className="dl-btn" style={{ padding: "4px 10px", fontSize: 11, marginRight: 4 }}>
+                        {u.role === "admin" ? "降为成员" : "升为管理员"}
+                      </button>
+                      <button className={`dl-btn ${u.status === "active" ? "danger" : "primary"}`} style={{ padding: "4px 10px", fontSize: 11 }}>
+                        {u.status === "active" ? "封禁" : "解封"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {tab === "ai-config" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            <div>
+              <label style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)", display: "block", marginBottom: 6 }}>API Key</label>
+              <div style={{ position: "relative" }}>
+                <input className="dl-input" type={showKey ? "text" : "password"} value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." style={{ paddingRight: 36 }} />
+                <button onClick={() => setShowKey(!showKey)} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", cursor: "pointer", color: "var(--text-tertiary)", padding: 4 }}>
+                  <Icon name={showKey ? "eyeOff" : "eye"} size={15} />
+                </button>
+              </div>
+            </div>
+            <div>
+              <label style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)", display: "block", marginBottom: 6 }}>模型选择</label>
+              <div style={{ position: "relative" }}>
+                <select className="dl-input" value={model} onChange={(e) => setModel(e.target.value)} style={{ appearance: "none", paddingRight: 32, cursor: "pointer" }}>
+                  <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+                  <option value="deepseek-v4">deepseek-v4</option>
+                  <option value="qwen-3.5">qwen-3.5</option>
+                  <option value="glm-5.2">glm-5.2</option>
+                </select>
+                <div style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-secondary)", pointerEvents: "none" }}>
+                  <Icon name="chevronDown" size={15} />
+                </div>
+              </div>
+            </div>
+            <div>
+              <label style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)", display: "block", marginBottom: 8 }}>工具权限</label>
+              {[
+                { key: "fs", label: "文件系统工具（read/write/edit/bash/grep/find/ls）" },
+                { key: "browser", label: "浏览器工具（18 个 browser_* 工具）" },
+                { key: "search", label: "搜索工具（local/web/academic/github）" },
+              ].map(p => (
+                <label key={p.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", cursor: "pointer" }}>
+                  <input type="checkbox" checked={toolPerms[p.key]} onChange={(e) => setToolPerms({ ...toolPerms, [p.key]: e.target.checked })} style={{ width: 16, height: 16, accentColor: "var(--color-primary)" }} />
+                  <span style={{ fontSize: 13, color: "var(--text-primary)" }}>{p.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {tab === "tool-config" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            <div>
+              <label style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)", display: "block", marginBottom: 8 }}>搜索引擎选择</label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                {[
+                  { key: "local", label: "本地搜索", icon: "folder" },
+                  { key: "web", label: "Web 搜索（秘塔）", icon: "globe" },
+                  { key: "academic", label: "学术论文（ArXiv）", icon: "book" },
+                  { key: "github", label: "GitHub 仓库", icon: "code" },
+                ].map(e => (
+                  <label key={e.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: 12, border: "1px solid var(--border-subtle)", borderRadius: 8, cursor: "pointer", background: engines[e.key] ? "var(--color-primary-muted)" : "var(--bg-surface)" }}>
+                    <input type="checkbox" checked={engines[e.key]} onChange={(ev) => setEngines({ ...engines, [e.key]: ev.target.checked })} style={{ width: 16, height: 16, accentColor: "var(--color-primary)" }} />
+                    <Icon name={e.icon} size={15} />
+                    <span style={{ fontSize: 13, color: "var(--text-primary)" }}>{e.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, borderTop: "1px solid var(--border-subtle)", paddingTop: 20 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 32, height: 32, borderRadius: 8, background: "var(--bg-elevated)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)" }}>
+                  <Icon name="docker" size={16} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>Docker CLI</div>
+                  <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>允许 AI 使用 docker 命令管理容器</div>
+                </div>
+                <label className="dl-toggle">
+                  <input type="checkbox" checked={dockerCli} onChange={(e) => setDockerCli(e.target.checked)} />
+                  <span className="dl-toggle-slider"></span>
+                </label>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 32, height: 32, borderRadius: 8, background: "var(--bg-elevated)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)" }}>
+                  <Icon name="terminal" size={16} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>Canvas CLI</div>
+                  <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>允许 AI 通过 CLI 操作画布</div>
+                </div>
+                <label className="dl-toggle">
+                  <input type="checkbox" checked={canvasCli} onChange={(e) => setCanvasCli(e.target.checked)} />
+                  <span className="dl-toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === "view" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+            <div>
+              <label style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)", display: "block", marginBottom: 12 }}>相册缩放档位触发值</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: 16, background: "var(--bg-elevated)", borderRadius: 12 }}>
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                    <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>最大档 zoom 阈值（单个组件占满全屏）</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-primary)" }}>{maxZoom.toFixed(1)}</span>
+                  </div>
+                  <input type="range" className="dl-range" min="1.5" max="3.0" step="0.1" value={maxZoom} onChange={(e) => setMaxZoom(parseFloat(e.target.value))} />
+                </div>
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                    <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>最小档 zoom 阈值（只显示图标）</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-primary)" }}>{minZoom.toFixed(1)}</span>
+                  </div>
+                  <input type="range" className="dl-range" min="0.2" max="0.8" step="0.1" value={minZoom} onChange={(e) => setMinZoom(parseFloat(e.target.value))} />
+                </div>
+              </div>
+            </div>
+            <div>
+              <label style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)", display: "block", marginBottom: 8 }}>主题选择</label>
+              <div style={{ display: "flex", gap: 10 }}>
+                <div style={{ flex: 1, padding: 12, border: "2px solid var(--color-primary)", borderRadius: 12, background: "#ffffff", cursor: "pointer" }}>
+                  <div style={{ height: 40, borderRadius: 6, background: "#f5f5f7", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div style={{ width: 24, height: 8, background: "#4A90E2", borderRadius: 2 }}></div>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>白色主题</span>
+                    <Icon name="check" size={14} />
+                  </div>
+                </div>
+                <div style={{ flex: 1, padding: 12, border: "1px solid var(--border-subtle)", borderRadius: 12, background: "var(--bg-surface)", cursor: "pointer" }}>
+                  <div style={{ height: 40, borderRadius: 6, background: "#1a1a1c", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div style={{ width: 24, height: 8, background: "#4A90E2", borderRadius: 2 }}></div>
+                  </div>
+                  <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text-secondary)" }}>黑色主题</span>
+                </div>
+              </div>
+            </div>
+            <div>
+              <label style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)", display: "block", marginBottom: 8 }}>accentColor 颜色选择器</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <input type="color" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} style={{ width: 48, height: 36, border: "1px solid var(--border-default)", borderRadius: 8, cursor: "pointer", background: "transparent" }} />
+                <input className="dl-input" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} style={{ width: 120, fontFamily: "SF Mono, monospace", fontSize: 12 }} />
+                <div style={{ display: "flex", gap: 6 }}>
+                  {["#4A90E2", "#50E3C2", "#FF6B6B", "#FF9500", "#AF52DE"].map(c => (
+                    <button key={c} onClick={() => setAccentColor(c)} style={{ width: 24, height: 24, borderRadius: "50%", background: c, border: accentColor === c ? "2px solid var(--text-primary)" : "2px solid transparent", cursor: "pointer" }}></button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ===== Page 3: Panel Switch ===== */
+function PanelSwitchPage() {
+  const [selPersonal, setSelPersonal] = useState("study");
+  const [selCommunity, setSelCommunity] = useState("game");
+  const [showLogin, setShowLogin] = useState(false);
+
+  const personal = [
+    { id: "study", name: "学习", count: 12, modified: "2 小时前", icon: "book" },
+    { id: "life", name: "生活", count: 8, modified: "昨天", icon: "user" },
+    { id: "leisure", name: "休闲", count: 5, modified: "3 天前", icon: "globe" },
+    { id: "work", name: "工作", count: 15, modified: "刚刚", icon: "layers" },
+  ];
+  const community = [
+    { id: "game", name: "游戏社区", members: 1280, admin: "alice", icon: "code" },
+    { id: "study", name: "学习社区", members: 856, admin: "bob", icon: "book" },
+    { id: "design", name: "设计社区", members: 432, admin: "diana", icon: "palette" },
+  ];
+
+  return (
+    <div style={{ padding: 24 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+        {/* Personal */}
+        <div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)" }}>个人面板</h3>
+            <button className="dl-btn primary"><Icon name="plus" size={13} /> 新建</button>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {personal.map(p => (
+              <div key={p.id} onClick={() => setSelPersonal(p.id)} className="dl-card" style={{ padding: 14, cursor: "pointer", border: selPersonal === p.id ? "2px solid var(--color-primary)" : "1px solid var(--border-subtle)", background: selPersonal === p.id ? "var(--color-primary-muted)" : "var(--bg-surface)", transition: "all 150ms cubic-bezier(0.16,1,0.3,1)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 8, background: "var(--bg-elevated)", display: "flex", alignItems: "center", justifyContent: "center", color: selPersonal === p.id ? "var(--color-primary)" : "var(--text-secondary)" }}>
+                    <Icon name={p.icon} size={18} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>{p.name}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{p.count} 个组件 · {p.modified}</div>
+                  </div>
+                  {selPersonal === p.id && <Icon name="check" size={16} />}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        {/* Community */}
+        <div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)" }}>社区面板</h3>
+            <button className="dl-btn primary" onClick={() => setShowLogin(true)}><Icon name="plus" size={13} /> 创建社区面板</button>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {community.map(c => (
+              <div key={c.id} onClick={() => setSelCommunity(c.id)} className="dl-card" style={{ padding: 14, cursor: "pointer", border: selCommunity === c.id ? "2px solid var(--color-primary)" : "1px solid var(--border-subtle)", background: selCommunity === c.id ? "var(--color-primary-muted)" : "var(--bg-surface)", transition: "all 150ms cubic-bezier(0.16,1,0.3,1)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 8, background: "var(--bg-elevated)", display: "flex", alignItems: "center", justifyContent: "center", color: selCommunity === c.id ? "var(--color-primary)" : "var(--text-secondary)" }}>
+                    <Icon name={c.icon} size={18} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>{c.name}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{c.members} 成员 · 管理员 {c.admin}</div>
+                  </div>
+                  {selCommunity === c.id && <Icon name="check" size={16} />}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div style={{ marginTop: 20, padding: 12, background: "var(--bg-elevated)", borderRadius: 8, fontSize: 12, color: "var(--text-secondary)" }}>
+        点击"创建社区面板"会弹出登录窗口（弹出层 HTML widget），连接外部社群需输入社区地址/API。各社区独立用户系统。
+      </div>
+      {showLogin && <LoginModal onClose={() => setShowLogin(false)} title="连接外部社群" />}
+    </div>
+  );
+}
+
+/* ===== Page 4: Community Discovery ===== */
+function CommunityDiscoveryPage() {
+  const [query, setQuery] = useState("");
+  const [joined, setJoined] = useState({});
+  const [manualAddr, setManualAddr] = useState("");
+
+  const communities = [
+    { id: "html-game", name: "HTML 游戏工坊", desc: "用 HTML 做游戏，分享与联机", members: 2340 },
+    { id: "frontend", name: "前端学习圈", desc: "前端技术交流与学习", members: 1820 },
+    { id: "animator", name: "动画设计师", desc: "CSS/Canvas/WebGL 动画", members: 960 },
+    { id: "rust", name: "Rust 开发者", desc: "Rust 语言学习与项目", members: 740 },
+    { id: "python", name: "Python 爱好者", desc: "Python 编程与数据科学", members: 3120 },
+    { id: "music", name: "音乐创作社", desc: "WebAudio 与音乐制作", members: 580 },
+    { id: "photo", name: "摄影分享", desc: "摄影作品与后期交流", members: 1240 },
+    { id: "reading", name: "读书会", desc: "读书笔记与讨论", members: 860 },
+  ];
+
+  const filtered = communities.filter(c => c.name.toLowerCase().includes(query.toLowerCase()));
+
+  const logoUrl = (name) => `https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=${encodeURIComponent(name + " logo minimal")}&image_size=square_hd`;
+
+  return (
+    <div style={{ padding: 24, maxWidth: 960, margin: "0 auto" }}>
+      <div style={{ position: "relative", marginBottom: 20 }}>
+        <div style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-tertiary)" }}>
+          <Icon name="search" size={16} />
+        </div>
+        <input className="dl-input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索社区..." style={{ paddingLeft: 36 }} />
+      </div>
+      <h3 style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)", marginBottom: 16 }}>官方社区列表</h3>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+        {filtered.map(c => (
+          <div key={c.id} className="dl-card" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+              <img src={logoUrl(c.name)} alt={c.name} style={{ width: 44, height: 44, borderRadius: "50%", objectFit: "cover", background: "var(--bg-elevated)", flexShrink: 0 }} onError={(e) => { e.target.style.display = "none"; e.target.nextSibling.style.display = "flex"; }} />
+              <div style={{ width: 44, height: 44, borderRadius: "50%", background: "var(--color-primary-muted)", color: "var(--color-primary)", display: "none", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 600, flexShrink: 0 }}>{c.name[0]}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>{c.name}</div>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{c.members.toLocaleString()} 成员</div>
+              </div>
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-secondary)", minHeight: 32, lineHeight: 1.5 }}>{c.desc}</div>
+            <button className={`dl-btn ${joined[c.id] ? "ghost" : "primary"}`} style={{ width: "100%", padding: "6px 12px", fontSize: 12 }} onClick={() => setJoined({ ...joined, [c.id]: !joined[c.id] })}>
+              {joined[c.id] ? <><Icon name="check" size={13} /> 已加入</> : "加入"}
+            </button>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 24, padding: 16, background: "var(--bg-elevated)", borderRadius: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>手动添加社区</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input className="dl-input" value={manualAddr} onChange={(e) => setManualAddr(e.target.value)} placeholder="输入社区地址或 API endpoint" />
+          <button className="dl-btn primary" style={{ flexShrink: 0 }}><Icon name="plus" size={13} /> 添加</button>
+        </div>
+        <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 8 }}>联邦式社区，各社区独立注册。用户从官方列表选择添加，或手动输入地址。</div>
+      </div>
+    </div>
+  );
+}
+
+/* ===== Page 5: Component Import ===== */
+function ComponentImportPage() {
+  const [htmlCode, setHtmlCode] = useState("");
+  const [copied, setCopied] = useState(false);
+  const fileRef = React.useRef(null);
+
+  const curlCmd = `curl -X POST https://your-daily.example.com/api/components/upload \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer <token>" \\
+  -d '{
+    "name": "my-widget",
+    "html": "<div>Hello Daily</div>",
+    "type": "iframe"
+  }'`;
+
+  const copyCurl = () => {
+    try {
+      navigator.clipboard.writeText(curlCmd);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) { setCopied(false); }
+  };
+
+  return (
+    <div style={{ padding: 24, maxWidth: 880, margin: "0 auto" }}>
+      {/* Manual upload */}
+      <div className="dl-card" style={{ padding: 24, marginBottom: 20 }}>
+        <h3 style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)", marginBottom: 16 }}>手动上传</h3>
+        <div className="dl-drag" onClick={() => fileRef.current && fileRef.current.click()}>
+          <div style={{ width: 48, height: 48, borderRadius: "50%", background: "var(--color-primary-muted)", color: "var(--color-primary)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
+            <Icon name="upload" size={24} />
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>拖拽 HTML 文件到此处</div>
+          <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 12 }}>或点击选择文件</div>
+          <button className="dl-btn primary" style={{ pointerEvents: "none" }}>选择文件</button>
+          <input ref={fileRef} type="file" accept=".html,.htm" style={{ display: "none" }} onChange={(e) => { if (e.target.files[0]) setHtmlCode(`<!-- ${e.target.files[0].name} -->`); }} />
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <label style={{ fontSize: 12, fontWeight: 500, color: "var(--text-secondary)", display: "block", marginBottom: 6 }}>或粘贴 HTML 代码</label>
+          <textarea className="dl-input font-mono" value={htmlCode} onChange={(e) => setHtmlCode(e.target.value)} placeholder="<div>你的组件 HTML</div>" style={{ height: 120, resize: "vertical", fontFamily: "SF Mono, Cascadia Code, Consolas, monospace", fontSize: 12, lineHeight: 1.6 }} />
+        </div>
+        <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
+          <button className="dl-btn primary" style={{ padding: "8px 16px", fontSize: 13 }}><Icon name="upload" size={14} /> 上传组件</button>
+        </div>
+      </div>
+
+      {/* API upload */}
+      <div className="dl-card" style={{ padding: 24 }}>
+        <h3 style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)", marginBottom: 16 }}>API 接口上传</h3>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text-secondary)", marginBottom: 6 }}>Endpoint</div>
+          <div className="font-mono" style={{ background: "var(--bg-elevated)", borderRadius: 8, padding: "8px 12px", fontSize: 13, color: "var(--color-primary)" }}>POST /api/components/upload</div>
+        </div>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text-secondary)", marginBottom: 8 }}>请求参数</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid var(--border-default)" }}>
+                <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 12, fontWeight: 600, color: "var(--text-secondary)" }}>参数名</th>
+                <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 12, fontWeight: 600, color: "var(--text-secondary)" }}>类型</th>
+                <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 12, fontWeight: 600, color: "var(--text-secondary)" }}>说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                { name: "name", type: "string", desc: "组件名" },
+                { name: "html", type: "string", desc: "HTML 内容" },
+                { name: "type", type: "string", desc: "组件类型（iframe / free）" },
+              ].map((r, i) => (
+                <tr key={i} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+                  <td style={{ padding: "8px 12px", fontSize: 13, fontFamily: "SF Mono, monospace", color: "var(--color-primary)" }}>{r.name}</td>
+                  <td style={{ padding: "8px 12px", fontSize: 13, fontFamily: "SF Mono, monospace", color: "var(--text-secondary)" }}>{r.type}</td>
+                  <td style={{ padding: "8px 12px", fontSize: 13, color: "var(--text-primary)" }}>{r.desc}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text-secondary)" }}>示例 curl 命令</div>
+            <button className="dl-btn" style={{ padding: "4px 10px", fontSize: 11 }} onClick={copyCurl}>
+              <Icon name={copied ? "check" : "copy"} size={12} /> {copied ? "已复制" : "复制"}
+            </button>
+          </div>
+          <div className="dl-code">
+            <span className="cmt"># 上传组件到 Daily</span><br/>
+            <span className="kw">curl</span> -X POST https://your-daily.example.com/api/components/upload \<br/>
+            &nbsp;&nbsp;-H <span className="str">"Content-Type: application/json"</span> \<br/>
+            &nbsp;&nbsp;-H <span className="str">"Authorization: Bearer &lt;token&gt;"</span> \<br/>
+            &nbsp;&nbsp;-d <span className="str">{'\''}</span>{'{'}<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;<span className="str">"name"</span>: <span className="str">"my-widget"</span>,<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;<span className="str">"html"</span>: <span className="str">"&lt;div&gt;Hello Daily&lt;/div&gt;"</span>,<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;<span className="str">"type"</span>: <span className="str">"iframe"</span><br/>
+            {'}'}<span className="str">'\''</span>
+          </div>
+        </div>
+        <div style={{ marginTop: 16, padding: 12, background: "var(--color-primary-muted)", borderRadius: 8, fontSize: 12, color: "var(--color-primary-dark)" }}>
+          AI 对话生成不属于导入。导入是从外部导入已开发好的组件。
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ===== App ===== */
+function App() {
+  const [page, setPage] = useState("login");
+  const pages = [
+    { id: "login", label: "登录页" },
+    { id: "settings", label: "设置页" },
+    { id: "panel", label: "面板切换" },
+    { id: "community", label: "社区发现" },
+    { id: "import", label: "组件导入" },
+  ];
+  return (
+    <div style={{ minHeight: "100vh", background: "var(--bg-canvas)" }}>
+      <header style={{ position: "sticky", top: 0, zIndex: 100, background: "var(--glass-bg)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", borderBottom: "1px solid var(--border-subtle)" }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 24px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 52 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ width: 24, height: 24, borderRadius: 6, background: "var(--color-primary)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Icon name="layers" size={14} />
+            </div>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>Daily</span>
+            <span style={{ fontSize: 11, color: "var(--text-tertiary)", marginLeft: 4 }}>辅助页面 v2</span>
+          </div>
+          <nav style={{ display: "flex", gap: 2, borderBottom: "none" }}>
+            {pages.map(p => (
+              <button key={p.id} className={`dl-toptab ${page === p.id ? "active" : ""}`} onClick={() => setPage(p.id)}>{p.label}</button>
+            ))}
+          </nav>
+        </div>
+      </header>
+      <main>
+        {page === "login" && <LoginPage />}
+        {page === "settings" && <SettingsPage />}
+        {page === "panel" && <PanelSwitchPage />}
+        {page === "community" && <CommunityDiscoveryPage />}
+        {page === "import" && <ComponentImportPage />}
+      </main>
+    </div>
+  );
+}
+
+Object.assign(window, { LoginPage, SettingsPage, PanelSwitchPage, CommunityDiscoveryPage, ComponentImportPage, LoginModal, App });
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+<script>
+// Babel manual transform with classic JSX runtime (avoids "import outside module")
+(function () {
+  var src = document.getElementById('app-source').textContent;
+  try {
+    var out = Babel.transform(src, {
+      presets: [['react', { runtime: 'classic' }]],
+    }).code;
+    var s = document.createElement('script');
+    s.textContent = out;
+    document.body.appendChild(s);
+  } catch (e) {
+    console.error('Babel transform failed:', e);
+    document.getElementById('root').innerHTML = '<div style="padding:24px;color:#FF6B6B;font-family:monospace">Babel transform error: ' + e.message + '</div>';
+  }
+})();
+</script>
+</body>
+</html>

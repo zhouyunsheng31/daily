@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Daily · 画布核心 v2 · 白色主题</title>
+
+<!-- Pinned React 18.3.1 -->
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<style>
+  /* === DailyLife Design Tokens (白色主题，与 index.css 严格一致) === */
+  :root {
+    --bg-canvas: #f5f5f7;
+    --bg-surface: #ffffff;
+    --bg-elevated: #f0f0f2;
+    --bg-hover: rgba(0, 0, 0, 0.05);
+    --bg-active: rgba(0, 0, 0, 0.08);
+    --color-primary: #4A90E2;
+    --color-primary-light: #6BA3E8;
+    --color-primary-dark: #3A7BC2;
+    --color-primary-muted: rgba(74, 144, 226, 0.15);
+    --color-secondary: #50E3C2;
+    --color-accent: #FF6B6B;
+    --text-primary: #1d1d1f;
+    --text-secondary: #86868b;
+    --text-tertiary: #adb5bd;
+    --border-subtle: rgba(0, 0, 0, 0.08);
+    --border-default: rgba(0, 0, 0, 0.12);
+    --border-strong: rgba(0, 0, 0, 0.18);
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.1), 0 2px 4px rgba(0,0,0,0.06);
+    --shadow-lg: 0 8px 28px rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.08);
+    --shadow-xl: 0 16px 40px rgba(0,0,0,0.16), 0 8px 16px rgba(0,0,0,0.1);
+    --glass-bg: rgba(255, 255, 255, 0.72);
+    --glass-blur: 20px;
+    --glass-border: rgba(255, 255, 255, 0.18);
+    --toolbar-bg: rgba(255, 255, 255, 0.88);
+    --toolbar-border: rgba(0, 0, 0, 0.10);
+    --overlay-bg: rgba(0, 0, 0, 0.35);
+    --radius-xs: 4px;
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 24px;
+    --radius-2xl: 32px;
+    --radius-full: 9999px;
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+    --duration-fast: 150ms;
+    --duration-normal: 250ms;
+    --duration-slow: 400ms;
+  }
+
+  /* 黑色主题 token 覆盖（仅声明，UI 默认展示白色主题） */
+  [data-theme="dark"] {
+    --bg-canvas: #0a0a0c;
+    --bg-surface: #1c1c1e;
+    --bg-elevated: #2c2c2e;
+    --bg-hover: rgba(255, 255, 255, 0.06);
+    --bg-active: rgba(255, 255, 255, 0.10);
+    --text-primary: #f5f5f7;
+    --text-secondary: #aeaeb2;
+    --text-tertiary: #636366;
+    --border-subtle: rgba(255, 255, 255, 0.10);
+    --border-default: rgba(255, 255, 255, 0.14);
+    --border-strong: rgba(255, 255, 255, 0.22);
+    --glass-bg: rgba(28, 28, 30, 0.72);
+    --glass-border: rgba(255, 255, 255, 0.10);
+    --toolbar-bg: rgba(28, 28, 30, 0.88);
+    --overlay-bg: rgba(0, 0, 0, 0.55);
+  }
+
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg-canvas);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    letter-spacing: -0.01em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    height: 100vh;
+    overflow: hidden;
+  }
+  .font-mono { font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', 'Consolas', monospace; }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+  :focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; border-radius: 2px; }
+  ::selection { background: var(--color-primary-muted); color: var(--text-primary); }
+
+  /* === 下雨特效（背景层） === */
+  @keyframes rainFall {
+    0% { transform: translate3d(0, -120%, 0); opacity: 0; }
+    8% { opacity: 0.55; }
+    100% { transform: translate3d(-40px, 120vh, 0); opacity: 0; }
+  }
+  .rain-drop {
+    position: absolute;
+    width: 1px;
+    background: linear-gradient(to bottom, transparent, rgba(74,144,226,0.45), transparent);
+    animation: rainFall linear infinite;
+    pointer-events: none;
+  }
+
+  /* === 自由 HTML 组件：旋转渐变光球（任意形状，无矩形边框） === */
+  @keyframes orbSpin {
+    0% { transform: rotate(0deg) scale(1); }
+    50% { transform: rotate(180deg) scale(1.08); }
+    100% { transform: rotate(360deg) scale(1); }
+  }
+  .free-orb {
+    border-radius: 50%;
+    background: conic-gradient(from 0deg, rgba(74,144,226,0.55), rgba(80,227,194,0.45), rgba(74,144,226,0.55));
+    filter: blur(0.4px);
+    box-shadow: 0 0 30px rgba(74,144,226,0.45), 0 0 60px rgba(80,227,194,0.30);
+    animation: orbSpin 8s linear infinite;
+    pointer-events: none;
+  }
+
+  /* === 自由 HTML 组件：飘动光点（跨 widget 边界，无矩形边框） === */
+  @keyframes particleDrift {
+    0%   { transform: translate(0, 0); opacity: 0; }
+    20%  { opacity: 0.9; }
+    80%  { opacity: 0.9; }
+    100% { transform: translate(140px, -90px); opacity: 0; }
+  }
+  .free-particle {
+    position: absolute;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: radial-gradient(circle, #fff 0%, rgba(80,227,194,0.85) 50%, transparent 100%);
+    box-shadow: 0 0 8px rgba(80,227,194,0.7);
+    animation: particleDrift 6s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  /* === AI 浮球呼吸 === */
+  @keyframes aiBallGlow {
+    0%, 100% { box-shadow: 0 6px 18px rgba(74,144,226,0.35), 0 0 0 0 rgba(74,144,226,0.30); }
+    50%      { box-shadow: 0 8px 26px rgba(74,144,226,0.50), 0 0 0 8px rgba(74,144,226,0.08); }
+  }
+  .ai-ball-glow { animation: aiBallGlow 3.2s ease-in-out infinite; }
+
+  /* === 入场 === */
+  @keyframes bubbleIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .bubble-in { animation: bubbleIn 0.28s var(--ease-out); }
+  @keyframes popIn { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: scale(1); } }
+  .pop-in { animation: popIn 0.24s var(--ease-out); }
+
+  /* === 缩放档位过渡 === */
+  .zoom-transition { transition: transform 380ms var(--ease-out), opacity 320ms ease, width 380ms var(--ease-out), height 380ms var(--ease-out), left 380ms var(--ease-out), top 380ms var(--ease-out); }
+
+  /* === iframe widget 专属（矩形 + 标题栏 + resize 手柄） === */
+  .iframe-widget {
+    position: absolute;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+    transition: box-shadow var(--duration-normal) var(--ease-out);
+  }
+  .iframe-widget:hover { box-shadow: var(--shadow-lg); }
+  .iframe-widget .widget-titlebar {
+    height: 32px;
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 10px;
+    cursor: grab;
+    user-select: none;
+  }
+  .iframe-widget .widget-titlebar:active { cursor: grabbing; }
+  .iframe-widget .resize-handle {
+    position: absolute;
+    right: 0; bottom: 0;
+    width: 14px; height: 14px;
+    cursor: nwse-resize;
+    background:
+      linear-gradient(135deg, transparent 50%, var(--border-strong) 50%, var(--border-strong) 60%, transparent 60%, transparent 75%, var(--border-strong) 75%, var(--border-strong) 85%, transparent 85%);
+  }
+
+  /* === 拖拽中禁用选中 === */
+  .dragging * { user-select: none !important; }
+
+  /* === 顶部 Tab === */
+  .tab-btn { transition: color var(--duration-fast) ease, background var(--duration-fast) ease; }
+  .tab-btn:hover { background: var(--bg-hover); }
+  .tab-active { color: var(--color-primary) !important; background: var(--color-primary-muted) !important; }
+
+  /* === 标注胶囊（区分各层 / 组件类型） === */
+  .label-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-family: 'SF Mono', monospace;
+    border-radius: var(--radius-full);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    border: 1px solid var(--border-subtle);
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  .label-bg     { background: rgba(255,255,255,0.78); color: var(--text-secondary); }
+  .label-iframe { background: rgba(74,144,226,0.12); color: var(--color-primary-dark); border-color: rgba(74,144,226,0.25); }
+  .label-free   { background: rgba(80,227,194,0.14); color: #2fa98a; border-color: rgba(80,227,194,0.30); }
+  .label-pop    { background: rgba(255,107,107,0.12); color: #d8514f; border-color: rgba(255,107,107,0.28); }
+  .label-ai     { background: rgba(74,144,226,0.18); color: #fff; border-color: rgba(74,144,226,0.45); }
+
+  /* === Apple Watch 风格最小档圆球 === */
+  .aw-bubble {
+    width: 88px; height: 88px;
+    border-radius: 50%;
+    background: var(--bg-surface);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.10), inset 0 -2px 4px rgba(0,0,0,0.04);
+    display: flex; align-items: center; justify-content: center;
+    transition: transform var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+    cursor: pointer;
+    border: 1px solid var(--border-subtle);
+  }
+  .aw-bubble:hover { transform: scale(1.06); box-shadow: 0 8px 24px rgba(74,144,226,0.25); }
+  .aw-bubble.active { background: var(--color-primary); color: #fff; }
+  .aw-bubble.active svg { stroke: #fff; }
+
+  /* === 视图容器 === */
+  .view-container { height: calc(100vh - 56px); overflow: hidden; position: relative; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+/* ============================================================
+   SVG 几何线条图标（无 emoji）
+   ============================================================ */
+const SvgIcons = {
+  zoomIn:   (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>),
+  zoomOut:  (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><line x1="8" y1="11" x2="14" y2="11"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>),
+  grid:     (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>),
+  watch:    (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="6"/><rect x="9" y="2" width="6" height="3" rx="1"/><rect x="9" y="19" width="6" height="3" rx="1"/></svg>),
+  upload:   (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>),
+  panel:    (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>),
+  close:    (s=14) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>),
+  send:     (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>),
+  chat:     (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-9 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.2A8.5 8.5 0 0 1 4 11.5 8.38 8.38 0 0 1 13 3a8.5 8.5 0 0 1 8 8.5z"/></svg>),
+  calc:     (s=18) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="11" x2="8" y2="11"/><line x1="12" y1="11" x2="12" y2="11"/><line x1="16" y1="11" x2="16" y2="11"/><line x1="8" y1="15" x2="8" y2="15"/><line x1="12" y1="15" x2="12" y2="15"/><line x1="16" y1="15" x2="16" y2="15"/><line x1="8" y1="19" x2="12" y2="19"/></svg>),
+  note:     (s=18) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>),
+  music:    (s=18) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>),
+  game:     (s=18) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><line x1="6" y1="11" x2="10" y2="11"/><line x1="8" y1="9" x2="8" y2="13"/><line x1="15" y1="12" x2="15.01" y2="12"/><line x1="18" y1="10" x2="18.01" y2="10"/><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258A4 4 0 0 0 17.32 5z"/></svg>),
+  clock:    (s=18) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>),
+  weather:  (s=18) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>),
+  user:     (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>),
+  lock:     (s=14) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>),
+  mail:     (s=14) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>),
+  check:    (s=14) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>),
+  arrowR:   (s=14) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>),
+  bell:     (s=18) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>),
+};
+
+/* ============================================================
+   共享小组件
+   ============================================================ */
+const LabelChip = ({ kind, children, style }) => (
+  <span className={`label-chip label-${kind}`} style={style}>{children}</span>
+);
+
+const TopBar = ({ activeView, onViewChange }) => {
+  const tabs = [
+    { id: 'v1', label: '画布主页', desc: '三层模型' },
+    { id: 'v2', label: '相册缩放', desc: '三档' },
+    { id: 'v3', label: 'AI 对话形态', desc: '浮球 / 任务栏' },
+    { id: 'v4', label: '背景层', desc: '示例' },
+    { id: 'v5', label: '弹出层', desc: '示例' },
+  ];
+  return (
+    <div style={{
+      height: 56, background: 'var(--toolbar-bg)', backdropFilter: 'blur(20px)',
+      WebkitBackdropFilter: 'blur(20px)', borderBottom: '1px solid var(--toolbar-border)',
+      display: 'flex', alignItems: 'center', padding: '0 20px', gap: 4, zIndex: 50, position: 'relative',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 24 }}>
+        <div style={{ width: 26, height: 26, borderRadius: 7, background: 'linear-gradient(135deg, #4A90E2, #50E3C2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 13 }}>D</div>
+        <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' }}>Daily · 画布核心 v2</div>
+      </div>
+      {tabs.map(t => (
+        <button key={t.id} onClick={() => onViewChange(t.id)}
+          className={`tab-btn ${activeView === t.id ? 'tab-active' : ''}`}
+          style={{
+            padding: '6px 12px', borderRadius: 'var(--radius-sm)', border: 'none', background: 'transparent',
+            color: 'var(--text-secondary)', fontSize: 13, cursor: 'pointer',
+            display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.15,
+          }}>
+          <span style={{ fontWeight: 600 }}>{t.label}</span>
+          <span style={{ fontSize: 10, opacity: 0.7 }}>{t.desc}</span>
+        </button>
+      ))}
+      <div style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'SF Mono, monospace' }}>白色主题 · White Theme</div>
+    </div>
+  );
+};
+
+/* 实时时钟（背景层基础组件） */
+const ClockWidget = ({ position }) => {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  const ss = String(now.getSeconds()).padStart(2, '0');
+  const dateStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`;
+  return (
+    <div style={{
+      position: 'absolute', ...position,
+      background: 'var(--glass-bg)', backdropFilter: `blur(${20}px)`,
+      WebkitBackdropFilter: `blur(${20}px)`, border: '1px solid var(--glass-border)',
+      borderRadius: 'var(--radius-lg)', padding: '12px 18px', color: 'var(--text-primary)',
+      boxShadow: 'var(--shadow-md)', display: 'flex', alignItems: 'center', gap: 12,
+      zIndex: 2,
+    }}>
+      <div style={{ color: 'var(--color-primary)' }}>{SvgIcons.clock(24)}</div>
+      <div>
+        <div className="font-mono" style={{ fontSize: 22, fontWeight: 600, lineHeight: 1, letterSpacing: '-0.02em' }}>{hh}:{mm}<span style={{ fontSize: 14, opacity: 0.6 }}>:{ss}</span></div>
+        <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>{dateStr}</div>
+      </div>
+    </div>
+  );
+};
+
+/* 下雨特效（背景层） */
+const RainEffect = ({ count = 60 }) => {
+  const drops = useMemo(() => Array.from({ length: count }).map((_, i) => ({
+    id: i,
+    left: Math.random() * 100,
+    height: 60 + Math.random() * 80,
+    duration: 0.6 + Math.random() * 0.9,
+    delay: -Math.random() * 2,
+    opacity: 0.3 + Math.random() * 0.5,
+  })), [count]);
+  return (
+    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 1 }}>
+      {drops.map(d => (
+        <div key={d.id} className="rain-drop"
+          style={{ left: `${d.left}%`, height: `${d.height}px`, animationDuration: `${d.duration}s`, animationDelay: `${d.delay}s`, opacity: d.opacity }} />
+      ))}
+    </div>
+  );
+};
+
+/* AI 浮球（视图1 + 视图3 共用） */
+const AIFloatingBall = ({ onClick, expanded }) => (
+  <div onClick={onClick}
+    className="ai-ball-glow"
+    style={{
+      position: 'absolute', right: 24, bottom: 24, width: 56, height: 56, borderRadius: '50%',
+      background: 'linear-gradient(135deg, var(--color-primary), var(--color-primary-dark))',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+      color: '#fff', zIndex: 60, border: '2px solid rgba(255,255,255,0.6)',
+    }}>
+    {expanded ? SvgIcons.close(22) : SvgIcons.chat(22)}
+  </div>
+);
+
+/* ============================================================
+   视图 1：画布主页（三层模型可视化）
+   ============================================================ */
+const View1Canvas = () => {
+  const [widgets, setWidgets] = useState([
+    { id: 'w-calc', x: 80, y: 110, w: 240, h: 280, name: '计算器', type: 'iframe' },
+    { id: 'w-note', x: 360, y: 160, w: 280, h: 200, name: '记事本', type: 'iframe' },
+    { id: 'w-music', x: 700, y: 100, w: 220, h: 160, name: '音乐播放器', type: 'iframe' },
+  ]);
+  const [showLogin, setShowLogin] = useState(true);
+  const [aiExpanded, setAiExpanded] = useState(false);
+  const dragRef = useRef(null);
+
+  const onTitleMouseDown = (e, id) => {
+    e.preventDefault();
+    const startX = e.clientX, startY = e.clientY;
+    const w = widgets.find(w => w.id === id);
+    const ox = w.x, oy = w.y;
+    document.body.classList.add('dragging');
+    const move = (ev) => {
+      const dx = ev.clientX - startX, dy = ev.clientY - startY;
+      setWidgets(prev => prev.map(p => p.id === id ? { ...p, x: Math.max(0, ox + dx), y: Math.max(0, oy + dy) } : p));
+    };
+    const up = () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      document.body.classList.remove('dragging');
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  };
+
+  const onResizeMouseDown = (e, id) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX, startY = e.clientY;
+    const w = widgets.find(w => w.id === id);
+    const ow = w.w, oh = w.h;
+    const move = (ev) => {
+      const dx = ev.clientX - startX, dy = ev.clientY - startY;
+      setWidgets(prev => prev.map(p => p.id === id ? { ...p, w: Math.max(160, ow + dx), h: Math.max(120, oh + dy) } : p));
+    };
+    const up = () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  };
+
+  return (
+    <div className="view-container" style={{ background: 'var(--bg-canvas)' }}>
+      {/* === 顶部工具栏 === */}
+      <div style={{ position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 40,
+        background: 'var(--toolbar-bg)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+        border: '1px solid var(--toolbar-border)', borderRadius: 'var(--radius-full)', padding: '6px 10px',
+        display: 'flex', alignItems: 'center', gap: 6, boxShadow: 'var(--shadow-md)' }}>
+        <ToolBtn icon={SvgIcons.zoomIn(15)} label="最大档" />
+        <ToolBtn icon={SvgIcons.grid(15)} label="中档" />
+        <ToolBtn icon={SvgIcons.watch(15)} label="最小档" />
+        <div style={{ width: 1, height: 18, background: 'var(--toolbar-border)' }} />
+        <ToolBtn icon={SvgIcons.upload(15)} label="上传组件" />
+        <ToolBtn icon={SvgIcons.panel(15)} label="切换面板" />
+      </div>
+
+      {/* === 背景层（最底）=== */}
+      <div style={{ position: 'absolute', inset: 0, zIndex: 0, overflow: 'hidden' }}>
+        <img src="https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=serene%20mountain%20landscape%20soft%20morning%20light&image_size=landscape_16_9"
+          alt="bg" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.3 }} />
+        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(245,245,247,0.4), rgba(245,245,247,0.7))' }} />
+        <RainEffect count={50} />
+        <ClockWidget position={{ top: 24, right: 24 }} />
+        <LabelChip kind="bg" style={{ position: 'absolute', bottom: 16, left: 16 }}>
+          背景层 · 始终存在，不随缩放消失（图片 + 下雨特效 + 时钟）
+        </LabelChip>
+      </div>
+
+      {/* === 组件层（中间，参与缩放）=== */}
+      <div style={{ position: 'absolute', inset: 0, zIndex: 10, pointerEvents: 'none' }}>
+        {/* iframe widget × 3 */}
+        {widgets.map(w => (
+          <div key={w.id} className="iframe-widget" style={{ left: w.x, top: w.y, width: w.w, height: w.h, pointerEvents: 'auto' }}>
+            <div className="widget-titlebar" onMouseDown={(e) => onTitleMouseDown(e, w.id)}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-primary)' }} />
+                <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{w.name}</span>
+                <span className="font-mono" style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>.html</span>
+              </div>
+              <button style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-tertiary)', padding: 2, display: 'flex' }}
+                onClick={(e) => { e.stopPropagation(); setWidgets(prev => prev.filter(p => p.id !== w.id)); }}>
+                {SvgIcons.close(12)}
+              </button>
+            </div>
+            <div style={{ padding: 10, height: 'calc(100% - 32px)', overflow: 'hidden', background: 'var(--bg-surface)' }}>
+              <WidgetContent id={w.id} name={w.name} />
+            </div>
+            <div className="resize-handle" onMouseDown={(e) => onResizeMouseDown(e, w.id)} />
+            <LabelChip kind="iframe" style={{ position: 'absolute', top: -22, left: 0 }}>
+              矩形 iframe widget · 可拖拽缩放
+            </LabelChip>
+          </div>
+        ))}
+
+        {/* 自由 HTML 组件 1：旋转渐变光球（无矩形边框，任意形状） */}
+        <div style={{ position: 'absolute', left: 660, top: 360, width: 100, height: 100, pointerEvents: 'auto', zIndex: 11 }}>
+          <div className="free-orb" style={{ width: '100%', height: '100%' }} />
+          <LabelChip kind="free" style={{ position: 'absolute', top: -22, left: -20, whiteSpace: 'nowrap' }}>
+            自由 HTML 组件 · 任意形状
+          </LabelChip>
+        </div>
+
+        {/* 自由 HTML 组件 2：飘动光点（跨 widget 边界，无矩形边框） */}
+        <div style={{ position: 'absolute', left: 200, top: 420, width: 200, height: 120, pointerEvents: 'none', zIndex: 12 }}>
+          {[0,1,2,3,4].map(i => (
+            <div key={i} className="free-particle"
+              style={{ left: `${i*40}px`, top: `${(i%2)*40}px`, animationDelay: `${i*1.2}s` }} />
+          ))}
+          <LabelChip kind="free" style={{ position: 'absolute', top: -22, left: 0 }}>
+            自由 HTML 组件 · 可跨 widget 边界
+          </LabelChip>
+        </div>
+
+        <LabelChip kind="iframe" style={{ position: 'absolute', top: 70, left: 16 }}>
+          组件层 · iframe widget（矩形） + 自由 HTML 组件（任意形状）
+        </LabelChip>
+      </div>
+
+      {/* === 弹出层（最上）=== */}
+      {showLogin && (
+        <div style={{ position: 'absolute', inset: 0, background: 'var(--overlay-bg)', backdropFilter: 'blur(4px)', zIndex: 70, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="pop-in" style={{ width: 360, background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-xl)', overflow: 'hidden' }}>
+            <div style={{ padding: '20px 24px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 600 }}>登录 Daily</div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>登录后可同步画布到所有设备</div>
+              </div>
+              <button onClick={() => setShowLogin(false)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-tertiary)', padding: 4 }}>{SvgIcons.close(16)}</button>
+            </div>
+            <div style={{ padding: '12px 24px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <input placeholder="用户名" style={{ padding: '10px 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 13, outline: 'none' }} />
+              <input type="password" placeholder="密码" style={{ padding: '10px 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 13, outline: 'none' }} />
+              <button onClick={() => setShowLogin(false)} style={{ marginTop: 4, padding: '10px', background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: 600, cursor: 'pointer' }}>登录</button>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center' }}>没有账号？<a style={{ color: 'var(--color-primary)', cursor: 'pointer' }}>注册</a></div>
+            </div>
+          </div>
+          <LabelChip kind="pop" style={{ position: 'absolute', top: 16, right: 16 }}>
+            弹出层 · 临时弹出，用完消失
+          </LabelChip>
+        </div>
+      )}
+
+      {/* AI 浮球 */}
+      <div style={{ position: 'absolute', right: 0, bottom: 0, zIndex: 80, pointerEvents: 'none' }}>
+        <div style={{ position: 'relative', pointerEvents: 'auto' }}>
+          {aiExpanded && (
+            <div className="pop-in" style={{ position: 'absolute', right: 0, bottom: 70, width: 280, background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-lg)', border: '1px solid var(--border-subtle)', overflow: 'hidden' }}>
+              <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>AI 助手</div>
+                <button onClick={() => setAiExpanded(false)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-tertiary)' }}>{SvgIcons.close(14)}</button>
+              </div>
+              <div style={{ padding: 12, maxHeight: 200, overflow: 'auto' }}>
+                <div className="bubble-in" style={{ background: 'var(--bg-elevated)', padding: '8px 10px', borderRadius: 'var(--radius-sm)', fontSize: 12, marginBottom: 6 }}>好的，我帮你创建一个计算器组件...</div>
+                <div className="bubble-in" style={{ background: 'var(--color-primary-muted)', color: 'var(--color-primary-dark)', padding: '8px 10px', borderRadius: 'var(--radius-sm)', fontSize: 12 }}>✓ 计算器组件已创建，放在画布左上角</div>
+              </div>
+              <div style={{ padding: 10, borderTop: '1px solid var(--border-subtle)', display: 'flex', gap: 6 }}>
+                <input placeholder="说点什么..." style={{ flex: 1, padding: '6px 10px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 12, outline: 'none' }} />
+                <button style={{ background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', padding: '0 10px', cursor: 'pointer' }}>{SvgIcons.send(14)}</button>
+              </div>
+            </div>
+          )}
+          <AIFloatingBall onClick={() => setAiExpanded(!aiExpanded)} expanded={aiExpanded} />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ToolBtn = ({ icon, label }) => (
+  <button style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px', border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer', borderRadius: 'var(--radius-full)' }}
+    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-hover)'}
+    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+    {icon}<span>{label}</span>
+  </button>
+);
+
+/* widget 内部演示内容 */
+const WidgetContent = ({ id, name }) => {
+  if (id === 'w-calc') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div className="font-mono" style={{ background: 'var(--bg-elevated)', padding: '8px 10px', borderRadius: 'var(--radius-sm)', textAlign: 'right', fontSize: 18, marginBottom: 8 }}>1,248</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 4, flex: 1 }}>
+          {['C','±','%','÷','7','8','9','×','4','5','6','−','1','2','3','+','0','.','='].map((k,i) => (
+            <div key={i} style={{ background: ['÷','×','−','+','='].includes(k) ? 'var(--color-primary-muted)' : 'var(--bg-elevated)', color: ['÷','×','−','+','='].includes(k) ? 'var(--color-primary-dark)' : 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 'var(--radius-xs)', fontSize: 12, fontWeight: 500 }}>{k}</div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (id === 'w-note') {
+    return (
+      <div style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--text-primary)' }}>
+        <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 13 }}>今日待办</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {['完成 Daily 画布设计','提交比赛初稿','与团队 review 三层模型','更新 AGENT.md'].map((t,i) => (
+            <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <div style={{ width: 12, height: 12, borderRadius: 3, border: '1.5px solid var(--border-strong)' }} />
+              <span style={{ color: i < 2 ? 'var(--text-tertiary)' : 'var(--text-primary)', textDecoration: i < 2 ? 'line-through' : 'none' }}>{t}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (id === 'w-music') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <div style={{ width: 48, height: 48, borderRadius: 'var(--radius-sm)', background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))' }} />
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>Morning Focus</div>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Daily Mix</div>
+          </div>
+        </div>
+        <div style={{ height: 3, background: 'var(--bg-elevated)', borderRadius: 2, position: 'relative' }}>
+          <div style={{ width: '40%', height: '100%', background: 'var(--color-primary)', borderRadius: 2 }} />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-tertiary)' }}>
+          <span>1:24</span><span>3:12</span>
+        </div>
+      </div>
+    );
+  }
+  return <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{name} 内容区域</div>;
+};
+
+/* ============================================================
+   视图 2：相册缩放三档（重点重做，真实缩放）
+   ============================================================ */
+const View2Zoom = () => {
+  const [level, setLevel] = useState('mid'); // max / mid / min
+  const [activeId, setActiveId] = useState('w-calc');
+
+  const components = [
+    { id: 'w-calc', name: '计算器', icon: 'calc', color: '#4A90E2' },
+    { id: 'w-note', name: '记事本', icon: 'note', color: '#50E3C2' },
+    { id: 'w-music', name: '音乐', icon: 'music', color: '#FF6B6B' },
+    { id: 'w-game', name: '小游戏', icon: 'game', color: '#4A90E2' },
+    { id: 'w-clock', name: '时钟', icon: 'clock', color: '#50E3C2' },
+    { id: 'w-weather', name: '天气', icon: 'weather', color: '#FF6B6B' },
+    { id: 'w-calc2', name: '汇率', icon: 'calc', color: '#4A90E2' },
+    { id: 'w-note2', name: '日记', icon: 'note', color: '#50E3C2' },
+    { id: 'w-music2', name: '播客', icon: 'music', color: '#FF6B6B' },
+    { id: 'w-game2', name: '数独', icon: 'game', color: '#4A90E2' },
+    { id: 'w-clock2', name: '番茄', icon: 'clock', color: '#50E3C2' },
+    { id: 'w-weather2', name: '日历', icon: 'weather', color: '#FF6B6B' },
+  ];
+
+  const iconMap = { calc: SvgIcons.calc, note: SvgIcons.note, music: SvgIcons.music, game: SvgIcons.game, clock: SvgIcons.clock, weather: SvgIcons.weather };
+
+  return (
+    <div className="view-container" style={{ background: 'var(--bg-canvas)' }}>
+      {/* 顶部三档切换 */}
+      <div style={{ position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 40, display: 'flex', gap: 6,
+        background: 'var(--toolbar-bg)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+        border: '1px solid var(--toolbar-border)', borderRadius: 'var(--radius-full)', padding: 5, boxShadow: 'var(--shadow-md)' }}>
+        {[
+          { id: 'max', label: '最大档', desc: 'zoom > 2.0', icon: SvgIcons.zoomIn(14) },
+          { id: 'mid', label: '中档', desc: '0.4 ≤ zoom ≤ 2.0', icon: SvgIcons.grid(14) },
+          { id: 'min', label: '最小档', desc: 'zoom < 0.4 · Apple Watch', icon: SvgIcons.watch(14) },
+        ].map(b => (
+          <button key={b.id} onClick={() => setLevel(b.id)}
+            style={{
+              padding: '6px 14px', borderRadius: 'var(--radius-full)', border: 'none', cursor: 'pointer',
+              background: level === b.id ? 'var(--color-primary)' : 'transparent',
+              color: level === b.id ? '#fff' : 'var(--text-secondary)',
+              display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 500,
+              transition: 'all var(--duration-fast) var(--ease-out)',
+            }}>
+            {b.icon}<span>{b.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* === 最大档：单个组件占满全屏 + 侧边缩略图 === */}
+      {level === 'max' && (
+        <div style={{ position: 'absolute', inset: 0, paddingTop: 80, paddingBottom: 24, paddingLeft: 80, paddingRight: 80, display: 'flex', gap: 16 }}>
+          {/* 主组件占满 */}
+          <div className="zoom-transition pop-in" style={{ flex: 1, background: 'var(--bg-surface)', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-lg)', padding: 28, overflow: 'auto', position: 'relative' }}>
+            <LabelChip kind="iframe" style={{ position: 'absolute', top: 12, left: 12 }}>最大档 · 单个 HTML 占满全屏</LabelChip>
+            <div style={{ marginTop: 24 }}>
+              <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 4 }}>{components.find(c => c.id === activeId).name}</div>
+              <div className="font-mono" style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 20 }}>沉浸模式 · iframe widget 全屏展示</div>
+              <WidgetContent id={activeId} name={components.find(c => c.id === activeId).name} />
+              <div style={{ marginTop: 20, padding: 16, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', fontSize: 12, color: 'var(--text-secondary)' }}>
+                此档位下，单个组件占满整个画布区域，提供沉浸式体验。其他组件以缩略图形式陈列在右侧，可点击切换。
+              </div>
+            </div>
+          </div>
+          {/* 侧边缩略图 */}
+          <div style={{ width: 100, display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto' }}>
+            {components.slice(0, 8).map(c => (
+              <div key={c.id} onClick={() => setActiveId(c.id)}
+                className="zoom-transition"
+                style={{
+                  height: 64, background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', cursor: 'pointer',
+                  border: activeId === c.id ? '2px solid var(--color-primary)' : '1px solid var(--border-subtle)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: c.color,
+                  boxShadow: activeId === c.id ? 'var(--shadow-md)' : 'none',
+                }}>
+                {iconMap[c.icon](20)}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* === 中档：2×3 网格 === */}
+      {level === 'mid' && (
+        <div style={{ position: 'absolute', inset: 0, paddingTop: 80, paddingBottom: 24, paddingLeft: 40, paddingRight: 40 }}>
+          <LabelChip kind="iframe" style={{ position: 'absolute', top: 60, left: 40, zIndex: 5 }}>中档 · 组件并列展示 · 自动网格布局</LabelChip>
+          <div className="pop-in" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(2, 1fr)', gap: 16, height: '100%' }}>
+            {components.slice(0, 6).map(c => (
+              <div key={c.id} className="zoom-transition"
+                style={{
+                  background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-subtle)',
+                  boxShadow: 'var(--shadow-sm)', padding: 16, display: 'flex', flexDirection: 'column', cursor: 'pointer',
+                  transition: 'box-shadow var(--duration-normal) var(--ease-out), transform var(--duration-normal) var(--ease-out)',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.boxShadow = 'var(--shadow-md)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; e.currentTarget.style.transform = 'translateY(0)'; }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: 'var(--radius-sm)', background: `${c.color}22`, color: c.color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{iconMap[c.icon](16)}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{c.name}</div>
+                </div>
+                <div style={{ flex: 1, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', padding: 8, fontSize: 11, color: 'var(--text-secondary)', overflow: 'hidden' }}>
+                  {c.name} 内容预览...
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* === 最小档：Apple Watch 风格圆球网格 === */}
+      {level === 'min' && (
+        <div style={{ position: 'absolute', inset: 0, paddingTop: 70, paddingBottom: 100, display: 'flex', flexDirection: 'column' }}>
+          <LabelChip kind="free" style={{ position: 'absolute', top: 60, left: 24, zIndex: 5 }}>最小档 · Apple Watch 风格应用网格 · 卸载 iframe 省性能</LabelChip>
+          <div className="pop-in" style={{ flex: 1, overflow: 'auto', padding: '20px 60px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '28px 20px', justifyItems: 'center', maxWidth: 900, margin: '0 auto' }}>
+              {components.map(c => (
+                <div key={c.id} onClick={() => setActiveId(c.id)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                  <div className={`aw-bubble ${activeId === c.id ? 'active' : ''}`} style={{ color: c.color }}>
+                    {iconMap[c.icon](28)}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', textAlign: 'center' }}>{c.name}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* 底部 AI 对话栏（最小档时设置和信息都放底部） */}
+          <div style={{ position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)', width: 'min(680px, 90%)',
+            background: 'var(--glass-bg)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+            border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-full)', padding: '8px 8px 8px 18px',
+            display: 'flex', alignItems: 'center', gap: 10, boxShadow: 'var(--shadow-md)' }}>
+            <div style={{ flex: 1, fontSize: 13, color: 'var(--text-tertiary)' }}>问 AI 助手：缩到最小时设置和信息都放这里...</div>
+            <button style={{ background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-full)', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>{SvgIcons.send(15)}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ============================================================
+   视图 3：AI 对话两种形态
+   ============================================================ */
+const View3AI = () => {
+  const [form, setForm] = useState('ball'); // ball / taskbar
+  const [ballOpen, setBallOpen] = useState(false);
+
+  return (
+    <div className="view-container" style={{ background: 'var(--bg-canvas)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+      {/* 切换按钮 */}
+      <div style={{ position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 6,
+        background: 'var(--toolbar-bg)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+        border: '1px solid var(--toolbar-border)', borderRadius: 'var(--radius-full)', padding: 4, zIndex: 30 }}>
+        <button onClick={() => setForm('ball')} style={{ padding: '6px 16px', borderRadius: 'var(--radius-full)', border: 'none', cursor: 'pointer', background: form === 'ball' ? 'var(--color-primary)' : 'transparent', color: form === 'ball' ? '#fff' : 'var(--text-secondary)', fontSize: 12, fontWeight: 500 }}>浮球形态</button>
+        <button onClick={() => setForm('taskbar')} style={{ padding: '6px 16px', borderRadius: 'var(--radius-full)', border: 'none', cursor: 'pointer', background: form === 'taskbar' ? 'var(--color-primary)' : 'transparent', color: form === 'taskbar' ? '#fff' : 'var(--text-secondary)', fontSize: 12, fontWeight: 500 }}>底部任务栏形态</button>
+      </div>
+
+      {/* 画布预览区 */}
+      <div style={{ position: 'relative', width: '80%', height: '70%', background: 'var(--bg-surface)', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-lg)', overflow: 'hidden' }}>
+        {/* 背景图（示意画布） */}
+        <img src="https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=serene%20mountain%20landscape%20soft%20morning%20light&image_size=landscape_16_9"
+          alt="bg" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.3 }} />
+        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.3), rgba(255,255,255,0.7))' }} />
+        <div style={{ position: 'absolute', top: 20, left: 20, fontSize: 13, color: 'var(--text-secondary)' }}>画布预览（HTML 内容）</div>
+
+        {/* 浮球形态 */}
+        {form === 'ball' && (
+          <>
+            <LabelChip kind="ai" style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(74,144,226,0.18)', color: '#fff' }}>
+              浮球 · 始终置顶，点击展开
+            </LabelChip>
+            {ballOpen && (
+              <div className="pop-in" style={{ position: 'absolute', right: 24, bottom: 90, width: 320, background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-xl)', border: '1px solid var(--border-subtle)', overflow: 'hidden' }}>
+                <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--color-secondary)' }} /> AI 助手
+                  </div>
+                  <button onClick={() => setBallOpen(false)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-tertiary)' }}>{SvgIcons.close(14)}</button>
+                </div>
+                <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div className="bubble-in" style={{ alignSelf: 'flex-end', maxWidth: '80%', background: 'var(--color-primary)', color: '#fff', padding: '8px 12px', borderRadius: '14px 14px 4px 14px', fontSize: 12 }}>帮我做一个计算器</div>
+                  <div className="bubble-in" style={{ alignSelf: 'flex-start', maxWidth: '80%', background: 'var(--bg-elevated)', padding: '8px 12px', borderRadius: '14px 14px 14px 4px', fontSize: 12 }}>好的，我帮你创建一个计算器组件。正在生成 HTML...</div>
+                  <div className="bubble-in" style={{ alignSelf: 'flex-start', maxWidth: '80%', background: 'var(--color-primary-muted)', color: 'var(--color-primary-dark)', padding: '8px 12px', borderRadius: '14px 14px 14px 4px', fontSize: 12 }}>✓ 计算器组件已创建，放在画布左上角</div>
+                </div>
+                <div style={{ padding: 10, borderTop: '1px solid var(--border-subtle)', display: 'flex', gap: 6 }}>
+                  <input placeholder="说点什么..." style={{ flex: 1, padding: '6px 10px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-full)', fontSize: 12, outline: 'none' }} />
+                  <button style={{ background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: '50%', width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>{SvgIcons.send(13)}</button>
+                </div>
+              </div>
+            )}
+            <div className="ai-ball-glow" onClick={() => setBallOpen(!ballOpen)}
+              style={{ position: 'absolute', right: 24, bottom: 24, width: 56, height: 56, borderRadius: '50%',
+                background: 'linear-gradient(135deg, var(--color-primary), var(--color-primary-dark))',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#fff',
+                border: '2px solid rgba(255,255,255,0.6)' }}>
+              {ballOpen ? SvgIcons.close(22) : SvgIcons.chat(22)}
+            </div>
+            <div style={{ position: 'absolute', right: 24, bottom: 88, fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'SF Mono, monospace' }}>
+              {ballOpen ? '↑ 展开对话' : '点击浮球 →'}
+            </div>
+          </>
+        )}
+
+        {/* 底部任务栏形态 */}
+        {form === 'taskbar' && (
+          <>
+            <LabelChip kind="ai" style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(74,144,226,0.18)', color: '#fff' }}>
+              底部任务栏 · 椭圆发送框 + 气泡对话历史
+            </LabelChip>
+            {/* 对话气泡（右下角） */}
+            <div style={{ position: 'absolute', right: 24, bottom: 90, width: 320, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="bubble-in" style={{ alignSelf: 'flex-end', maxWidth: '80%', background: 'var(--color-primary)', color: '#fff', padding: '8px 12px', borderRadius: '14px 14px 4px 14px', fontSize: 12, boxShadow: 'var(--shadow-sm)' }}>帮我做一个计算器</div>
+              <div className="bubble-in" style={{ alignSelf: 'flex-start', maxWidth: '85%', background: 'var(--bg-surface)', padding: '8px 12px', borderRadius: '14px 14px 14px 4px', fontSize: 12, boxShadow: 'var(--shadow-sm)' }}>好的，我帮你创建一个计算器组件。正在生成 HTML...</div>
+              <div className="bubble-in" style={{ alignSelf: 'flex-start', maxWidth: '85%', background: 'var(--bg-surface)', padding: '8px 12px', borderRadius: '14px 14px 14px 4px', fontSize: 12, boxShadow: 'var(--shadow-sm)' }}>✓ 计算器组件已创建，放在画布左上角</div>
+            </div>
+            {/* 椭圆发送框 */}
+            <div style={{ position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)', width: 'min(560px, 80%)',
+              background: 'var(--glass-bg)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+              border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-full)', padding: '8px 8px 8px 20px',
+              display: 'flex', alignItems: 'center', gap: 10, boxShadow: 'var(--shadow-md)' }}>
+              <div style={{ flex: 1, fontSize: 13, color: 'var(--text-tertiary)' }}>输入消息或指令...</div>
+              <button style={{ background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>{SvgIcons.send(15)}</button>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* 形态说明 */}
+      <div style={{ marginTop: 24, padding: '12px 20px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', maxWidth: 600, textAlign: 'center' }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{form === 'ball' ? '浮球形态' : '底部任务栏形态'}</div>
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+          {form === 'ball'
+            ? '小圆形组件始终置顶，哪怕 HTML 占满全屏也在。点击展开小对话框，关闭后收回浮球。适合沉浸式画布。'
+            : '椭圆形发送框 + 对话历史气泡摆在角落。对话历史常驻可见，适合需要频繁与 AI 交互的场景。'}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ============================================================
+   视图 4：背景层示例
+   ============================================================ */
+const View4Background = () => {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div className="view-container" style={{ background: 'var(--bg-canvas)' }}>
+      <div style={{ height: '50%', position: 'relative', overflow: 'hidden', borderBottom: '1px solid var(--border-subtle)' }}>
+        {/* 图片背景 + 时钟 + 天气 */}
+        <img src="https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=serene%20mountain%20landscape%20soft%20morning%20light&image_size=landscape_16_9"
+          alt="bg" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.4 }} />
+        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.2), rgba(245,245,247,0.6))' }} />
+
+        {/* 时钟组件 */}
+        <div style={{ position: 'absolute', top: 24, left: 24, background: 'var(--glass-bg)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-lg)', padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ color: 'var(--color-primary)' }}>{SvgIcons.clock(22)}</div>
+          <div>
+            <div className="font-mono" style={{ fontSize: 20, fontWeight: 600 }}>{String(now.getHours()).padStart(2,'0')}:{String(now.getMinutes()).padStart(2,'0')}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{now.getFullYear()}/{now.getMonth()+1}/{now.getDate()}</div>
+          </div>
+        </div>
+
+        {/* 天气组件 */}
+        <div style={{ position: 'absolute', top: 24, right: 24, background: 'var(--glass-bg)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-lg)', padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ color: '#FF9500' }}>{SvgIcons.weather(24)}</div>
+          <div>
+            <div style={{ fontSize: 20, fontWeight: 600 }}>22°</div>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>晴 · 上海</div>
+          </div>
+        </div>
+
+        <LabelChip kind="bg" style={{ position: 'absolute', bottom: 16, left: 24 }}>图片背景 + 基础组件（时钟 / 天气）</LabelChip>
+        <div style={{ position: 'absolute', bottom: 16, right: 24, fontSize: 12, color: 'var(--text-secondary)', background: 'var(--glass-bg)', padding: '6px 12px', borderRadius: 'var(--radius-full)' }}>
+          上半部分
+        </div>
+      </div>
+
+      <div style={{ height: '50%', position: 'relative', overflow: 'hidden', background: 'var(--bg-canvas)' }}>
+        <RainEffect count={70} />
+        {/* 浮动装饰光球 */}
+        <div style={{ position: 'absolute', left: '20%', top: '30%' }}>
+          <div className="free-orb" style={{ width: 100, height: 100 }} />
+        </div>
+        <div style={{ position: 'absolute', right: '15%', top: '40%' }}>
+          <div className="free-orb" style={{ width: 70, height: 70, animationDuration: '6s' }} />
+        </div>
+        {/* 飘动光点 */}
+        {[0,1,2,3,4,5].map(i => (
+          <div key={i} className="free-particle" style={{ left: `${30 + i*8}%`, top: `${20 + (i%3)*20}%`, animationDelay: `${i*0.8}s` }} />
+        ))}
+
+        <LabelChip kind="free" style={{ position: 'absolute', bottom: 16, left: 24 }}>特效背景 + 装饰元素（下雨 + 旋转光球 + 光点）</LabelChip>
+        <div style={{ position: 'absolute', bottom: 16, right: 24, fontSize: 12, color: 'var(--text-secondary)', background: 'var(--glass-bg)', padding: '6px 12px', borderRadius: 'var(--radius-full)' }}>
+          下半部分
+        </div>
+      </div>
+
+      {/* 说明文字 */}
+      <div style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', padding: '10px 18px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-full)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-sm)', maxWidth: 700, textAlign: 'center', fontSize: 12, color: 'var(--text-secondary)', zIndex: 10 }}>
+        背景层始终存在，不随相册缩放消失。AI 可以上传图片当背景、加特效（下雨）、放基础组件（时钟 / 天气）。
+      </div>
+    </div>
+  );
+};
+
+/* ============================================================
+   视图 5：弹出层示例
+   ============================================================ */
+const View5Popup = () => {
+  const [popup, setPopup] = useState(null); // 'login' / 'onboard' / 'ad' / 'condition'
+  const [onboardStep, setOnboardStep] = useState(1);
+
+  const cards = [
+    { id: 'login', title: '登录窗口', trigger: '进入时触发', desc: '用户名 + 密码输入框，登录按钮，注册切换链接', color: 'var(--color-primary)', icon: SvgIcons.user(28) },
+    { id: 'onboard', title: '新手引导', trigger: '进入时触发', desc: '3 步引导（step 1/3, 2/3, 3/3），带进度条', color: 'var(--color-secondary)', icon: SvgIcons.check(28) },
+    { id: 'ad', title: '广告弹窗', trigger: '定时触发', desc: '宣传内容 + 立即查看按钮 + 关闭按钮', color: 'var(--color-accent)', icon: SvgIcons.bell(28) },
+    { id: 'condition', title: '条件触发提示', trigger: '条件触发', desc: '未登录时显示"请先登录"提示', color: '#FF9500', icon: SvgIcons.lock(28) },
+  ];
+
+  return (
+    <div className="view-container" style={{ background: 'var(--bg-canvas)', padding: 40, overflow: 'auto' }}>
+      <div style={{ maxWidth: 1000, margin: '0 auto' }}>
+        <div style={{ marginBottom: 24 }}>
+          <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>弹出层示例</h2>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>展示弹出层的各种触发方式。点击下方卡片可弹出对应的弹窗。</p>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
+          {cards.map(c => (
+            <div key={c.id} onClick={() => { setPopup(c.id); if (c.id === 'onboard') setOnboardStep(1); }}
+              style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-subtle)', padding: 20, cursor: 'pointer', transition: 'box-shadow var(--duration-normal) var(--ease-out), transform var(--duration-normal) var(--ease-out)' }}
+              onMouseEnter={(e) => { e.currentTarget.style.boxShadow = 'var(--shadow-md)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'translateY(0)'; }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+                <div style={{ width: 48, height: 48, borderRadius: 'var(--radius-md)', background: `${c.color}22`, color: c.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{c.icon}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <div style={{ fontSize: 15, fontWeight: 600 }}>{c.title}</div>
+                    <span style={{ fontSize: 10, fontFamily: 'SF Mono, monospace', padding: '2px 8px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-full)', color: 'var(--text-secondary)' }}>{c.trigger}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>{c.desc}</div>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--color-primary)', fontWeight: 500 }}>点击弹出 {SvgIcons.arrowR(12)}</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 弹窗渲染 */}
+      {popup && (
+        <div onClick={() => setPopup(null)} style={{ position: 'absolute', inset: 0, background: 'var(--overlay-bg)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div onClick={(e) => e.stopPropagation()} className="pop-in" style={{ width: 380, background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-xl)', overflow: 'hidden' }}>
+            {/* 登录窗口 */}
+            {popup === 'login' && (
+              <>
+                <div style={{ padding: '20px 24px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: 18, fontWeight: 600 }}>登录 Daily</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>登录后可同步画布到所有设备</div>
+                  </div>
+                  <button onClick={() => setPopup(null)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-tertiary)' }}>{SvgIcons.close(16)}</button>
+                </div>
+                <div style={{ padding: '12px 24px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <input placeholder="用户名" style={{ padding: '10px 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 13, outline: 'none' }} />
+                  <input type="password" placeholder="密码" style={{ padding: '10px 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 13, outline: 'none' }} />
+                  <button onClick={() => setPopup(null)} style={{ marginTop: 4, padding: '10px', background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: 600, cursor: 'pointer' }}>登录</button>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center' }}>没有账号？<a style={{ color: 'var(--color-primary)', cursor: 'pointer' }}>注册</a></div>
+                </div>
+              </>
+            )}
+
+            {/* 新手引导 */}
+            {popup === 'onboard' && (
+              <>
+                <div style={{ padding: '20px 24px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ fontSize: 18, fontWeight: 600 }}>新手引导 · Step {onboardStep}/3</div>
+                  <button onClick={() => setPopup(null)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-tertiary)' }}>{SvgIcons.close(16)}</button>
+                </div>
+                <div style={{ padding: '0 24px' }}>
+                  <div style={{ height: 4, background: 'var(--bg-elevated)', borderRadius: 2, marginBottom: 16, overflow: 'hidden' }}>
+                    <div style={{ width: `${(onboardStep/3)*100}%`, height: '100%', background: 'var(--color-primary)', borderRadius: 2, transition: 'width var(--duration-normal) var(--ease-out)' }} />
+                  </div>
+                </div>
+                <div style={{ padding: '0 24px 20px' }}>
+                  {onboardStep === 1 && <div style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.6 }}>欢迎使用 <b>Daily</b>！这里是一个画布，你可以把任何 HTML 组件拖到画布上。</div>}
+                  {onboardStep === 2 && <div style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.6 }}>试试和 AI 对话：点击右下角的浮球，告诉它"帮我做一个计算器"。</div>}
+                  {onboardStep === 3 && <div style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.6 }}>滚动鼠标滚轮可以缩放画布：最大档单 HTML 全屏，最小档像 Apple Watch 应用网格。</div>}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 20 }}>
+                    <button onClick={() => setPopup(null)} style={{ border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer' }}>跳过</button>
+                    <button onClick={() => onboardStep < 3 ? setOnboardStep(onboardStep + 1) : setPopup(null)} style={{ padding: '8px 16px', background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                      {onboardStep < 3 ? '下一步' : '完成'}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* 广告弹窗 */}
+            {popup === 'ad' && (
+              <>
+                <div style={{ position: 'relative', height: 140, background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>
+                  <div style={{ fontSize: 24, fontWeight: 700 }}>Daily Pro 上线</div>
+                  <button onClick={() => setPopup(null)} style={{ position: 'absolute', top: 10, right: 10, border: 'none', background: 'rgba(255,255,255,0.2)', color: '#fff', cursor: 'pointer', padding: 4, borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{SvgIcons.close(14)}</button>
+                </div>
+                <div style={{ padding: '20px 24px' }}>
+                  <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>解锁全部高级组件</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.6 }}>升级到 Daily Pro，享受无限画布、AI 高级模型、社区面板创建权限。前 100 名用户享 5 折优惠。</div>
+                  <button onClick={() => setPopup(null)} style={{ width: '100%', padding: '10px', background: 'var(--color-accent)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: 600, cursor: 'pointer' }}>立即查看</button>
+                </div>
+              </>
+            )}
+
+            {/* 条件触发提示 */}
+            {popup === 'condition' && (
+              <div style={{ padding: 24, textAlign: 'center' }}>
+                <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(255,149,0,0.15)', color: '#FF9500', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>{SvgIcons.lock(28)}</div>
+                <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>请先登录</div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 20, lineHeight: 1.6 }}>检测到当前操作需要登录后才能使用。请登录后再继续。</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => setPopup(null)} style={{ flex: 1, padding: '10px', background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 12, cursor: 'pointer' }}>取消</button>
+                  <button onClick={() => setPopup(null)} style={{ flex: 1, padding: '10px', background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>去登录</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ============================================================
+   App 根
+   ============================================================ */
+const App = () => {
+  const [view, setView] = useState('v1');
+  return (
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <TopBar activeView={view} onViewChange={setView} />
+      {view === 'v1' && <View1Canvas />}
+      {view === 'v2' && <View2Zoom />}
+      {view === 'v3' && <View3AI />}
+      {view === 'v4' && <View4Background />}
+      {view === 'v5' && <View5Popup />}
+    </div>
+  );
+};
+
+/* 导出组件到 window（按要求） */
+Object.assign(window, {
+  View1Canvas, View2Zoom, View3AI, View4Background, View5Popup,
+  TopBar, App, SvgIcons, LabelChip, ClockWidget, RainEffect, AIFloatingBall,
+});
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

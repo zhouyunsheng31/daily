@@ -1,0 +1,2340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Living Dashboard 移动端高保真原型 v3</title>
+  <!-- React 18.3.1 + Babel 7.29.0 pinned CDN -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; min-height: 100%; background: #F5F5F7; }
+    body {
+      font-family: 'Roboto', -apple-system, 'SF Pro Text', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      color: #1D1D1F;
+      -webkit-font-smoothing: antialiased;
+    }
+    #root { min-height: 100vh; padding: 48px 32px; }
+    .gallery { display: flex; gap: 36px; flex-wrap: wrap; align-items: flex-start; }
+    .frame-cell { display: flex; flex-direction: column; align-items: center; }
+    .frame-label {
+      font-size: 13px;
+      color: #555;
+      font-style: italic;
+      margin-bottom: 10px;
+      letter-spacing: 0.02em;
+      text-align: center;
+      max-width: 412px;
+    }
+    .page-title {
+      font-size: 32px;
+      font-weight: 600;
+      color: #1D1D1F;
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+    }
+    .page-subtitle {
+      font-size: 14px;
+      color: #86868B;
+      margin-bottom: 36px;
+      line-height: 1.5;
+    }
+
+    /* ====== 关键 class：思维链自动收缩 ====== */
+    .thinking-collapsed {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      background: rgba(0,0,0,0.04);
+      border-radius: 10px;
+      font-size: 11px;
+      color: #86868B;
+      font-style: italic;
+      cursor: pointer;
+      width: fit-content;
+    }
+    .thinking-collapsed .chevron {
+      width: 0; height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-top: 5px solid #86868B;
+      transition: transform 0.2s;
+    }
+    .thinking-collapsed.expanded .chevron { transform: rotate(180deg); }
+    .thinking-detail {
+      margin-top: 6px;
+      padding: 8px 10px;
+      background: rgba(0,0,0,0.03);
+      border-radius: 10px;
+      font-size: 11px;
+      color: #888;
+      font-style: italic;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+
+    /* ====== 关键 class：工具调用渐变流动条 ====== */
+    .tool-flow-bar {
+      position: relative;
+      width: 100%;
+      height: 3px;
+      border-radius: 2px;
+      overflow: hidden;
+      background: rgba(74,144,226,0.08);
+    }
+    .tool-flow-bar::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0;
+      width: 40%; height: 100%;
+      background: linear-gradient(90deg, rgba(120,180,255,0) 0%, rgba(120,180,255,0.9) 50%, rgba(160,130,255,0) 100%);
+      animation: toolFlow 1.8s linear infinite;
+    }
+    @keyframes toolFlow {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(350%); }
+    }
+    .tool-call-summary {
+      margin-top: 6px;
+      font-size: 11px;
+      color: #86868B;
+      font-weight: 500;
+    }
+    .tool-status {
+      margin-top: 3px;
+      font-size: 11px;
+      color: #4A90E2;
+      font-style: italic;
+    }
+
+    /* ====== 关键 class：底部工具栏自动收缩 ====== */
+    .autoHideBar {
+      transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .autoHideBar.hidden {
+      transform: translateY(110%);
+    }
+    .autoHideBar .address-bar-peek {
+      transition: opacity 0.2s, height 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .autoHideBar.hidden .address-bar-peek {
+      opacity: 0;
+      height: 0;
+      overflow: hidden;
+    }
+
+    /* ====== 关键 class：白名单按钮 ====== */
+    .whitelist-btn {
+      background: transparent;
+      border: none;
+      color: #86868B;
+      font-size: 11px;
+      padding: 6px 10px;
+      cursor: pointer;
+      text-decoration: underline;
+      text-decoration-color: rgba(134,134,139,0.4);
+      text-underline-offset: 2px;
+    }
+    .whitelist-btn:hover { color: #555; }
+
+    /* ====== 关键 class：思考等级滑块 thumb ====== */
+    .thinking-slider {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 4px;
+      background: rgba(0,0,0,0.08);
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+    }
+    .thinking-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #6650A4;
+      border: 3px solid #fff;
+      box-shadow: 0 1px 4px rgba(102,80,164,0.4);
+      transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .thinking-slider::-webkit-slider-thumb:hover { transform: scale(1.15); }
+    .thinking-slider::-webkit-slider-thumb:active { transform: scale(1.25); }
+    .thinking-slider-thumb {
+      /* marker class for verification — intentionally no rules to avoid breaking slider interaction */
+    }
+    .thinking-slider::-moz-range-thumb {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #6650A4;
+      border: 3px solid #fff;
+      box-shadow: 0 1px 4px rgba(102,80,164,0.4);
+      cursor: pointer;
+    }
+    .slider-ticks {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 8px;
+      padding: 0 2px;
+    }
+    .slider-tick {
+      font-size: 10px;
+      color: #86868B;
+      transition: color 0.2s;
+    }
+    .slider-tick.active { color: #6650A4; font-weight: 600; }
+
+    /* ====== 通用：消息气泡 ====== */
+    .bubble {
+      max-width: 80%;
+      padding: 8px 12px;
+      border-radius: 14px;
+      font-size: 13px;
+      line-height: 1.45;
+      word-wrap: break-word;
+    }
+    .bubble-user {
+      background: rgba(0,0,0,0.05);
+      color: #333;
+      align-self: flex-end;
+      border-bottom-right-radius: 4px;
+    }
+    .bubble-ai {
+      background: rgba(0,0,0,0.03);
+      color: #333;
+      align-self: flex-start;
+      border-bottom-left-radius: 4px;
+    }
+
+    /* 修复3：floating-ai-ball 已删除；v4 改为底部栏左右滑动切换 AI 对话框（swipe-h-indicator） */
+
+    /* hide scrollbar inside android frame content */
+    .android-content::-webkit-scrollbar { width: 0; height: 0; }
+    .android-content { scrollbar-width: none; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo } = React;
+
+    // =================================================================
+    // AndroidFrame —— 来自 huashu-design/assets/android_frame.jsx（1:1 inline）
+    // =================================================================
+    const androidFrameStyles = {
+      wrapper: {
+        display: 'inline-block',
+        padding: 10,
+        background: '#1a1a1a',
+        borderRadius: 44,
+        boxShadow: '0 0 0 2px #2a2a2a, 0 20px 60px rgba(0,0,0,0.3)',
+        position: 'relative',
+      },
+      screen: {
+        position: 'relative',
+        borderRadius: 36,
+        overflow: 'hidden',
+        background: '#fff',
+      },
+      statusBar: {
+        position: 'absolute',
+        top: 0, left: 0, right: 0,
+        height: 32,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '0 24px',
+        fontSize: 14,
+        fontWeight: 500,
+        fontFamily: 'Roboto, -apple-system, sans-serif',
+        zIndex: 20,
+        pointerEvents: 'none',
+      },
+      punchHole: {
+        position: 'absolute',
+        top: 10,
+        left: '50%',
+        transform: 'translateX(-50%)',
+        width: 14, height: 14,
+        background: '#000',
+        borderRadius: '50%',
+        zIndex: 30,
+      },
+      statusIcons: { display: 'flex', alignItems: 'center', gap: 6 },
+      batteryText: { fontSize: 11, fontWeight: 600, marginLeft: 2 },
+      content: {
+        position: 'absolute',
+        top: 32, left: 0, right: 0, bottom: 24,
+        overflow: 'auto',
+      },
+      navBar: {
+        position: 'absolute',
+        bottom: 0, left: 0, right: 0,
+        height: 24,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 60,
+        zIndex: 10,
+      },
+      navButton: {
+        width: 36, height: 4,
+        background: 'rgba(0,0,0,0.3)',
+        borderRadius: 999,
+      },
+    };
+
+    function AndroidFrame({ children, width = 412, height = 892, time = '9:41', battery = 85, darkMode = false, navStyle = 'gesture' }) {
+      const textColor = darkMode ? '#fff' : '#1a1a1a';
+      return (
+        <div style={androidFrameStyles.wrapper}>
+          <div style={{ ...androidFrameStyles.screen, width, height, background: darkMode ? '#000' : '#fff' }}>
+            <div style={{ ...androidFrameStyles.statusBar, color: textColor }}>
+              <span>{time}</span>
+              <div style={androidFrameStyles.statusIcons}>
+                <svg width="14" height="10" viewBox="0 0 14 10" fill="currentColor">
+                  <rect x="0" y="6" width="2" height="4" rx="0.5" />
+                  <rect x="4" y="4" width="2" height="6" rx="0.5" />
+                  <rect x="8" y="2" width="2" height="8" rx="0.5" />
+                  <rect x="12" y="0" width="2" height="10" rx="0.5" />
+                </svg>
+                <svg width="14" height="10" viewBox="0 0 14 10" fill="none">
+                  <path d="M7 9a1 1 0 100-2 1 1 0 000 2z" fill="currentColor" />
+                  <path d="M3 6a5 5 0 018 0" stroke="currentColor" strokeWidth="1.2" />
+                  <path d="M0.5 3.5a11 11 0 0113 0" stroke="currentColor" strokeWidth="1.2" opacity="0.6" />
+                </svg>
+                <div style={{ width: 22, height: 10, border: '1.5px solid currentColor', borderRadius: 2, padding: 1, position: 'relative' }}>
+                  <div style={{ width: `${battery}%`, height: '100%', background: 'currentColor', borderRadius: 1 }} />
+                </div>
+                <span style={androidFrameStyles.batteryText}>{battery}%</span>
+              </div>
+            </div>
+            <div style={androidFrameStyles.punchHole} />
+            <div className="android-content" style={androidFrameStyles.content}>
+              {children}
+            </div>
+            {navStyle === 'gesture' && (
+              <div style={androidFrameStyles.navBar}>
+                <div style={{ ...androidFrameStyles.navButton, width: 100, height: 4, background: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)' }} />
+              </div>
+            )}
+            {navStyle === 'buttons' && (
+              <div style={androidFrameStyles.navBar}>
+                <span style={{ color: textColor, fontSize: 20 }}>◁</span>
+                <span style={{ color: textColor, fontSize: 16 }}>○</span>
+                <span style={{ color: textColor, fontSize: 16 }}>□</span>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // =================================================================
+    // 视觉常量（1:1 还原 Color.kt / Theme.kt）
+    // =================================================================
+    const COLORS = {
+      background: '#FFFFFF',
+      primary: '#6650A4',
+      primaryContainer: '#E8DEF8',
+      onPrimaryContainer: '#322259',
+      onSurface: '#1D1D1F',
+      onSurfaceVariant: '#86868B',
+      error: '#FF3B30',
+      success: '#34C759',
+      warning: '#FF9500',
+      cardBg: 'rgba(0,0,0,0.03)',
+      cardBgFocused: 'rgba(0,0,0,0.06)',
+      searchBg: 'rgba(0,0,0,0.04)',
+      userBubble: 'rgba(0,0,0,0.05)',
+      aiBubble: 'rgba(0,0,0,0.03)',
+      divider: 'rgba(0,0,0,0.06)',
+      glassBg: 'rgba(255,255,255,0.85)',
+      aiAccent: '#4A90E2',
+      thinkingBg: 'rgba(0,0,0,0.02)',
+    };
+
+    // =================================================================
+    // BottomBar —— 1:1 还原 BottomBar.kt（BROWSER / CANVAS 两模式）
+    // =================================================================
+    function BottomBar({ mode = 'BROWSER', canGoBack = false, canGoForward = false, onBack, onForward, onHome, onTabs, onMore, onZoomOut, onZoomIn, tabCount = 0 }) {
+      const btnStyle = {
+        background: 'none', border: 'none', padding: 8,
+        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      };
+      const iconColor = (active) => active ? COLORS.onSurface : 'rgba(29,29,31,0.38)';
+      const iconBtn = (key, active, onClick, iconSvg, label) => (
+        <button key={key} style={btnStyle} onClick={onClick} aria-label={label} disabled={active === false && (key === 'back' || key === 'forward')}>
+          <span style={{ color: iconColor(active !== false), display: 'inline-flex' }}>{iconSvg}</span>
+        </button>
+      );
+
+      // 简易 SVG 图标集
+      const Ico = {
+        back: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>,
+        forward: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>,
+        home: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1h-5v-7H9v7H4a1 1 0 01-1-1V9.5z"/></svg>,
+        // 设计改进：BROWSER 模式 Home 按钮加转换小图标（双向箭头 ↹），暗示点击可切换到画布主页
+        homeWithConvert: (
+          <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 0 }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1h-5v-7H9v7H4a1 1 0 01-1-1V9.5z"/></svg>
+            <span style={{ position: 'absolute', bottom: -3, right: -6, background: '#fff', borderRadius: 6, padding: '0 1px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 0 1px rgba(0,0,0,0.06)' }}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={COLORS.primary} strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 8h13"/>
+                <path d="M13 5l3 3-3 3"/>
+                <path d="M21 16H8"/>
+                <path d="M11 13l-3 3 3 3"/>
+              </svg>
+            </span>
+          </span>
+        ),
+        tab: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>,
+        more: <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>,
+        zoomOut: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><path d="M8 11h6M21 21l-4.3-4.3"/></svg>,
+        zoomIn: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><path d="M11 8v6M8 11h6M21 21l-4.3-4.3"/></svg>,
+      };
+
+      return (
+        <div style={{
+          display: 'flex', flexDirection: 'column',
+          background: COLORS.glassBg,
+          backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+          borderTop: `1px solid ${COLORS.divider}`,
+          position: 'relative',
+        }}>
+          {/* 设计改进：左右滑动指示（滑一下把底部栏整体替换为 AI 对话框） */}
+          <div className="swipe-h-indicator" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4px 0 2px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="rgba(0,0,0,0.30)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+              <div style={{ width: 36, height: 4, borderRadius: 2, background: 'rgba(0,0,0,0.18)' }} />
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="rgba(0,0,0,0.30)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+            </div>
+            <div style={{ fontSize: 9, color: COLORS.onSurfaceVariant, marginTop: 2 }}>左右滑动切换 AI</div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-evenly', alignItems: 'center', padding: '4px 8px' }}>
+          {mode === 'BROWSER'
+            ? [iconBtn('back', canGoBack, onBack, Ico.back, '后退'),
+               iconBtn('forward', canGoForward, onForward, Ico.forward, '前进'),
+               iconBtn('home', true, onHome, Ico.homeWithConvert, '主页 · 切换主页类型'),
+               <div key="tabs" style={{ position: 'relative', paddingTop: 8 }}>
+                 {iconBtn('tabs', true, onTabs, Ico.tab, '标签页')}
+                 {tabCount > 0 && (
+                   <span style={{ position: 'absolute', top: 0, right: 0, background: COLORS.primary, color: '#fff', fontSize: 9, fontWeight: 600, padding: '1px 5px', borderRadius: 7, minWidth: 14, textAlign: 'center' }}>{tabCount > 99 ? '99+' : tabCount}</span>
+                 )}
+               </div>,
+               iconBtn('more', true, onMore, Ico.more, '更多')]
+            : [iconBtn('zoomOut', true, onZoomOut, Ico.zoomOut, '缩小'),
+               iconBtn('zoomIn', true, onZoomIn, Ico.zoomIn, '放大'),
+               iconBtn('home', true, onHome, Ico.home, '主页'),
+               iconBtn('tabs', true, onTabs, Ico.tab, '标签页'),
+               iconBtn('more', true, onMore, Ico.more, '更多')]}
+
+          </div>
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 1: BrowserHome（浏览器主页）—— 1:1 还原 BrowserHomeScreen.kt
+    // =================================================================
+    function BrowserHomeScreen() {
+      const [text, setText] = useState('');
+      const shortcuts = [
+        { id: 1, title: '百度', letter: 'B' },
+        { id: 2, title: '知乎', letter: 'Z' },
+        { id: 3, title: '微博', letter: 'W' },
+        { id: 4, title: 'GitHub', letter: 'G' },
+      ];
+      return (
+        <div style={{ width: '100%', height: '100%', background: COLORS.background, overflowY: 'auto', padding: '24px 0' }}>
+          {/* LogoHeader —— 设计改进：去掉 "Living Dashboard" 文字标题 */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px 16px' }}>
+            <div style={{ width: 56, height: 56, borderRadius: 14, background: 'linear-gradient(135deg, #7B68EE, #6650A4)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 22, letterSpacing: '-0.02em' }}>LD</div>
+          </div>
+          <div style={{ fontSize: 10, color: '#999', textAlign: 'center', fontStyle: 'italic' }}>设计改进：去掉冗余文字标题</div>
+          <div style={{ height: 16 }} />
+          {/* SearchBar pill */}
+          <div style={{ padding: '0 16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', background: COLORS.searchBg, borderRadius: 28, padding: '0 16px', height: 52 }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={COLORS.onSurfaceVariant} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+              <input
+                value={text}
+                onChange={e => setText(e.target.value)}
+                placeholder="搜索或输入网址"
+                style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: 15, padding: '0 12px', color: COLORS.onSurface, fontFamily: 'inherit' }}
+              />
+              <button style={{ background: 'none', border: 'none', padding: 4, cursor: 'pointer', display: 'flex', color: COLORS.primary }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+              </button>
+            </div>
+          </div>
+          <div style={{ height: 24 }} />
+          {/* QuickAccessGrid —— 设计改进：去掉 "常用网站" 文字标签，网格本身自明 */}
+          <div style={{ padding: '0 16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, paddingTop: 8 }}>
+              {shortcuts.map(s => (
+                <div key={s.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 0', cursor: 'pointer' }}>
+                  <div style={{ width: 48, height: 48, borderRadius: '50%', background: COLORS.primaryContainer, display: 'flex', alignItems: 'center', justifyContent: 'center', color: COLORS.onPrimaryContainer, fontWeight: 700, fontSize: 18 }}>{s.letter}</div>
+                  <div style={{ fontSize: 11, color: COLORS.onSurface, marginTop: 4, textAlign: 'center' }}>{s.title}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{ height: 80 }} />
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 2: CanvasHome 收起态 —— 1:1 还原 CanvasHomeScreen.kt
+    // =================================================================
+    function CircleIcon() {
+      return (
+        <div style={{ width: 72, height: 72, borderRadius: '50%', background: COLORS.cardBg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: 40, height: 40, borderRadius: 10, background: 'linear-gradient(135deg, #7B68EE, #6650A4)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 14 }}>LD</div>
+        </div>
+      );
+    }
+
+    function CanvasHomeCollapsedScreen() {
+      const favorites = [
+        { id: '1', name: 'AI 助手', color: '#4A90E2', icon: '✦' },
+        { id: '2', name: '网页', color: '#34C759', icon: '◐' },
+        { id: '3', name: '计算器', color: '#FF9500', icon: '⊕' },
+        { id: '4', name: '专注计时', color: '#FF3B30', icon: '◷' },
+      ];
+      return (
+        <div style={{ width: '100%', height: '100%', background: '#fff', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ flex: 1, padding: '32px 16px 16px', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ alignSelf: 'center' }}><CircleIcon /></div>
+            <div style={{ height: 24 }} />
+            {/* AIInputPill 收起态 */}
+            <div style={{ display: 'flex', alignItems: 'center', height: 44, background: COLORS.userBubble, borderRadius: 22, padding: '0 16px' }}>
+              <input placeholder="有什么想问的..." style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: 14, color: COLORS.onSurface, fontFamily: 'inherit' }} />
+              <button style={{ width: 32, height: 32, background: 'none', border: 'none', cursor: 'pointer', color: COLORS.aiAccent, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
+              </button>
+            </div>
+            <div style={{ height: 32 }} />
+            {/* 设计改进：去掉 "收藏组件" 文字标签，网格本身自明 */}
+            <div style={{ fontSize: 10, color: '#999', textAlign: 'center', fontStyle: 'italic', marginBottom: 12 }}>设计改进：去掉冗余文字标题</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, flex: 1, alignContent: 'start' }}>
+              {favorites.map(f => (
+                <div key={f.id} style={{ aspectRatio: '1', background: COLORS.cardBg, borderRadius: 16, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 8 }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 8, background: f.color, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 600 }}>{f.icon}</div>
+                  <div style={{ fontSize: 11, color: '#666', marginTop: 6 }}>{f.name}</div>
+                </div>
+              ))}
+              <div style={{ aspectRatio: '1', background: COLORS.cardBg, borderRadius: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ fontSize: 22, color: '#999' }}>+</span>
+              </div>
+            </div>
+            <div style={{ height: 8 }} />
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', color: '#999', padding: 8 }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+              <div style={{ fontSize: 10 }}>下滑进入画布</div>
+            </div>
+          </div>
+          <BottomBar mode="CANVAS" />
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 3: CanvasHome 展开态（带对话历史 + 思维链折叠 + 工具调用流动条）
+    // =================================================================
+    function CanvasHomeAIExpandedScreen({ emptyState = false }) {
+      const [thinkingExpanded, setThinkingExpanded] = useState(false);
+      const [agentSwitcherOpen, setAgentSwitcherOpen] = useState(false);
+      return (
+        <div style={{ width: '100%', height: '100%', background: '#fff', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ flex: 1, padding: '32px 16px 12px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ alignSelf: 'center', marginBottom: 16 }}><CircleIcon /></div>
+            {/* 修复2：AI 标题 + 折叠图标（默认折叠，点击展开 AgentModeSwitcher） */}
+            <div className="agent-switcher-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 4 }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.onSurface }}>AI</span>
+              <button onClick={() => setAgentSwitcherOpen(!agentSwitcherOpen)} aria-label="Agent 模式设置" style={{ background: 'none', border: 'none', padding: 4, cursor: 'pointer', color: agentSwitcherOpen ? COLORS.primary : COLORS.onSurfaceVariant, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+              </button>
+            </div>
+            {agentSwitcherOpen && <AgentModeSwitcherInline />}
+            <div style={{ fontSize: 10, color: '#999', textAlign: 'center', fontStyle: 'italic', marginBottom: 4 }}>设计改进：源码常驻显示，改为折叠菜单</div>
+            <div style={{ height: 8 }} />
+            {/* 对话区域 */}
+            {emptyState ? (
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+                <div style={{ fontSize: 22, color: '#C7C7CC', fontWeight: 500, textAlign: 'center' }}>开始和 AI 对话吧</div>
+              </div>
+            ) : (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', paddingBottom: 8 }}>
+                {/* 用户消息 */}
+                <div className="bubble bubble-user">帮我查一下百度首页有什么新闻</div>
+
+                {/* 思维链自动收缩 */}
+                <div className={`thinking-collapsed ${thinkingExpanded ? 'expanded' : ''}`} onClick={() => setThinkingExpanded(!thinkingExpanded)}>
+                  <span className="chevron" />
+                  <span>已思考 8s</span>
+                </div>
+                {thinkingExpanded && (
+                  <div className="thinking-detail">
+                    用户想要查看百度首页的新闻内容。我需要先打开百度首页，然后提取页面上的新闻条目，再整理成列表返回给用户。
+                  </div>
+                )}
+
+                {/* 工具调用折叠 */}
+                <div style={{ padding: '10px 12px', background: COLORS.cardBg, borderRadius: 12, alignSelf: 'flex-start', maxWidth: '85%' }}>
+                  <div className="tool-flow-bar" />
+                  <div className="tool-call-summary">工具执行了 3 次</div>
+                  <div className="tool-status">命令执行中...</div>
+                </div>
+
+                {/* AI 回复 */}
+                <div className="bubble bubble-ai">已为你打开百度首页，并提取了 5 条热门新闻，整理如下：1. xxx 2. xxx 3. xxx ...</div>
+
+                {/* AI 流式中 */}
+                <div className="bubble bubble-ai" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  正在生成
+                  <span style={{ display: 'inline-flex', gap: 2 }}>
+                    {[0, 1, 2].map(i => (
+                      <span key={i} style={{ width: 4, height: 4, background: COLORS.aiAccent, borderRadius: '50%', animation: `bounce 1.2s ${i * 0.15}s infinite ease-in-out` }} />
+                    ))}
+                  </span>
+                  <style>{`@keyframes bounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.5; } 30% { transform: translateY(-4px); opacity: 1; } }`}</style>
+                </div>
+              </div>
+            )}
+            {/* 底部输入框（pill + 发送） */}
+            <div style={{ display: 'flex', alignItems: 'center', height: 44, background: COLORS.userBubble, borderRadius: 22, padding: '0 16px', marginTop: 8 }}>
+              <input placeholder="输入消息..." style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: 14, color: COLORS.onSurface, fontFamily: 'inherit' }} />
+              <button style={{ width: 32, height: 32, background: 'none', border: 'none', cursor: 'pointer', color: COLORS.aiAccent, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+              </button>
+            </div>
+          </div>
+          <BottomBar mode="CANVAS" />
+        </div>
+      );
+    }
+
+    // AgentModeSwitcher 内联版（CLOUD/AUTO/LOCAL SegmentedButton + 思考等级 Slider）
+    function AgentModeSwitcherInline() {
+      const [mode, setMode] = useState('AUTO');
+      const [level, setLevel] = useState(1); // 0..3 → 快速/平衡/深度/极深度
+      const levels = ['快速', '平衡', '深度', '极深度'];
+      return (
+        <div style={{ width: '100%' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {/* SegmentedButton CLOUD/AUTO/LOCAL */}
+            <div style={{ flex: 1, display: 'flex', background: COLORS.cardBg, borderRadius: 8, padding: 2, height: 32 }}>
+              {['CLOUD', 'AUTO', 'LOCAL'].map(m => (
+                <button key={m} onClick={() => setMode(m)} style={{
+                  flex: 1, background: mode === m ? '#fff' : 'transparent',
+                  border: 'none', borderRadius: 6, fontSize: 11, fontWeight: mode === m ? 600 : 500,
+                  color: mode === m ? COLORS.onSurface : COLORS.onSurfaceVariant,
+                  cursor: 'pointer', boxShadow: mode === m ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                  transition: 'all 0.2s',
+                }}>{m}</button>
+              ))}
+            </div>
+          </div>
+          {/* 思考等级滑块 */}
+          <div style={{ marginTop: 10, padding: '0 4px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ fontSize: 11, color: COLORS.onSurfaceVariant }}>思考等级</span>
+              <span style={{ fontSize: 11, color: COLORS.primary, fontWeight: 600 }}>{levels[level]}</span>
+            </div>
+            <input
+              type="range" min="0" max="3" step="1" value={level}
+              onChange={e => setLevel(parseInt(e.target.value))}
+              className="thinking-slider thinking-slider-thumb"
+            />
+            <div className="slider-ticks">
+              {levels.map((l, i) => (
+                <span key={l} className={`slider-tick ${i === level ? 'active' : ''}`}>{l}</span>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 4-7: CanvasScreen 四档分层（Apple Watch 风格，修复7：THUMBNAIL/SUMMARY/INTERACTIVE/FULL）
+    // =================================================================
+    function CanvasAppleWatchTier1Screen() {
+      // 修复5：第一档 THUMBNAIL（zoom<0.3）—— Apple Watch 风格实心彩色小球叠加
+      const widgets = [
+        { id: 1, name: 'AI', color: '#4A90E2', symbol: '✦' },
+        { id: 2, name: '网页', color: '#34C759', symbol: '◐' },
+        { id: 3, name: '计算器', color: '#FF9500', symbol: '⊕' },
+        { id: 4, name: '专注', color: '#FF3B30', symbol: '◷' },
+        { id: 5, name: 'HTML', color: '#AF52DE', symbol: '◇' },
+        { id: 6, name: '笔记', color: '#007AFF', symbol: '✎' },
+        { id: 7, name: '日历', color: '#FF2D55', symbol: '▦' },
+        { id: 8, name: '音乐', color: '#5856D6', symbol: '♪' },
+        { id: 9, name: '天气', color: '#5AC8FA', symbol: '⊙' },
+        { id: 10, name: '地图', color: '#30B0C7', symbol: '◉' },
+      ];
+      return (
+        <div className="canvas-tier-thumbnail" style={{ width: '100%', height: '100%', background: '#FAFAFA', position: 'relative', overflow: 'hidden' }}>
+          <div style={{ position: 'absolute', top: 8, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#999', fontStyle: 'italic' }}>双指缩放：第一档 THUMBNAIL · Apple Watch 彩色小球叠加</div>
+          {/* 修复5：实心彩色小球叠加（圆形，紧密排列重叠，像 Apple Watch 网格充实感） */}
+          <div className="apple-watch-balls" style={{ position: 'absolute', top: 40, left: 0, right: 0, bottom: 72, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignContent: 'center', padding: 16 }}>
+            {widgets.map((w, idx) => (
+              <div key={w.id} title={w.name} style={{
+                width: 72, height: 72, borderRadius: '50%',
+                background: w.color, color: '#fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 30, fontWeight: 400,
+                boxShadow: '0 3px 10px rgba(0,0,0,0.18)',
+                border: '3px solid #FAFAFA',
+                marginLeft: idx % 4 === 0 ? 0 : -16,
+                marginTop: idx >= 4 ? -14 : 0,
+                zIndex: idx,
+              }}>{w.symbol}</div>
+            ))}
+          </div>
+          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+            <BottomBar mode="CANVAS" />
+          </div>
+        </div>
+      );
+    }
+
+    function CanvasAppleWatchTier2Screen() {
+      // 修复6：第二档 SUMMARY（zoom<0.7）—— 完整组件的缩小版（按钮/显示屏都在，只是小）
+      return (
+        <div className="canvas-tier-summary" style={{ width: '100%', height: '100%', background: '#FAFAFA', position: 'relative', overflow: 'hidden' }}>
+          <div style={{ position: 'absolute', top: 8, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#999', fontStyle: 'italic' }}>双指缩放：第二档 SUMMARY · 缩小版完整组件</div>
+          <div style={{ position: 'absolute', top: 32, left: 0, right: 0, bottom: 72, display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, padding: 10, alignContent: 'start', overflowY: 'auto' }}>
+            {/* 专注计时 缩小版完整组件 */}
+            <div className="mini-widget focus-timer-mini" style={{ background: '#fff', borderRadius: 12, padding: 8, boxShadow: '0 2px 6px rgba(0,0,0,0.05)' }}>
+              <div style={{ fontSize: 9, color: COLORS.onSurfaceVariant, marginBottom: 4 }}>专注计时</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+                <div style={{ position: 'relative', width: 70, height: 70 }}>
+                  <svg width="70" height="70" viewBox="0 0 70 70">
+                    <circle cx="35" cy="35" r="30" fill="none" stroke="#EEEEEE" strokeWidth="5" />
+                    <circle cx="35" cy="35" r="30" fill="none" stroke="#4A90E2" strokeWidth="5" strokeLinecap="round" strokeDasharray={`${2 * Math.PI * 30 * 0.7} ${2 * Math.PI * 30}`} transform="rotate(-90 35 35)" />
+                  </svg>
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 600, color: '#333' }}>17:30</div>
+                </div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                  <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#4A90E2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="#fff"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
+                  </div>
+                  <div style={{ width: 18, height: 18, borderRadius: '50%', background: 'rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#666" strokeWidth="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5"/></svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+            {/* 计算器 缩小版完整组件 */}
+            <div className="mini-widget calculator-mini" style={{ background: '#fff', borderRadius: 12, padding: 8, boxShadow: '0 2px 6px rgba(0,0,0,0.05)' }}>
+              <div style={{ fontSize: 9, color: COLORS.onSurfaceVariant, marginBottom: 4 }}>计算器</div>
+              <div style={{ background: '#F5F5F7', borderRadius: 5, padding: 5, fontSize: 11, textAlign: 'right', marginBottom: 4, color: '#333', fontWeight: 500 }}>128+256</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 3 }}>
+                {['C','(',')','÷','7','8','9','×','4','5','6','-','1','2','3','+','0','.','='].map(k => (
+                  <div key={k} style={{ padding: '3px 0', background: ['÷','×','-','+','='].includes(k) ? '#FF9500' : '#F5F5F7', color: ['÷','×','-','+','='].includes(k) ? '#fff' : '#333', borderRadius: 4, fontSize: 8, fontWeight: 600, textAlign: 'center' }}>{k}</div>
+                ))}
+              </div>
+            </div>
+            {/* AI 助手 缩小版完整组件 */}
+            <div className="mini-widget ai-mini" style={{ background: '#fff', borderRadius: 12, padding: 8, boxShadow: '0 2px 6px rgba(0,0,0,0.05)' }}>
+              <div style={{ fontSize: 9, color: COLORS.onSurfaceVariant, marginBottom: 4 }}>AI 助手</div>
+              <div style={{ background: 'rgba(0,0,0,0.05)', borderRadius: 6, padding: 4, fontSize: 8, color: '#333', marginBottom: 3, marginLeft: 'auto', width: 'fit-content' }}>查天气</div>
+              <div style={{ background: 'rgba(0,0,0,0.03)', borderRadius: 6, padding: 4, fontSize: 8, color: '#333', marginBottom: 4 }}>北京 25°晴</div>
+              <div style={{ display: 'flex', alignItems: 'center', height: 18, background: 'rgba(0,0,0,0.05)', borderRadius: 9, padding: '0 5px' }}>
+                <span style={{ flex: 1, fontSize: 8, color: '#999' }}>输入...</span>
+                <div style={{ width: 14, height: 14, borderRadius: '50%', background: '#4A90E2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+                </div>
+              </div>
+            </div>
+            {/* 网页 缩小版完整组件 */}
+            <div className="mini-widget web-mini" style={{ background: '#fff', borderRadius: 12, padding: 8, boxShadow: '0 2px 6px rgba(0,0,0,0.05)' }}>
+              <div style={{ fontSize: 9, color: COLORS.onSurfaceVariant, marginBottom: 4 }}>网页</div>
+              <div style={{ display: 'flex', alignItems: 'center', background: '#F5F5F7', borderRadius: 5, padding: '0 4px', height: 14, marginBottom: 4 }}>
+                <svg width="6" height="6" viewBox="0 0 24 24" fill="none" stroke="#999" strokeWidth="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+                <span style={{ flex: 1, marginLeft: 3, fontSize: 7, color: '#666' }}>baidu.com</span>
+              </div>
+              <div style={{ fontSize: 8, fontWeight: 600, color: '#333', marginBottom: 2 }}>百度一下</div>
+              <div style={{ fontSize: 7, color: '#999', lineHeight: 1.4 }}>新闻 网页 贴吧 知道</div>
+              <div style={{ display: 'flex', gap: 3, marginTop: 3 }}>
+                <div style={{ flex: 1, height: 8, background: '#4A90E2', borderRadius: 2 }} />
+                <div style={{ flex: 1, height: 8, background: '#F5F5F7', borderRadius: 2 }} />
+              </div>
+            </div>
+            {/* HTML 画布 缩小版完整组件 */}
+            <div className="mini-widget html-mini" style={{ background: '#fff', borderRadius: 12, padding: 8, boxShadow: '0 2px 6px rgba(0,0,0,0.05)' }}>
+              <div style={{ fontSize: 9, color: COLORS.onSurfaceVariant, marginBottom: 4 }}>HTML 画布</div>
+              <div style={{ background: '#F5F5F7', borderRadius: 5, padding: 4, fontSize: 7, fontFamily: 'monospace', color: '#666', marginBottom: 3 }}>&lt;div&gt;...&lt;/div&gt;</div>
+              <div style={{ height: 20, background: 'linear-gradient(135deg, #AF52DE, #7B68EE)', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 7 }}>草稿 #3</div>
+            </div>
+            {/* 笔记 缩小版完整组件 */}
+            <div className="mini-widget notes-mini" style={{ background: '#fff', borderRadius: 12, padding: 8, boxShadow: '0 2px 6px rgba(0,0,0,0.05)' }}>
+              <div style={{ fontSize: 9, color: COLORS.onSurfaceVariant, marginBottom: 4 }}>笔记</div>
+              <div style={{ fontSize: 8, fontWeight: 600, color: '#333', marginBottom: 2 }}>3 条笔记</div>
+              <div style={{ background: '#F5F5F7', borderRadius: 4, padding: 3, fontSize: 7, color: '#666', marginBottom: 2 }}>· 购物清单</div>
+              <div style={{ background: '#F5F5F7', borderRadius: 4, padding: 3, fontSize: 7, color: '#666', marginBottom: 2 }}>· 会议记录</div>
+              <div style={{ background: '#F5F5F7', borderRadius: 4, padding: 3, fontSize: 7, color: '#666' }}>· 灵感</div>
+            </div>
+          </div>
+          {/* 修复6：标注小字 */}
+          <div style={{ position: 'absolute', bottom: 60, left: 0, right: 0, textAlign: 'center', fontSize: 9, color: '#999', fontStyle: 'italic', pointerEvents: 'none' }}>设计改进：源码为简化态，改为缩小版组件（待 Design Agent 实现）</div>
+          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+            <BottomBar mode="CANVAS" />
+          </div>
+        </div>
+      );
+    }
+
+    function CanvasAppleWatchTier3Screen() {
+      // 修复7：第三档 INTERACTIVE（zoom<=1.0）—— 完全可用组件（正常大小）
+      return (
+        <div className="canvas-tier-interactive" style={{ width: '100%', height: '100%', background: '#FAFAFA', position: 'relative', overflow: 'hidden' }}>
+          <div style={{ position: 'absolute', top: 8, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#999', fontStyle: 'italic' }}>双指缩放：第三档 INTERACTIVE · 完全可用组件</div>
+          <div style={{ position: 'absolute', top: 36, left: 0, right: 0, bottom: 60, padding: 12, overflowY: 'auto' }}>
+            {/* FocusTimerWidget 完整态 */}
+            <div style={{ background: '#fff', borderRadius: 16, padding: 16, marginBottom: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
+              <div style={{ fontSize: 12, color: COLORS.onSurfaceVariant, marginBottom: 6 }}>专注计时</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+                <div style={{ position: 'relative', width: 140, height: 140 }}>
+                  <svg width="140" height="140" viewBox="0 0 140 140">
+                    <circle cx="70" cy="70" r="60" fill="none" stroke="#EEEEEE" strokeWidth="10" />
+                    <circle cx="70" cy="70" r="60" fill="none" stroke="#4A90E2" strokeWidth="10" strokeLinecap="round" strokeDasharray={`${2 * Math.PI * 60 * 0.7} ${2 * Math.PI * 60}`} transform="rotate(-90 70 70)" />
+                  </svg>
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ fontSize: 11, color: '#999' }}>专注</div>
+                    <div style={{ fontSize: 28, fontWeight: 600, color: '#333' }}>17:30</div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 12, marginTop: 14 }}>
+                  <button style={{ width: 48, height: 48, borderRadius: '50%', background: '#4A90E2', border: 'none', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
+                  </button>
+                  <button style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(0,0,0,0.1)', border: 'none', color: '#666', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+            {/* CalculatorWidget 完整态 */}
+            <div style={{ background: '#fff', borderRadius: 16, padding: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
+              <div style={{ fontSize: 12, color: COLORS.onSurfaceVariant, marginBottom: 6 }}>计算器</div>
+              <div style={{ background: '#F5F5F7', borderRadius: 8, padding: 10, fontSize: 22, textAlign: 'right', marginBottom: 8, color: '#333', fontWeight: 500 }}>128 + 256</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+                {['C', '(', ')', '÷', '7', '8', '9', '×', '4', '5', '6', '-', '1', '2', '3', '+', '0', '.', '='].map(k => (
+                  <button key={k} style={{ padding: '8px 0', background: ['#÷', '×', '-', '+', '='].includes(k) ? '#FF9500' : '#F5F5F7', color: ['#÷', '×', '-', '+', '='].includes(k) ? '#fff' : '#333', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{k}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+            <BottomBar mode="CANVAS" />
+          </div>
+        </div>
+      );
+    }
+
+    // =================================================================
+    // 修复7 第四档 FULL（zoom>1.0）—— 组件放大查看，可能只看到局部
+    // 参考 CanvasTransform.kt: MAX_ZOOM = 2.0f, zoomLevelFromZoom: zoom > 1.0 → FULL
+    // 用户体验：双指放大到 >100%，组件被放大显示，只能看到局部细节
+    // =================================================================
+    function CanvasAppleWatchTier4Screen() {
+      // 修复7：第四档 FULL（zoom>1.0）—— 组件放大查看，可能只看到局部
+      return (
+        <div className="canvas-tier-full" style={{ width: '100%', height: '100%', background: '#FAFAFA', position: 'relative', overflow: 'hidden' }}>
+          <div style={{ position: 'absolute', top: 8, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#999', fontStyle: 'italic' }}>双指缩放：第四档 FULL · 放大查看（仅见局部）</div>
+          {/* 放大的圆环细节：用 transform: scale(1.8) 放大，只显示圆环+时间数字的特写，超出屏幕被裁剪 */}
+          <div style={{ position: 'absolute', top: 36, left: 0, right: 0, bottom: 60, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ position: 'relative', width: 140, height: 140, transform: 'scale(1.8)', transformOrigin: 'center center' }}>
+              <svg width="140" height="140" viewBox="0 0 140 140">
+                <circle cx="70" cy="70" r="60" fill="none" stroke="#EEEEEE" strokeWidth="10" />
+                <circle cx="70" cy="70" r="60" fill="none" stroke="#4A90E2" strokeWidth="10" strokeLinecap="round" strokeDasharray={`${2 * Math.PI * 60 * 0.7} ${2 * Math.PI * 60}`} transform="rotate(-90 70 70)" />
+              </svg>
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ fontSize: 11, color: '#999' }}>专注</div>
+                <div style={{ fontSize: 28, fontWeight: 600, color: '#333' }}>17:30</div>
+              </div>
+            </div>
+          </div>
+          {/* 局部提示：右上角角标"局部视图" */}
+          <div style={{ position: 'absolute', top: 28, right: 12, background: 'rgba(102,80,164,0.12)', color: '#6650A4', fontSize: 10, fontWeight: 600, padding: '3px 8px', borderRadius: 10, letterSpacing: 0.04 }}>局部视图 · 1.8x</div>
+          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+            <BottomBar mode="CANVAS" />
+          </div>
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 7: BrowserScreen 网页视图 + 底部工具栏自动收缩 + AI 右下角入口
+    // =================================================================
+    function BrowserScreenWithAutoHideScreen() {
+      const [barHidden, setBarHidden] = useState(false);
+      // 模拟用户向下滑动 → 工具栏收起；向上滑 → 唤起
+      useEffect(() => {
+        const t1 = setTimeout(() => setBarHidden(true), 2200);
+        const t2 = setTimeout(() => setBarHidden(false), 4400);
+        return () => { clearTimeout(t1); clearTimeout(t2); };
+      }, []);
+      return (
+        <div style={{ width: '100%', height: '100%', background: '#fff', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+          {/* 模拟网页内容（占满屏幕） */}
+          <div style={{ flex: 1, overflowY: 'auto', position: 'relative' }}>
+            <div style={{ padding: 16, lineHeight: 1.7, color: '#333', fontSize: 14 }}>
+              <h2 style={{ fontSize: 20, marginBottom: 12 }}>示例网页 · 沉浸阅读体验</h2>
+              <p style={{ marginBottom: 12 }}>用户向下滑动时，地址栏 + 底部工具栏自动收起，网页内容占满全屏。</p>
+              <p style={{ marginBottom: 12 }}>这是 Living Dashboard 浏览器的沉浸感核心——任何网页视图，向下滚动即隐藏工具栏，向上滑动一下立即唤起。</p>
+              {Array.from({ length: 12 }).map((_, i) => (
+                <p key={i} style={{ marginBottom: 10, color: '#666' }}>第 {i + 1} 段：示例文本，模拟长文阅读场景。当用户专注阅读时，工具栏的视觉干扰被最小化。</p>
+              ))}
+            </div>
+          </div>
+          {/* 顶部地址栏 + 底部工具栏：autoHideBar */}
+          <div className={`autoHideBar ${barHidden ? 'hidden' : ''}`} style={{ position: 'absolute', top: 0, left: 0, right: 0 }}>
+            <div className="address-bar-peek" style={{ padding: '6px 8px', background: COLORS.glassBg, backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', background: '#fff', borderRadius: 22, padding: '0 14px', height: 38, border: `1px solid ${COLORS.divider}` }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={COLORS.onSurfaceVariant} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+                <span style={{ flex: 1, marginLeft: 8, fontSize: 13, color: COLORS.onSurface }}>www.example.com/article</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={COLORS.onSurfaceVariant} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+              </div>
+            </div>
+          </div>
+          <div className={`autoHideBar ${barHidden ? 'hidden' : ''}`} style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+            <BottomBar mode="BROWSER" canGoBack={true} canGoForward={false} tabCount={3} />
+          </div>
+          {/* 提示文字 */}
+          <div style={{ position: 'absolute', top: 60, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#999', fontStyle: 'italic', pointerEvents: 'none' }}>
+            {barHidden ? '工具栏已收起 · 网页占满全屏' : '工具栏可见 · 滑动可隐藏'}
+          </div>
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 8a: 底部栏 + 左右滑动指示（设计改进：底部栏左右滑动切换 AI 对话框 · 状态1/3）
+    // =================================================================
+    function BottomBarSwipeHScreen() {
+      return (
+        <div style={{ width: '100%', height: '100%', background: '#fff', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+          {/* 顶部地址栏 */}
+          <div style={{ padding: '6px 8px', background: COLORS.glassBg, backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', background: '#fff', borderRadius: 22, padding: '0 14px', height: 38, border: `1px solid ${COLORS.divider}` }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={COLORS.onSurfaceVariant} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+              <span style={{ flex: 1, marginLeft: 8, fontSize: 13, color: COLORS.onSurface }}>www.example.com</span>
+            </div>
+          </div>
+          {/* 网页内容 */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: 16, lineHeight: 1.7, color: '#333', fontSize: 14 }}>
+            <h2 style={{ fontSize: 18, marginBottom: 12 }}>示例网页</h2>
+            <p style={{ marginBottom: 12 }}>底部栏左右滑动，可将底部栏整体替换为 AI 对话框。</p>
+            <p style={{ marginBottom: 12 }}>设计改进：从"上滑召唤 AI"改为"左右滑动切换 AI"——底部栏与 AI 对话框平行切换，更符合移动端单手操作。</p>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <p key={i} style={{ marginBottom: 10, color: '#666' }}>第 {i + 1} 段示例文本。</p>
+            ))}
+          </div>
+          {/* 状态标注 */}
+          <div style={{ position: 'absolute', top: 60, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#999', fontStyle: 'italic', pointerEvents: 'none' }}>
+            状态 1/3 · 底部栏（BROWSER 模式 5 按钮）+ 左右滑动指示
+          </div>
+          {/* 设计改进标注：Home 按钮加转换标识 */}
+          <div style={{ position: 'absolute', bottom: 78, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: COLORS.primary, fontStyle: 'italic', pointerEvents: 'none' }}>
+            设计改进：Home 按钮加转换标识，暗示可切换主页类型
+          </div>
+          <BottomBar mode="BROWSER" canGoBack={true} canGoForward={true} tabCount={3} />
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 8b: AI 对话框收起态（设计改进：左右滑动把底部栏替换为 AI pill · 状态2/3）
+    // =================================================================
+    function AIDialogCollapsedScreen() {
+      return (
+        <div style={{ width: '100%', height: '100%', background: '#fff', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+          {/* 顶部地址栏 */}
+          <div style={{ padding: '6px 8px', background: COLORS.glassBg, backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', background: '#fff', borderRadius: 22, padding: '0 14px', height: 38, border: `1px solid ${COLORS.divider}` }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={COLORS.onSurfaceVariant} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+              <span style={{ flex: 1, marginLeft: 8, fontSize: 13, color: COLORS.onSurface }}>www.example.com</span>
+            </div>
+          </div>
+          {/* 网页内容 */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: 16, lineHeight: 1.7, color: '#333', fontSize: 14 }}>
+            <h2 style={{ fontSize: 18, marginBottom: 12 }}>示例网页</h2>
+            <p style={{ marginBottom: 12 }}>底部栏已被 AI 对话框（收起态）替换。</p>
+            <p style={{ marginBottom: 12 }}>点击 AI 输入框，向上弹起一部分空间便于 AI 对话；再左右滑动可切换回底部栏。</p>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <p key={i} style={{ marginBottom: 10, color: '#666' }}>第 {i + 1} 段示例文本。</p>
+            ))}
+          </div>
+          {/* 状态标注 */}
+          <div style={{ position: 'absolute', top: 60, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#999', fontStyle: 'italic', pointerEvents: 'none' }}>
+            状态 2/3 · AI 对话框收起态（替换底部栏，显示 AI pill + 左右滑动指示）
+          </div>
+          {/* AI 对话框收起态：替换底部栏区域 */}
+          <div style={{
+            display: 'flex', flexDirection: 'column',
+            background: COLORS.glassBg,
+            backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+            borderTop: `1px solid ${COLORS.divider}`,
+            position: 'relative',
+          }}>
+            {/* 左右滑动指示（再滑一下切回底部栏） */}
+            <div className="swipe-h-indicator" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4px 0 2px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="rgba(0,0,0,0.30)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+                <div style={{ width: 36, height: 4, borderRadius: 2, background: 'rgba(0,0,0,0.18)' }} />
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="rgba(0,0,0,0.30)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+              </div>
+              <div style={{ fontSize: 9, color: COLORS.onSurfaceVariant, marginTop: 2 }}>左右滑动切回底部栏</div>
+            </div>
+            {/* AI pill 输入框（占满原底部栏位置） */}
+            <div style={{ padding: '6px 12px 10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', height: 44, background: COLORS.userBubble, borderRadius: 22, padding: '0 8px 0 16px' }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={COLORS.aiAccent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 013 3c0 1.5-1 2-1 3 0 2 2 3 2 3v2H8v-2s2-1 2-3c0-1-1-1.5-1-3a3 3 0 013-3z"/><path d="M9 17h6"/></svg>
+                <input placeholder="有什么想问的..." style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: 14, padding: '0 10px', color: COLORS.onSurface, fontFamily: 'inherit' }} />
+                <button style={{ width: 32, height: 32, background: COLORS.aiAccent, border: 'none', cursor: 'pointer', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, borderRadius: '50%' }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+                </button>
+              </div>
+              <div style={{ fontSize: 9, color: COLORS.onSurfaceVariant, marginTop: 4, textAlign: 'center' }}>点击输入框向上弹起对话面板</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 8c: AI 对话框工作态（设计改进：AI 干活时收起后框内显示状态 · 状态3/3）
+    // =================================================================
+    function AIDialogWorkingScreen() {
+      return (
+        <div style={{ width: '100%', height: '100%', background: '#fff', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+          {/* 顶部地址栏 */}
+          <div style={{ padding: '6px 8px', background: COLORS.glassBg, backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', background: '#fff', borderRadius: 22, padding: '0 14px', height: 38, border: `1px solid ${COLORS.divider}` }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={COLORS.onSurfaceVariant} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+              <span style={{ flex: 1, marginLeft: 8, fontSize: 13, color: COLORS.onSurface }}>www.example.com</span>
+            </div>
+          </div>
+          {/* 网页内容 */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: 16, lineHeight: 1.7, color: '#333', fontSize: 14 }}>
+            <h2 style={{ fontSize: 18, marginBottom: 12 }}>示例网页</h2>
+            <p style={{ marginBottom: 12 }}>AI 正在干活，对话框收起后框内显示 AI 正在做什么。</p>
+            <p style={{ marginBottom: 12 }}>点击外部也可收回对话框；收回后框内显示实时状态（如"AI 正在浏览 baidu.com..."）。</p>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <p key={i} style={{ marginBottom: 10, color: '#666' }}>第 {i + 1} 段示例文本。</p>
+            ))}
+          </div>
+          {/* 状态标注 */}
+          <div style={{ position: 'absolute', top: 60, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#999', fontStyle: 'italic', pointerEvents: 'none' }}>
+            状态 3/3 · AI 对话框工作态（收起后显示"AI 正在..."状态）
+          </div>
+          {/* AI 对话框工作态：替换底部栏区域，左右滑动指示 + AI 状态显示 */}
+          <div style={{
+            display: 'flex', flexDirection: 'column',
+            background: COLORS.glassBg,
+            backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+            borderTop: `1px solid ${COLORS.divider}`,
+            position: 'relative',
+          }}>
+            {/* 左右滑动指示 */}
+            <div className="swipe-h-indicator" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4px 0 2px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="rgba(0,0,0,0.30)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+                <div style={{ width: 36, height: 4, borderRadius: 2, background: 'rgba(0,0,0,0.18)' }} />
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="rgba(0,0,0,0.30)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+              </div>
+              <div style={{ fontSize: 9, color: COLORS.onSurfaceVariant, marginTop: 2 }}>左右滑动切回底部栏</div>
+            </div>
+            {/* AI 状态显示 pill（占满原底部栏位置，显示 AI 正在干什么） */}
+            <div style={{ padding: '6px 12px 10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 44, background: 'rgba(74,144,226,0.08)', borderRadius: 22, padding: '0 14px' }}>
+                {/* AI 工作指示动效（三点跳动） */}
+                <span style={{ display: 'inline-flex', gap: 3 }}>
+                  {[0, 1, 2].map(i => (
+                    <span key={i} style={{ width: 5, height: 5, background: COLORS.aiAccent, borderRadius: '50%', animation: `aiPulse 1.2s ${i * 0.15}s infinite ease-in-out` }} />
+                  ))}
+                </span>
+                <style>{`@keyframes aiPulse { 0%, 60%, 100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-3px); opacity: 1; } }`}</style>
+                <span style={{ flex: 1, fontSize: 13, color: COLORS.aiAccent, fontStyle: 'italic' }}>AI 正在浏览 baidu.com...</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={COLORS.aiAccent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+              </div>
+              <div style={{ fontSize: 9, color: COLORS.onSurfaceVariant, marginTop: 4, textAlign: 'center' }}>点击展开 AI 对话面板</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 8.5: CanvasMoreMenuSheet 展开态（修复4：CANVAS 模式三个点 ⋮ → 3 项）
+    // =================================================================
+    function CanvasMoreMenuSheetScreen() {
+      // 修复4：CANVAS 模式三个点展开态（CanvasMoreMenuSheet.kt，3 项）
+      const items = [
+        { title: '面板管理', desc: '→ TabManagerScreen（画布面板 Tab）', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> },
+        { title: '收藏管理', desc: '→ 聚合面板', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> },
+        { title: '设置', desc: '→ SettingsScreen', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg> },
+      ];
+      return (
+        <div className="more-menu-canvas" style={{ width: '100%', height: '100%', background: 'rgba(0,0,0,0.4)', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+          <div style={{ flex: 1 }} />
+          <div style={{ background: 'rgba(255,255,255,0.97)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '20px 20px 0 0', padding: '8px 0 24px', boxShadow: '0 -4px 24px rgba(0,0,0,0.12)' }}>
+            <div style={{ width: 36, height: 4, borderRadius: 2, background: 'rgba(0,0,0,0.15)', margin: '8px auto 16px' }} />
+            <div style={{ padding: '0 20px 8px', fontSize: 11, color: COLORS.onSurfaceVariant, fontStyle: 'italic' }}>CANVAS 模式 ⋮ 更多菜单 · 3 项（CanvasMoreMenuSheet.kt）</div>
+            {items.map((it, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', cursor: 'pointer' }}>
+                <div style={{ width: 32, height: 32, borderRadius: 8, background: COLORS.cardBg, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 14, color: COLORS.onSurface }}>{it.icon}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 15, color: COLORS.onSurface }}>{it.title}</div>
+                  <div style={{ fontSize: 11, color: COLORS.onSurfaceVariant, marginTop: 2 }}>{it.desc}</div>
+                </div>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={COLORS.onSurfaceVariant} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 8.6: BrowserMoreMenuSheet 展开态（修复4：BROWSER 模式三个点 ⋮ → 10 项）
+    // =================================================================
+    function BrowserMoreMenuSheetScreen() {
+      // 修复4：BROWSER 模式三个点展开态（MoreMenuSheet.kt，10 项）
+      const items = [
+        { title: '添加书签', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2v16z"/><line x1="12" y1="5" x2="12" y2="13"/><line x1="8" y1="9" x2="16" y2="9"/></svg> },
+        { title: '查看书签', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2v16z"/></svg> },
+        { title: '历史', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg> },
+        { title: '下载', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> },
+        { title: '分享', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg> },
+        { title: '复制链接', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> },
+        { title: '设置', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg> },
+        { title: '设为默认浏览器', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg> },
+        { title: '清除 Cookie', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg> },
+        { title: '退出', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> },
+      ];
+      return (
+        <div className="more-menu-browser" style={{ width: '100%', height: '100%', background: 'rgba(0,0,0,0.4)', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+          <div style={{ flex: 1 }} />
+          <div style={{ background: 'rgba(255,255,255,0.97)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '20px 20px 0 0', padding: '8px 0 24px', boxShadow: '0 -4px 24px rgba(0,0,0,0.12)', maxHeight: '85%', overflowY: 'auto' }}>
+            <div style={{ width: 36, height: 4, borderRadius: 2, background: 'rgba(0,0,0,0.15)', margin: '8px auto 16px' }} />
+            <div style={{ padding: '0 20px 8px', fontSize: 11, color: COLORS.onSurfaceVariant, fontStyle: 'italic' }}>BROWSER 模式 ⋮ 更多菜单 · 10 项（MoreMenuSheet.kt）</div>
+            {items.map((it, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '12px 20px', cursor: 'pointer' }}>
+                <div style={{ width: 30, height: 30, borderRadius: 8, background: COLORS.cardBg, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 14, color: COLORS.onSurface }}>{it.icon}</div>
+                <div style={{ flex: 1, fontSize: 15, color: COLORS.onSurface }}>{it.title}</div>
+                {it.title === '退出' && <span style={{ fontSize: 11, color: COLORS.error, marginLeft: 8 }}>finishAffinity</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 9: TabsScreen（标签管理）—— 1:1 还原 TabManagerScreen.kt
+    // =================================================================
+    function TabsScreen() {
+      const [selectedTab, setSelectedTab] = useState(0);
+      const tabs = [
+        { id: '1', title: '百度一下', url: 'baidu.com' },
+        { id: '2', title: 'GitHub', url: 'github.com' },
+        { id: '3', title: '新标签页', url: '空白页' },
+        { id: '4', title: '知乎', url: 'zhihu.com' },
+      ];
+      const panels = [
+        { id: 'p1', name: '工作面板', isAggregate: false },
+        { id: 'p2', name: '聚合面板', isAggregate: true },
+        { id: 'p3', name: '学习面板', isAggregate: false },
+      ];
+      return (
+        <div style={{ width: '100%', height: '100%', background: '#fff', display: 'flex', flexDirection: 'column' }}>
+          {/* TopAppBar */}
+          <div style={{ display: 'flex', alignItems: 'center', padding: '12px 8px 12px 4px', borderBottom: `1px solid ${COLORS.divider}` }}>
+            <button style={{ background: 'none', border: 'none', padding: 8, cursor: 'pointer', color: COLORS.onSurface }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+            <div style={{ flex: 1, fontSize: 18, fontWeight: 600, marginLeft: 8 }}>标签管理</div>
+            <button style={{ background: 'none', border: 'none', padding: 8, cursor: 'pointer', color: COLORS.onSurface }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+          </div>
+          {/* TabRow */}
+          <div style={{ display: 'flex', borderBottom: `1px solid ${COLORS.divider}` }}>
+            {['网页标签', '画布面板'].map((t, i) => (
+              <button key={t} onClick={() => setSelectedTab(i)} style={{
+                flex: 1, padding: '12px 0', background: 'none', border: 'none', cursor: 'pointer',
+                fontSize: 14, fontWeight: selectedTab === i ? 600 : 500,
+                color: selectedTab === i ? COLORS.primary : COLORS.onSurfaceVariant,
+                borderBottom: selectedTab === i ? `2px solid ${COLORS.primary}` : '2px solid transparent',
+              }}>{t}</button>
+            ))}
+          </div>
+          {/* Grid */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+              {selectedTab === 0 ? tabs.map(t => (
+                <div key={t.id} style={{ background: COLORS.cardBg, borderRadius: 12, padding: 12, position: 'relative', cursor: 'pointer' }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: COLORS.onSurface, marginBottom: 4 }}>{t.title}</div>
+                  <div style={{ fontSize: 12, color: COLORS.onSurfaceVariant }}>{t.url}</div>
+                  <button style={{ position: 'absolute', top: 4, right: 4, background: 'none', border: 'none', padding: 6, cursor: 'pointer', color: COLORS.onSurfaceVariant }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                  </button>
+                </div>
+              )) : panels.map(p => (
+                <div key={p.id} style={{ background: COLORS.cardBg, borderRadius: 12, padding: 12, position: 'relative', cursor: 'pointer' }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: COLORS.onSurface, marginBottom: 4 }}>{p.name}</div>
+                  <div style={{ fontSize: 12, color: COLORS.onSurfaceVariant }}>{p.isAggregate ? '聚合面板（系统）' : '普通面板'}</div>
+                  {!p.isAggregate && (
+                    <button style={{ position: 'absolute', top: 4, right: 4, background: 'none', border: 'none', padding: 6, cursor: 'pointer', color: COLORS.onSurfaceVariant }}>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 10: BookmarksScreen —— 1:1 还原 BookmarkScreen.kt
+    // =================================================================
+    function BookmarksScreen() {
+      const bookmarks = [
+        { id: 1, title: '百度', url: 'https://www.baidu.com', showOnHome: true },
+        { id: 2, title: '知乎', url: 'https://www.zhihu.com', showOnHome: true },
+        { id: 3, title: 'GitHub', url: 'https://github.com', showOnHome: false },
+        { id: 4, title: '微博', url: 'https://weibo.com', showOnHome: false },
+        { id: 5, title: 'YouTube', url: 'https://youtube.com', showOnHome: false },
+      ];
+      return (
+        <div style={{ width: '100%', height: '100%', background: '#fff', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'center', padding: '12px 8px 12px 4px', borderBottom: `1px solid ${COLORS.divider}` }}>
+            <button style={{ background: 'none', border: 'none', padding: 8, cursor: 'pointer', color: COLORS.onSurface }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+            <div style={{ flex: 1, fontSize: 18, fontWeight: 600, marginLeft: 8 }}>书签</div>
+            <button style={{ background: 'none', border: 'none', padding: 8, cursor: 'pointer', color: COLORS.onSurface }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
+            {bookmarks.map(b => (
+              <div key={b.id} style={{ background: COLORS.cardBg, borderRadius: 12, padding: 12, marginBottom: 6, display: 'flex', alignItems: 'center' }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill={COLORS.primary} stroke="none"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2v16z"/></svg>
+                <div style={{ flex: 1, marginLeft: 12 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: COLORS.onSurface }}>{b.title}</div>
+                  <div style={{ fontSize: 12, color: COLORS.onSurfaceVariant, marginTop: 2 }}>{b.url}</div>
+                </div>
+                {b.showOnHome && (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={COLORS.primary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1h-5v-7H9v7H4a1 1 0 01-1-1V9.5z"/></svg>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 11: HistoryScreen —— 1:1 还原 HistoryScreen.kt
+    // =================================================================
+    function HistoryScreen() {
+      const groups = [
+        { date: '今天', items: [
+          { id: 1, title: '百度一下', url: 'baidu.com', time: '14:32' },
+          { id: 2, title: 'GitHub', url: 'github.com', time: '13:18' },
+          { id: 3, title: '知乎', url: 'zhihu.com', time: '11:05' },
+        ]},
+        { date: '昨天', items: [
+          { id: 4, title: 'YouTube', url: 'youtube.com', time: '22:14' },
+          { id: 5, title: '微博', url: 'weibo.com', time: '20:48' },
+        ]},
+      ];
+      return (
+        <div style={{ width: '100%', height: '100%', background: '#fff', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'center', padding: '12px 8px 12px 4px', borderBottom: `1px solid ${COLORS.divider}` }}>
+            <button style={{ background: 'none', border: 'none', padding: 8, cursor: 'pointer', color: COLORS.onSurface }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+            <div style={{ flex: 1, fontSize: 18, fontWeight: 600, marginLeft: 8 }}>历史</div>
+            <button style={{ background: 'none', border: 'none', padding: 8, cursor: 'pointer', color: COLORS.onSurface }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+            </button>
+          </div>
+          <div style={{ padding: '8px 12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', background: COLORS.searchBg, borderRadius: 22, padding: '0 14px', height: 38 }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={COLORS.onSurfaceVariant} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+              <input placeholder="搜索历史" style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: 13, marginLeft: 8, color: COLORS.onSurface, fontFamily: 'inherit' }} />
+            </div>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {groups.map(g => (
+              <div key={g.date}>
+                <div style={{ padding: '8px 12px', fontSize: 13, fontWeight: 600, color: COLORS.primary }}>{g.date}</div>
+                {g.items.map(item => (
+                  <div key={item.id} style={{ margin: '0 8px 6px', background: COLORS.cardBg, borderRadius: 12, padding: 12, display: 'flex', alignItems: 'center' }}>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={COLORS.onSurfaceVariant} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                    <div style={{ flex: 1, marginLeft: 12 }}>
+                      <div style={{ fontSize: 14, fontWeight: 500, color: COLORS.onSurface }}>{item.title}</div>
+                      <div style={{ fontSize: 12, color: COLORS.onSurfaceVariant, marginTop: 2 }}>{item.url}</div>
+                    </div>
+                    <div style={{ fontSize: 12, color: COLORS.onSurfaceVariant }}>{item.time}</div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 12: SettingsScreen —— 1:1 还原 SettingsScreen.kt（6 分组 + 全允许模式）
+    // =================================================================
+    function SettingsScreen() {
+      const [allowAll, setAllowAll] = useState(false);
+      const [showHome, setShowHome] = useState(true);
+      const [jsEnabled, setJsEnabled] = useState(true);
+      const GroupHeader = ({ title }) => (
+        <div style={{ padding: '12px 16px 6px', fontSize: 13, fontWeight: 700, color: COLORS.primary, borderBottom: `1px solid rgba(0,0,0,0.04)` }}>{title}</div>
+      );
+      const SwitchItem = ({ title, checked, onChange, subtitle }) => (
+        <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px' }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 15, color: COLORS.onSurface }}>{title}</div>
+            {subtitle && <div style={{ fontSize: 12, color: COLORS.onSurfaceVariant, marginTop: 2 }}>{subtitle}</div>}
+          </div>
+          <button onClick={() => onChange(!checked)} style={{
+            width: 44, height: 26, borderRadius: 13, border: 'none', cursor: 'pointer',
+            background: checked ? COLORS.success : 'rgba(120,120,128,0.32)',
+            position: 'relative', transition: 'background 0.2s',
+          }}>
+            <div style={{ position: 'absolute', top: 2, left: checked ? 20 : 2, width: 22, height: 22, borderRadius: '50%', background: '#fff', boxShadow: '0 2px 4px rgba(0,0,0,0.2)', transition: 'left 0.2s' }} />
+          </button>
+        </div>
+      );
+      const ActionItem = ({ title, onClick }) => (
+        <button onClick={onClick} style={{ width: '100%', display: 'flex', alignItems: 'center', padding: '14px 16px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
+          <span style={{ flex: 1, fontSize: 15, color: COLORS.onSurface }}>{title}</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={COLORS.onSurfaceVariant} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+      );
+      return (
+        <div style={{ width: '100%', height: '100%', background: '#fff', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'center', padding: '12px 8px 12px 4px', borderBottom: `1px solid ${COLORS.divider}` }}>
+            <button style={{ background: 'none', border: 'none', padding: 8, cursor: 'pointer', color: COLORS.onSurface }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+            <div style={{ flex: 1, fontSize: 18, fontWeight: 600, marginLeft: 8 }}>设置</div>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {/* 0. AI 配置 */}
+            <GroupHeader title="AI 配置" />
+            <ActionItem title="AI 配置（Provider / API Key / 测试连接）" />
+            {/* 关键：全允许模式开关 */}
+            <SwitchItem title="全允许模式" checked={allowAll} onChange={setAllowAll}
+              subtitle={allowAll ? '开启后所有工具调用将自动执行，不再询问' : '开启后所有工具调用将自动执行，不再询问'} />
+            {allowAll && (
+              <div style={{ padding: '0 16px 12px', fontSize: 12, color: COLORS.error, fontStyle: 'italic' }}>
+                风险提示：开启后所有工具调用将自动执行，不再询问
+              </div>
+            )}
+            {/* 1. 主页定制 */}
+            <GroupHeader title="主页定制" />
+            <div style={{ padding: '12px 16px' }}>
+              <div style={{ fontSize: 15, color: COLORS.onSurface, marginBottom: 8 }}>主题色</div>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                {['#6650A4', '#0066CC', '#00897B', '#E65100', '#C62828', '#2E7D32'].map((c, i) => (
+                  <div key={c} style={{ width: 36, height: 36, borderRadius: '50%', background: c, cursor: 'pointer', border: i === 0 ? `3px solid ${COLORS.primary}` : '1px solid rgba(0,0,0,0.08)' }} />
+                ))}
+              </div>
+            </div>
+            <SwitchItem title="显示常用网站" checked={showHome} onChange={setShowHome} />
+            {/* 2. 浏览器设置 */}
+            <GroupHeader title="浏览器设置" />
+            <div style={{ padding: '12px 16px' }}>
+              <div style={{ fontSize: 15, color: COLORS.onSurface, marginBottom: 4 }}>搜索引擎</div>
+              {['百度', 'Google', 'Bing'].map((e, i) => (
+                <div key={e} style={{ display: 'flex', alignItems: 'center', padding: '4px 0' }}>
+                  <div style={{ width: 18, height: 18, borderRadius: '50%', border: `2px solid ${i === 0 ? COLORS.primary : '#C7C7CC'}`, marginRight: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {i === 0 && <div style={{ width: 8, height: 8, borderRadius: '50%', background: COLORS.primary }} />}
+                  </div>
+                  <span style={{ fontSize: 14, color: COLORS.onSurface }}>{e}</span>
+                </div>
+              ))}
+            </div>
+            <SwitchItem title="启用 JavaScript" checked={jsEnabled} onChange={setJsEnabled} />
+            {/* 3. 默认浏览器 */}
+            <GroupHeader title="默认浏览器" />
+            <ActionItem title="设为默认浏览器" />
+            {/* 4. 数据管理 */}
+            <GroupHeader title="数据管理" />
+            <ActionItem title="清除 Cookie" />
+            <ActionItem title="清除历史" />
+            <ActionItem title="清除书签" />
+            {/* 5. 调试信息 */}
+            <GroupHeader title="调试信息" />
+            <div style={{ margin: 8, padding: 16, background: 'rgba(0,0,0,0.03)', borderRadius: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+                <div style={{ width: 10, height: 10, borderRadius: '50%', background: COLORS.success, marginRight: 8 }} />
+                <span style={{ fontSize: 13, color: COLORS.onSurfaceVariant }}>WS 状态: 已连接</span>
+              </div>
+              <div style={{ fontSize: 11, color: COLORS.onSurfaceVariant, fontFamily: 'monospace', marginBottom: 4 }}>设备 ID: ab12cd34-...</div>
+              <div style={{ fontSize: 11, color: COLORS.onSurfaceVariant, fontFamily: 'monospace' }}>服务器: ws://localhost:8080</div>
+              <button style={{ marginTop: 12, padding: '8px 16px', background: 'transparent', border: `1px solid ${COLORS.divider}`, borderRadius: 8, fontSize: 13, color: COLORS.onSurface, cursor: 'pointer' }}>重新连接 WS</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 13: AiConfigScreen —— 1:1 还原 AiConfigScreen.kt
+    // =================================================================
+    function AiConfigScreen() {
+      const [provider, setProvider] = useState('stepfun');
+      const [apiKey, setApiKey] = useState('sk-••••••••••••••••');
+      const [apiKeyVisible, setApiKeyVisible] = useState(false);
+      const [endpoint, setEndpoint] = useState('https://api.stepfun.com/v1');
+      const [model, setModel] = useState('step-1-8k');
+      const [testing, setTesting] = useState(false);
+      const [testResult, setTestResult] = useState(null);
+      const [showModels, setShowModels] = useState(false);
+      const providers = [
+        { id: 'stepfun', name: 'StepFun（阶跃星辰）', endpoint: 'https://api.stepfun.com/v1', models: ['step-1-8k', 'step-2-16k'] },
+        { id: 'openai', name: 'OpenAI', endpoint: 'https://api.openai.com/v1', models: ['gpt-4o', 'gpt-4o-mini'] },
+        { id: 'deepseek', name: 'DeepSeek（深度求索）', endpoint: 'https://api.deepseek.com/v1', models: ['deepseek-chat', 'deepseek-reasoner'] },
+        { id: 'anthropic', name: 'Anthropic（Claude）', endpoint: 'https://api.anthropic.com/v1', models: ['claude-haiku-4-5', 'claude-sonnet-4-5'] },
+        { id: 'qwen', name: '通义千问（Qwen）', endpoint: 'https://dashscope.aliyuncs.com/api/v1', models: ['qwen-max', 'qwen-plus'] },
+        { id: 'custom', name: '自定义 API（兼容 OpenAI 协议）', endpoint: '', models: [] },
+      ];
+      const currentP = providers.find(p => p.id === provider);
+      const test = () => {
+        setTesting(true);
+        setTestResult(null);
+        setTimeout(() => { setTesting(false); setTestResult(true); }, 1500);
+      };
+      return (
+        <div style={{ width: '100%', height: '100%', background: '#fff', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'center', padding: '12px 8px 12px 4px', borderBottom: `1px solid ${COLORS.divider}` }}>
+            <button style={{ background: 'none', border: 'none', padding: 8, cursor: 'pointer', color: COLORS.onSurface }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            </button>
+            <div style={{ flex: 1, fontSize: 18, fontWeight: 600, marginLeft: 8 }}>AI 配置</div>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+            {/* Provider 选择（自动补全下拉） */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, color: COLORS.onSurfaceVariant, marginBottom: 6 }}>Provider</div>
+              <div style={{ position: 'relative' }}>
+                <button onClick={() => setShowModels(false)} style={{ width: '100%', display: 'flex', alignItems: 'center', padding: '12px 14px', background: '#fff', border: `1px solid ${COLORS.divider}`, borderRadius: 8, cursor: 'pointer' }}>
+                  <span style={{ flex: 1, fontSize: 14, color: COLORS.onSurface, textAlign: 'left' }}>{currentP?.name}</span>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={COLORS.onSurfaceVariant} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                </button>
+                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: `1px solid ${COLORS.divider}`, borderRadius: 8, marginTop: 2, zIndex: 10, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
+                  {providers.map(p => (
+                    <div key={p.id} onClick={() => { setProvider(p.id); setEndpoint(p.endpoint); if(p.models[0]) setModel(p.models[0]); }} style={{ padding: '10px 14px', fontSize: 13, color: p.id === provider ? COLORS.primary : COLORS.onSurface, cursor: 'pointer', fontWeight: p.id === provider ? 600 : 400, background: p.id === provider ? 'rgba(102,80,164,0.04)' : 'transparent' }}>{p.name}</div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            {/* API Key */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, color: COLORS.onSurfaceVariant, marginBottom: 6 }}>API Key</div>
+              <div style={{ display: 'flex', alignItems: 'center', background: '#fff', border: `1px solid ${COLORS.divider}`, borderRadius: 8, padding: '0 14px', height: 44 }}>
+                <input type={apiKeyVisible ? 'text' : 'password'} value={apiKey} onChange={e => setApiKey(e.target.value)} style={{ flex: 1, border: 'none', outline: 'none', fontSize: 14, color: COLORS.onSurface, fontFamily: 'inherit', background: 'transparent' }} />
+                <button onClick={() => setApiKeyVisible(!apiKeyVisible)} style={{ background: 'none', border: 'none', padding: 4, cursor: 'pointer', color: COLORS.onSurfaceVariant }}>
+                  {apiKeyVisible
+                    ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10 10 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9 9 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24M1 1l22 22"/></svg>
+                    : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}
+                </button>
+              </div>
+            </div>
+            {/* Endpoint（自动补全） */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, color: COLORS.onSurfaceVariant, marginBottom: 6 }}>Endpoint（可选，默认自动填充）</div>
+              <div style={{ display: 'flex', alignItems: 'center', background: '#fff', border: `1px solid ${COLORS.divider}`, borderRadius: 8, padding: '0 14px', height: 44 }}>
+                <input value={endpoint} onChange={e => setEndpoint(e.target.value)} style={{ flex: 1, border: 'none', outline: 'none', fontSize: 13, color: COLORS.onSurface, fontFamily: 'monospace', background: 'transparent' }} />
+              </div>
+              {/* 自动补全提示 */}
+              {providers.filter(p => p.endpoint && p.endpoint.includes(endpoint.split('//')[1]?.split('.')[0] || '')).length > 0 && endpoint !== currentP?.endpoint && (
+                <div style={{ marginTop: 4, fontSize: 11, color: COLORS.onSurfaceVariant }}>
+                  建议：{providers.find(p => p.endpoint && p.endpoint.includes(endpoint.split('//')[1]?.split('.')[0] || ''))?.endpoint}
+                </div>
+              )}
+            </div>
+            {/* Model + 获取模型列表按钮（关键） */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, color: COLORS.onSurfaceVariant, marginBottom: 6 }}>Model（可选，默认自动填充）</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', background: '#fff', border: `1px solid ${COLORS.divider}`, borderRadius: 8, padding: '0 14px', height: 44 }}>
+                  <input value={model} onChange={e => setModel(e.target.value)} style={{ flex: 1, border: 'none', outline: 'none', fontSize: 13, color: COLORS.onSurface, fontFamily: 'monospace', background: 'transparent' }} />
+                </div>
+                <button onClick={() => setShowModels(!showModels)} style={{ padding: '0 14px', background: COLORS.cardBg, border: `1px solid ${COLORS.divider}`, borderRadius: 8, fontSize: 12, color: COLORS.primary, cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: 500 }}>
+                  获取模型列表
+                </button>
+              </div>
+              {showModels && (
+                <div style={{ marginTop: 6, background: '#fff', border: `1px solid ${COLORS.divider}`, borderRadius: 8, padding: 6 }}>
+                  {currentP?.models.map(m => (
+                    <div key={m} onClick={() => { setModel(m); setShowModels(false); }} style={{ padding: '6px 10px', fontSize: 12, color: COLORS.onSurface, cursor: 'pointer', fontFamily: 'monospace' }}>{m}</div>
+                  ))}
+                  {(!currentP?.models || currentP.models.length === 0) && (
+                    <div style={{ padding: '6px 10px', fontSize: 11, color: COLORS.onSurfaceVariant }}>自定义 API：手动输入模型名</div>
+                  )}
+                </div>
+              )}
+            </div>
+            {/* 测试连接 */}
+            <button onClick={test} disabled={testing} style={{ width: '100%', height: 44, background: testing ? 'rgba(102,80,164,0.5)' : COLORS.primary, color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 500, cursor: testing ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              {testing && (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" style={{ animation: 'spin 0.8s linear infinite' }}>
+                  <path d="M21 12a9 9 0 11-6.219-8.56" />
+                </svg>
+              )}
+              <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
+              {testing ? '测试中...' : '测试连接'}
+            </button>
+            {testResult !== null && (
+              <div style={{ marginTop: 8, fontSize: 13, color: testResult ? COLORS.success : COLORS.error }}>
+                {testResult ? '连接成功' : '连接失败'}
+              </div>
+            )}
+            {/* 保存按钮 */}
+            <button style={{ width: '100%', height: 44, background: '#fff', color: COLORS.primary, border: `1px solid ${COLORS.primary}`, borderRadius: 8, fontSize: 14, fontWeight: 500, cursor: 'pointer', marginTop: 12 }}>保存</button>
+            {/* Skills 管理（M8） */}
+            <div style={{ marginTop: 24 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.onSurface, marginBottom: 8 }}>Skills 管理</div>
+              {['网页摘要', '代码生成', '番茄钟控制'].map(s => (
+                <div key={s} style={{ display: 'flex', alignItems: 'center', padding: '10px 12px', background: COLORS.cardBg, borderRadius: 8, marginBottom: 4 }}>
+                  <span style={{ flex: 1, fontSize: 13, color: COLORS.onSurface }}>{s}</span>
+                  <span style={{ fontSize: 11, color: COLORS.success }}>已启用</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 14: AgentModeSwitcher 单独展示（CLOUD/LOCAL/AUTO + 滑块）
+    // =================================================================
+    function AgentModeSwitcherScreen() {
+      const [mode, setMode] = useState('LOCAL');
+      const [level, setLevel] = useState(2);
+      const levels = ['快速', '平衡', '深度', '极深度'];
+      return (
+        <div style={{ width: '100%', height: '100%', background: '#fff', padding: 24, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          <div style={{ fontSize: 18, fontWeight: 600, color: COLORS.onSurface, marginBottom: 4 }}>Agent 模式与思考等级</div>
+          <div style={{ fontSize: 12, color: COLORS.onSurfaceVariant, marginBottom: 24 }}>Spec 6.11.1 · M8 已实现</div>
+
+          {/* 模式切换 SegmentedButton */}
+          <div style={{ fontSize: 12, color: COLORS.onSurfaceVariant, marginBottom: 6 }}>运行时模式</div>
+          <div style={{ display: 'flex', background: COLORS.cardBg, borderRadius: 10, padding: 3, marginBottom: 24 }}>
+            {['CLOUD', 'AUTO', 'LOCAL'].map(m => (
+              <button key={m} onClick={() => setMode(m)} style={{
+                flex: 1, padding: '8px 0', background: mode === m ? '#fff' : 'transparent',
+                border: 'none', borderRadius: 8, fontSize: 12, fontWeight: mode === m ? 600 : 500,
+                color: mode === m ? COLORS.onSurface : COLORS.onSurfaceVariant,
+                cursor: 'pointer', boxShadow: mode === m ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                transition: 'all 0.2s',
+              }}>{m}</button>
+            ))}
+          </div>
+          {mode === 'CLOUD' && (
+            <div style={{ fontSize: 11, color: COLORS.error, marginBottom: 12, fontStyle: 'italic' }}>（云端未实现）</div>
+          )}
+
+          {/* 思考等级滑块（关键：滑块，不是按钮组） */}
+          <div style={{ fontSize: 12, color: COLORS.onSurfaceVariant, marginBottom: 12 }}>思考等级</div>
+          <input type="range" min="0" max="3" step="1" value={level} onChange={e => setLevel(parseInt(e.target.value))} className="thinking-slider thinking-slider-thumb" />
+          <div className="slider-ticks">
+            {levels.map((l, i) => (
+              <span key={l} className={`slider-tick ${i === level ? 'active' : ''}`}>{l}</span>
+            ))}
+          </div>
+          <div style={{ marginTop: 24, padding: 12, background: COLORS.cardBg, borderRadius: 10, fontSize: 12, color: COLORS.onSurfaceVariant, lineHeight: 1.6 }}>
+            <div style={{ fontWeight: 600, color: COLORS.onSurface, marginBottom: 4 }}>当前选择</div>
+            模式：{mode} · 思考等级：{levels[level]}（{level + 1}/4）<br/>
+            参考 operit：水平 track + 4 个 tick + thumb 居中于当前档位，cubic-bezier(0.4, 0, 0.2, 1) 过渡动画
+          </div>
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 15: AskUserDialog（120s 超时选项框）—— 1:1 还原 AskUserDialog.kt
+    // =================================================================
+    function AskUserDialogScreen() {
+      const [remaining, setRemaining] = useState(120);
+      useEffect(() => {
+        const t = setInterval(() => setRemaining(r => Math.max(0, r - 1)), 1000);
+        return () => clearInterval(t);
+      }, []);
+      return (
+        <div style={{ width: '100%', height: '100%', background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 20, width: '100%', maxWidth: 340 }}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: COLORS.onSurface, marginBottom: 4 }}>你想让我做什么？</div>
+            <div style={{ fontSize: 11, color: COLORS.onSurfaceVariant, marginBottom: 12 }}>120s 超时 · 剩余 {remaining}s</div>
+            {/* 超时进度条 */}
+            <div style={{ width: '100%', height: 2, background: 'rgba(0,0,0,0.06)', borderRadius: 1, marginBottom: 16 }}>
+              <div style={{ width: `${(remaining / 120) * 100}%`, height: '100%', background: COLORS.primary, borderRadius: 1, transition: 'width 1s linear' }} />
+            </div>
+            {/* 单选选项 */}
+            {[
+              { label: '打开百度搜索', desc: '在浏览器中打开 baidu.com' },
+              { label: '提取页面新闻', desc: '分析当前页面内容并整理新闻' },
+              { label: '翻译为英文', desc: '将页面文本翻译为英文' },
+            ].map((opt, i) => (
+              <button key={i} style={{ width: '100%', textAlign: 'left', padding: '12px 14px', background: COLORS.cardBg, border: 'none', borderRadius: 10, marginBottom: 6, cursor: 'pointer' }}>
+                <div style={{ fontSize: 14, color: COLORS.onSurface, fontWeight: 500 }}>{opt.label}</div>
+                <div style={{ fontSize: 11, color: COLORS.onSurfaceVariant, marginTop: 2 }}>{opt.desc}</div>
+              </button>
+            ))}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12, gap: 8 }}>
+              <button style={{ padding: '8px 16px', background: 'none', border: 'none', color: COLORS.primary, fontSize: 14, cursor: 'pointer' }}>取消</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 16: PermissionCard（橙色普通 + 红色危险 + 白名单按钮）
+    // =================================================================
+    function PermissionCardScreen() {
+      return (
+        <div style={{ width: '100%', height: '100%', background: '#F5F5F7', padding: 24, display: 'flex', flexDirection: 'column', gap: 16, justifyContent: 'center' }}>
+          {/* 橙色普通权限 */}
+          <div style={{ background: '#fff', borderRadius: 12, padding: 14, borderLeft: '4px solid #FF9500', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+              <div style={{ width: 24, height: 24, borderRadius: 6, background: 'rgba(255,149,0,0.12)', color: '#FF9500', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 8, fontSize: 14, fontWeight: 700 }}>!</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: COLORS.onSurface }}>权限请求</div>
+            </div>
+            <div style={{ fontSize: 13, color: COLORS.onSurface, marginBottom: 4 }}>AI 想要打开网页</div>
+            <div style={{ fontSize: 12, color: COLORS.onSurfaceVariant, marginBottom: 10, fontFamily: 'monospace' }}>browser_navigate({`{url: "baidu.com"}`})</div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button style={{ padding: '6px 14px', background: COLORS.primary, color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>允许</button>
+              <button style={{ padding: '6px 14px', background: 'transparent', color: COLORS.onSurface, border: `1px solid ${COLORS.divider}`, borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>拒绝</button>
+              <button className="whitelist-btn" style={{ marginLeft: 'auto' }}>添加到白名单</button>
+            </div>
+          </div>
+
+          {/* 红色危险操作 */}
+          <div style={{ background: '#fff', borderRadius: 12, padding: 14, borderLeft: '4px solid #FF3B30', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+              <div style={{ width: 24, height: 24, borderRadius: 6, background: 'rgba(255,59,48,0.12)', color: '#FF3B30', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 8, fontSize: 14, fontWeight: 700 }}>!</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#FF3B30' }}>危险操作</div>
+            </div>
+            <div style={{ fontSize: 13, color: COLORS.onSurface, marginBottom: 4 }}>AI 想要写入文件</div>
+            <div style={{ fontSize: 12, color: COLORS.onSurfaceVariant, marginBottom: 10, fontFamily: 'monospace' }}>storage_write({`{path: "/data/note.txt"}`})</div>
+            <div style={{ fontSize: 11, color: COLORS.error, marginBottom: 10, fontStyle: 'italic' }}>此操作将修改本地文件系统，不可撤销</div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button style={{ padding: '6px 14px', background: '#FF3B30', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>允许</button>
+              <button style={{ padding: '6px 14px', background: 'transparent', color: COLORS.onSurface, border: `1px solid ${COLORS.divider}`, borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>拒绝</button>
+              <button className="whitelist-btn" style={{ marginLeft: 'auto' }}>添加到白名单</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 17-19: M9 发布 / M10 自动化测试 / M11 AI 搜索（替换原缺设计占位）
+    // =================================================================
+    function ReleaseScreen() {
+      const [variant, setVariant] = useState('RELEASE_AAB');
+      const [channel, setChannel] = useState('store');
+      const building = true;
+      const progress = 67;
+
+      const variants = [
+        { id: 'DEBUG_APK', name: 'Debug APK', desc: '调试包 · 不签名' },
+        { id: 'RELEASE_APK', name: 'Release APK', desc: '签名 APK · 直接安装' },
+        { id: 'RELEASE_AAB', name: 'Release AAB', desc: '签名 AAB · 应用商店' },
+        { id: 'RELEASE_SPLIT', name: 'Split APKs', desc: '按 ABI 分包' },
+      ];
+      const channels = [
+        { id: 'local', name: '本地安装' },
+        { id: 'store', name: '应用商店' },
+        { id: 'beta', name: '内测分发' },
+      ];
+      const versions = [
+        { code: 8, name: '0.4.0-m8', date: '2026-06-27', size: '2.27 MB', current: true },
+        { code: 7, name: '0.3.0-m5', date: '2026-05-14', size: '2.19 MB', current: false },
+        { code: 6, name: '0.2.0-m2', date: '2026-04-02', size: '19.64 MB', current: false },
+      ];
+      const logs = [
+        { t: '14:32:01', lvl: 'INFO', msg: '> Task :app:preBuild UP-TO-DATE' },
+        { t: '14:32:03', lvl: 'INFO', msg: '> Task :app:compileReleaseKotlin' },
+        { t: '14:32:18', lvl: 'WARN', msg: 'kotlin compiler: 3 warnings' },
+        { t: '14:32:21', lvl: 'INFO', msg: '> Task :app:minifyReleaseWithR8' },
+        { t: '14:32:34', lvl: 'ERROR', msg: 'unused resource: res/drawable/old_logo.webp' },
+      ];
+
+      const SectionLabel = ({ text, hint }) => (
+        <div style={{ padding: '14px 16px 6px', fontSize: 12, fontWeight: 700, color: COLORS.primary, letterSpacing: '0.02em' }}>
+          {text}{hint && <span style={{ fontSize: 10, color: COLORS.onSurfaceVariant, fontWeight: 400, marginLeft: 6 }}>{hint}</span>}
+        </div>
+      );
+      const FieldLabel = ({ text }) => (
+        <div style={{ fontSize: 11, color: COLORS.onSurfaceVariant, marginBottom: 5, marginTop: 8 }}>{text}</div>
+      );
+      const inputStyle = {
+        width: '100%', height: 38, background: COLORS.cardBg, border: 'none', borderRadius: 8,
+        padding: '0 12px', fontSize: 12, color: COLORS.onSurface, fontFamily: 'monospace', outline: 'none',
+      };
+
+      return (
+        <div style={{ width: '100%', height: '100%', background: '#fff', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'center', padding: '12px 8px 12px 4px', borderBottom: `1px solid ${COLORS.divider}` }}>
+            <button style={{ background: 'none', border: 'none', padding: 8, cursor: 'pointer', color: COLORS.onSurface }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            </button>
+            <div style={{ flex: 1, fontSize: 18, fontWeight: 600, marginLeft: 8 }}>发布配置</div>
+            <div style={{ fontSize: 10, color: COLORS.onSurfaceVariant, fontStyle: 'italic' }}>M9 · CANVAS</div>
+          </div>
+
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {/* 应用信息 */}
+            <div style={{ padding: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <div style={{ width: 60, height: 60, borderRadius: 14, background: COLORS.primary, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 26, fontWeight: 600, boxShadow: '0 4px 12px rgba(102,80,164,0.25)' }}>L</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 16, fontWeight: 600, color: COLORS.onSurface }}>Living Dashboard</div>
+                  <div style={{ fontSize: 11, color: COLORS.onSurfaceVariant, marginTop: 3, fontFamily: 'monospace' }}>com.livingdashboard</div>
+                  <div style={{ fontSize: 11, color: COLORS.onSurfaceVariant, marginTop: 2 }}>v0.4.0-m8 · versionCode 8</div>
+                </div>
+              </div>
+            </div>
+
+            {/* 签名配置 */}
+            <SectionLabel text="签名配置" hint="release keystore" />
+            <div style={{ padding: '0 16px 4px' }}>
+              <FieldLabel text="Keystore 路径" />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', background: COLORS.cardBg, borderRadius: 8, padding: '0 12px', height: 38, fontSize: 11, color: COLORS.onSurfaceVariant, fontFamily: 'monospace', overflow: 'hidden', whiteSpace: 'nowrap' }}>F:/allmylife/keystores/living-dashboard.jks</div>
+                <button style={{ padding: '0 12px', background: COLORS.cardBg, border: 'none', borderRadius: 8, fontSize: 12, color: COLORS.primary, cursor: 'pointer', fontWeight: 500, height: 38 }}>选择</button>
+              </div>
+              <FieldLabel text="Keystore 密码" />
+              <input type="password" value="••••••••" readOnly style={inputStyle} />
+              <FieldLabel text="Key 别名" />
+              <input value="living-dashboard" readOnly style={inputStyle} />
+            </div>
+
+            {/* 构建变体 */}
+            <SectionLabel text="构建变体" hint="2x2 网格" />
+            <div style={{ padding: '0 16px 4px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              {variants.map(v => (
+                <button key={v.id} onClick={() => setVariant(v.id)} style={{
+                  padding: 10, background: variant === v.id ? 'rgba(102,80,164,0.06)' : COLORS.cardBg,
+                  border: 'none', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+                }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: variant === v.id ? COLORS.primary : COLORS.onSurface }}>{v.name}</div>
+                  <div style={{ fontSize: 10, color: COLORS.onSurfaceVariant, marginTop: 2 }}>{v.desc}</div>
+                </button>
+              ))}
+            </div>
+
+            {/* 发布渠道 */}
+            <SectionLabel text="发布渠道" />
+            <div style={{ padding: '0 16px 4px', display: 'flex', gap: 8 }}>
+              {channels.map(c => (
+                <button key={c.id} onClick={() => setChannel(c.id)} style={{
+                  flex: 1, padding: '8px 0', background: channel === c.id ? COLORS.primary : COLORS.cardBg,
+                  color: channel === c.id ? '#fff' : COLORS.onSurface, border: 'none', borderRadius: 18, cursor: 'pointer',
+                  fontSize: 12, fontWeight: 500,
+                }}>{c.name}</button>
+              ))}
+            </div>
+
+            {/* 构建日志 */}
+            <SectionLabel text="构建日志" hint="实时输出" />
+            <div style={{ padding: '0 16px 4px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <div style={{ flex: 1, height: 4, background: 'rgba(0,0,0,0.06)', borderRadius: 2, overflow: 'hidden' }}>
+                  <div style={{ width: `${progress}%`, height: '100%', background: COLORS.primary, borderRadius: 2 }} />
+                </div>
+                <span style={{ fontSize: 11, color: COLORS.primary, fontWeight: 600 }}>{progress}%</span>
+              </div>
+              <div style={{ background: '#1a1a1a', borderRadius: 10, padding: 10, fontFamily: 'monospace', fontSize: 10, color: '#ddd', maxHeight: 120, overflowY: 'auto' }}>
+                {logs.map((l, i) => (
+                  <div key={i} style={{ lineHeight: 1.55, display: 'flex', gap: 6 }}>
+                    <span style={{ color: '#888', flexShrink: 0 }}>{l.t}</span>
+                    <span style={{ color: l.lvl === 'ERROR' ? '#FF6B6B' : l.lvl === 'WARN' ? '#FFD93D' : '#7FD8FF', flexShrink: 0, width: 36 }}>{l.lvl}</span>
+                    <span style={{ color: l.lvl === 'ERROR' ? '#FF9B9B' : '#ddd' }}>{l.msg}</span>
+                  </div>
+                ))}
+                <div style={{ color: '#7FD8FF' }}>▌</div>
+              </div>
+              <div style={{ marginTop: 6, fontSize: 10, color: COLORS.warning, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <span>1 个未使用资源警告 · 不阻塞构建</span>
+              </div>
+            </div>
+
+            {/* 版本历史 */}
+            <SectionLabel text="版本历史" hint="可回滚" />
+            <div style={{ padding: '0 16px 4px' }}>
+              {versions.map(v => (
+                <div key={v.code} style={{ display: 'flex', alignItems: 'center', padding: '9px 12px', background: COLORS.cardBg, borderRadius: 10, marginBottom: 5 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: COLORS.onSurface, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span>v{v.name}</span>
+                      <span style={{ fontSize: 10, color: COLORS.onSurfaceVariant, fontWeight: 400 }}>code {v.code}</span>
+                      {v.current && <span style={{ fontSize: 9, color: COLORS.success, background: 'rgba(52,199,89,0.12)', padding: '1px 5px', borderRadius: 3, fontWeight: 600 }}>当前</span>}
+                    </div>
+                    <div style={{ fontSize: 10, color: COLORS.onSurfaceVariant, marginTop: 2 }}>{v.date} · {v.size}</div>
+                  </div>
+                  {!v.current && (
+                    <button style={{ padding: '4px 10px', background: 'transparent', border: `1px solid ${COLORS.divider}`, borderRadius: 6, fontSize: 11, color: COLORS.onSurface, cursor: 'pointer' }}>回滚</button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Build button */}
+            <div style={{ padding: '12px 16px 16px' }}>
+              <button style={{ width: '100%', height: 44, background: building ? 'rgba(102,80,164,0.5)' : COLORS.primary, color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 500, cursor: building ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                {building ? (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" style={{ animation: 'spin 0.8s linear infinite' }}>
+                    <path d="M21 12a9 9 0 11-6.219-8.56" />
+                  </svg>
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                )}
+                <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
+                {building ? `构建中 · ${progress}%` : '开始构建'}
+              </button>
+              <div style={{ fontSize: 10, color: COLORS.onSurfaceVariant, textAlign: 'center', marginTop: 8, fontStyle: 'italic' }}>构建完成后切回画布 · CANVAS 模式</div>
+            </div>
+          </div>
+
+          <BottomBar mode="CANVAS" tabCount={3} />
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 18: AutoTestScreen —— M10 AI 自动化测试（AI 生成 + 报告 + 当前运行 + 用例列表 + 设置）
+    // roadmap M10：补齐移动端 AI 相关模块测试覆盖 · 底部栏 CANVAS 模式
+    // =================================================================
+    function AutoTestScreen() {
+      const [generating, setGenerating] = useState(false);
+      const [genDesc, setGenDesc] = useState('');
+      const [activeSuite, setActiveSuite] = useState('LlmClient');
+
+      const suites = [
+        { id: 'WsClient', name: 'WsClient', total: 12, pass: 12 },
+        { id: 'LlmClient', name: 'LlmClient', total: 23, pass: 21 },
+        { id: 'AgentLoop', name: 'AgentLoop', total: 10, pass: 10 },
+        { id: 'Tools', name: 'Tools', total: 30, pass: 28 },
+      ];
+      const cases = [
+        { id: 1, name: 'sse_parse_data_prefix', status: 'pass', time: '0.18s', lastRun: '14:32' },
+        { id: 2, name: 'sse_parse_done_terminator', status: 'pass', time: '0.12s', lastRun: '14:32' },
+        { id: 3, name: 'tool_calls_extraction', status: 'running', time: '—', lastRun: '运行中' },
+        { id: 4, name: 'anthropic_provider_compat', status: 'fail', time: '2.14s', lastRun: '14:31', err: 'AssertionError: expected 200 got 401' },
+        { id: 5, name: 'qwen_thinking_field', status: 'pending', time: '—', lastRun: '排队中' },
+        { id: 6, name: 'stream_cancel_propagation', status: 'pass', time: '0.31s', lastRun: '14:30' },
+      ];
+      const passRate = 87.5;
+      const coverage = 72;
+
+      const SectionLabel = ({ text, hint }) => (
+        <div style={{ padding: '14px 16px 6px', fontSize: 12, fontWeight: 700, color: COLORS.primary, letterSpacing: '0.02em' }}>
+          {text}{hint && <span style={{ fontSize: 10, color: COLORS.onSurfaceVariant, fontWeight: 400, marginLeft: 6 }}>{hint}</span>}
+        </div>
+      );
+      const StatusIcon = ({ s }) => {
+        if (s === 'pass') return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={COLORS.success} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>;
+        if (s === 'fail') return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={COLORS.error} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
+        if (s === 'running') return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={COLORS.aiAccent} strokeWidth="2.6" strokeLinecap="round" style={{ animation: 'spin 0.8s linear infinite' }}><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>;
+        return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={COLORS.onSurfaceVariant} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/></svg>;
+      };
+
+      return (
+        <div style={{ width: '100%', height: '100%', background: '#fff', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'center', padding: '12px 8px 12px 4px', borderBottom: `1px solid ${COLORS.divider}` }}>
+            <button style={{ background: 'none', border: 'none', padding: 8, cursor: 'pointer', color: COLORS.onSurface }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            </button>
+            <div style={{ flex: 1, fontSize: 18, fontWeight: 600, marginLeft: 8 }}>自动化测试</div>
+            <div style={{ fontSize: 10, color: COLORS.onSurfaceVariant, fontStyle: 'italic' }}>M10 · CANVAS</div>
+          </div>
+
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
+
+            {/* AI 生成测试 */}
+            <div style={{ margin: 12, padding: 12, background: 'rgba(74,144,226,0.06)', borderRadius: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={COLORS.aiAccent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 013 3c0 1.5-1 2-1 3 0 2 2 3 2 3v2H8v-2s2-1 2-3c0-1-1-1.5-1-3a3 3 0 013-3z"/><path d="M9 17h6"/></svg>
+                <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.aiAccent }}>让 AI 生成测试用例</span>
+              </div>
+              <input value={genDesc} onChange={e => setGenDesc(e.target.value)} placeholder="描述被测功能，如：测试 WsClient 重连退避策略" style={{ width: '100%', height: 36, background: '#fff', border: 'none', borderRadius: 8, padding: '0 10px', fontSize: 12, color: COLORS.onSurface, outline: 'none', fontFamily: 'inherit' }} />
+              <button onClick={() => setGenerating(true)} style={{ width: '100%', height: 36, background: COLORS.aiAccent, color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: 'pointer', marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                {generating ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" style={{ animation: 'spin 0.8s linear infinite' }}><path d="M21 12a9 9 0 11-6.219-8.56"/></svg> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 013 3c0 1.5-1 2-1 3 0 2 2 3 2 3v2H8v-2s2-1 2-3c0-1-1-1.5-1-3a3 3 0 013-3z"/><path d="M9 17h6"/></svg>}
+                {generating ? 'AI 生成中...' : '生成测试用例'}
+              </button>
+            </div>
+
+            {/* 报告概览 */}
+            <SectionLabel text="报告概览" hint="最近一次" />
+            <div style={{ padding: '0 16px 4px' }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ flex: 1, background: COLORS.cardBg, borderRadius: 10, padding: 10 }}>
+                  <div style={{ fontSize: 10, color: COLORS.onSurfaceVariant }}>通过率</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: COLORS.success, marginTop: 2 }}>{passRate}%</div>
+                  <div style={{ fontSize: 9, color: COLORS.onSurfaceVariant, marginTop: 2 }}>71/81 用例</div>
+                </div>
+                <div style={{ flex: 1, background: COLORS.cardBg, borderRadius: 10, padding: 10 }}>
+                  <div style={{ fontSize: 10, color: COLORS.onSurfaceVariant }}>覆盖率</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: COLORS.primary, marginTop: 2 }}>{coverage}%</div>
+                  <div style={{ fontSize: 9, color: COLORS.onSurfaceVariant, marginTop: 2 }}>核心 AI 模块</div>
+                </div>
+                <div style={{ flex: 1, background: COLORS.cardBg, borderRadius: 10, padding: 10 }}>
+                  <div style={{ fontSize: 10, color: COLORS.onSurfaceVariant }}>趋势</div>
+                  <svg width="100%" height="26" viewBox="0 0 80 26" style={{ marginTop: 2 }}>
+                    <polyline points="0,18 13,14 26,16 40,10 53,12 66,6 80,8" fill="none" stroke={COLORS.success} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                    <circle cx="80" cy="8" r="2.5" fill={COLORS.success}/>
+                  </svg>
+                </div>
+              </div>
+              <div style={{ marginTop: 6, fontSize: 10, color: COLORS.error, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <span>失败原因：Anthropic provider 返回 401（API Key 失效）</span>
+              </div>
+            </div>
+
+            {/* 当前运行 */}
+            <SectionLabel text="当前运行" hint="实时日志 + 截图对比" />
+            <div style={{ padding: '0 16px 4px' }}>
+              <div style={{ background: 'rgba(74,144,226,0.06)', borderRadius: 10, padding: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <StatusIcon s="running" />
+                  <span style={{ fontSize: 12, fontWeight: 500, color: COLORS.onSurface, flex: 1, fontFamily: 'monospace' }}>LlmClient.tool_calls_extraction</span>
+                  <span style={{ fontSize: 10, color: COLORS.aiAccent }}>运行中</span>
+                </div>
+                <div className="tool-flow-bar" style={{ marginBottom: 8 }} />
+                {/* 截图对比 */}
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 9, color: COLORS.onSurfaceVariant, marginBottom: 3 }}>期望</div>
+                    <div style={{ height: 50, background: '#f0f0f5', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: COLORS.onSurfaceVariant }}>expected.png</div>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 9, color: COLORS.onSurfaceVariant, marginBottom: 3 }}>实际</div>
+                    <div style={{ height: 50, background: '#f0f0f5', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: COLORS.onSurfaceVariant }}>actual.png</div>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 9, color: COLORS.onSurfaceVariant, marginBottom: 3 }}>Diff</div>
+                    <div style={{ height: 50, background: '#fff', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: COLORS.success, fontWeight: 600 }}>0.0%</div>
+                  </div>
+                </div>
+                <div style={{ marginTop: 6, background: '#1a1a1a', borderRadius: 6, padding: 6, fontFamily: 'monospace', fontSize: 9, color: '#7FD8FF' }}>
+                  ▌ streaming SSE chunk #14 · tool_calls[0].function.name="browser_open"
+                </div>
+              </div>
+            </div>
+
+            {/* 测试套件 + 用例列表 */}
+            <SectionLabel text="测试套件" hint="点击切换" />
+            <div style={{ padding: '0 16px 4px', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {suites.map(s => (
+                <button key={s.id} onClick={() => setActiveSuite(s.id)} style={{
+                  padding: '5px 10px', background: activeSuite === s.id ? COLORS.primary : COLORS.cardBg,
+                  color: activeSuite === s.id ? '#fff' : COLORS.onSurface, border: 'none', borderRadius: 14, cursor: 'pointer',
+                  fontSize: 11, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4,
+                }}>
+                  {s.name}<span style={{ fontSize: 9, opacity: 0.8 }}>{s.pass}/{s.total}</span>
+                </button>
+              ))}
+            </div>
+            <div style={{ padding: '4px 16px 4px' }}>
+              {cases.map(c => (
+                <div key={c.id} style={{ display: 'flex', alignItems: 'center', padding: '9px 10px', background: COLORS.cardBg, borderRadius: 10, marginBottom: 4, boxShadow: c.status === 'running' ? '0 0 0 1.5px rgba(74,144,226,0.4)' : 'none' }}>
+                  <StatusIcon s={c.status} />
+                  <div style={{ flex: 1, marginLeft: 8 }}>
+                    <div style={{ fontSize: 12, color: COLORS.onSurface, fontFamily: 'monospace' }}>{c.name}</div>
+                    {c.err && <div style={{ fontSize: 10, color: COLORS.error, marginTop: 2 }}>{c.err}</div>}
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 10, color: COLORS.onSurfaceVariant }}>{c.time}</div>
+                    <div style={{ fontSize: 9, color: COLORS.onSurfaceVariant, marginTop: 1 }}>{c.lastRun}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* 设置 */}
+            <SectionLabel text="运行设置" />
+            <div style={{ padding: '0 16px 4px' }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ flex: 1, background: COLORS.cardBg, borderRadius: 8, padding: 8 }}>
+                  <div style={{ fontSize: 10, color: COLORS.onSurfaceVariant }}>并发数</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: COLORS.onSurface }}>4</div>
+                </div>
+                <div style={{ flex: 1, background: COLORS.cardBg, borderRadius: 8, padding: 8 }}>
+                  <div style={{ fontSize: 10, color: COLORS.onSurfaceVariant }}>超时</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: COLORS.onSurface }}>30s</div>
+                </div>
+                <div style={{ flex: 1, background: COLORS.cardBg, borderRadius: 8, padding: 8 }}>
+                  <div style={{ fontSize: 10, color: COLORS.onSurfaceVariant }}>重试</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: COLORS.onSurface }}>2 次</div>
+                </div>
+              </div>
+            </div>
+            <div style={{ height: 12 }} />
+          </div>
+
+          <BottomBar mode="CANVAS" tabCount={3} />
+        </div>
+      );
+    }
+
+    // =================================================================
+    // Screen 19: AISearchScreen —— M11 AI 搜索（搜索框 + 模式三档 + AI 总结 + 网页结果 + 追问 + 历史）
+    // roadmap M11：local_search 客户端 + web/academic/github UI 集成 · 底部栏 BROWSER 模式
+    // =================================================================
+    function AISearchScreen() {
+      const [mode, setMode] = useState('ai');
+      const [query, setQuery] = useState('Living Dashboard 是什么');
+
+      const modes = [
+        { id: 'normal', name: '普通搜索' },
+        { id: 'ai', name: 'AI 搜索' },
+        { id: 'deep', name: '深度研究' },
+      ];
+      const results = [
+        { id: 1, title: 'Living Dashboard · GitHub', url: 'github.com/living-dashboard/living-dashboard', snippet: 'Living Dashboard 是一个浏览器 + 无限画布 + AI 的桌面端应用，移动端为安卓 AI 浏览器客户端。', score: 0.98 },
+        { id: 2, title: 'Living Dashboard 移动端 Roadmap v1', url: 'github.com/.../roadmap_mobile_v1.md', snippet: '形态上是"浏览器 + 无限画布 + AI"，功能用途上是日常 AI 助手。两种主页 + 分层画布 + 多端互通。', score: 0.94 },
+        { id: 3, title: 'Living Dashboard 架构重构文档', url: 'github.com/.../architecture_refactor.md', snippet: 'Pi Agent 在服务器端运行，多端连接共享上下文。移动端通过 WS 连服务器，按面板路由工具调用。', score: 0.89 },
+        { id: 4, title: 'Living Dashboard 桌面端组件列表', url: 'github.com/.../components/widgets', snippet: '9 个 React/TS 组件：AIAssistant / Calculator / FocusTimer / HtmlCanvasWidget / LatexQuiz / MusicPlayer / PdfViewer / Sudoku / WebviewWidget。', score: 0.82 },
+      ];
+      const followUps = ['Living Dashboard 怎么用？', '如何安装 Living Dashboard？', '支持哪些 AI provider？', '移动端和桌面端数据互通吗？'];
+      const history = [
+        { q: 'Living Dashboard 是什么', time: '刚刚' },
+        { q: 'Jetpack Compose 分层画布', time: '今天 13:24' },
+        { q: 'OpenAI SSE 流式解析', time: '昨天 22:15' },
+      ];
+
+      const SectionLabel = ({ text, action }) => (
+        <div style={{ padding: '14px 12px 4px', display: 'flex', alignItems: 'center' }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.primary, flex: 1 }}>{text}</span>
+          {action}
+        </div>
+      );
+
+      return (
+        <div style={{ width: '100%', height: '100%', background: '#fff', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'center', padding: '10px 8px 10px 4px', borderBottom: `1px solid ${COLORS.divider}` }}>
+            <button style={{ background: 'none', border: 'none', padding: 8, cursor: 'pointer', color: COLORS.onSurface }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            </button>
+            <div style={{ flex: 1, fontSize: 18, fontWeight: 600, marginLeft: 8 }}>AI 搜索</div>
+            <div style={{ fontSize: 10, color: COLORS.onSurfaceVariant, fontStyle: 'italic' }}>M11 · BROWSER</div>
+          </div>
+
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {/* 搜索框 + 模式 */}
+            <div style={{ padding: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', background: COLORS.searchBg, borderRadius: 22, padding: '0 14px', height: 42 }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={COLORS.onSurfaceVariant} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+                <input value={query} onChange={e => setQuery(e.target.value)} style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: 14, marginLeft: 8, color: COLORS.onSurface, fontFamily: 'inherit' }} />
+                <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: mode === 'ai' ? COLORS.aiAccent : COLORS.onSurfaceVariant, background: mode === 'ai' ? 'rgba(74,144,226,0.1)' : 'transparent', padding: '3px 8px', borderRadius: 10, fontWeight: 500 }}>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 013 3c0 1.5-1 2-1 3 0 2 2 3 2 3v2H8v-2s2-1 2-3c0-1-1-1.5-1-3a3 3 0 013-3z"/><path d="M9 17h6"/></svg>
+                  AI
+                </span>
+              </div>
+              {/* 模式切换三档 */}
+              <div style={{ display: 'flex', background: COLORS.cardBg, borderRadius: 10, padding: 3, marginTop: 10 }}>
+                {modes.map(m => (
+                  <button key={m.id} onClick={() => setMode(m.id)} style={{
+                    flex: 1, padding: '6px 0', background: mode === m.id ? '#fff' : 'transparent',
+                    border: 'none', borderRadius: 8, fontSize: 11, fontWeight: mode === m.id ? 600 : 500,
+                    color: mode === m.id ? COLORS.onSurface : COLORS.onSurfaceVariant,
+                    cursor: 'pointer', boxShadow: mode === m.id ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                  }}>{m.name}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* AI 总结答案 */}
+            <div style={{ padding: '0 12px' }}>
+              <div style={{ background: 'rgba(74,144,226,0.06)', borderRadius: 14, padding: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={COLORS.aiAccent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 013 3c0 1.5-1 2-1 3 0 2 2 3 2 3v2H8v-2s2-1 2-3c0-1-1-1.5-1-3a3 3 0 013-3z"/><path d="M9 17h6"/></svg>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.aiAccent }}>AI 总结</span>
+                  <span style={{ fontSize: 10, color: COLORS.onSurfaceVariant, marginLeft: 'auto' }}>2.4s · step-1-8k</span>
+                </div>
+                <div style={{ fontSize: 13, color: COLORS.onSurface, lineHeight: 1.6 }}>
+                  <b>Living Dashboard</b> 是一款<b>浏览器 + 无限画布 + AI</b> 三合一的应用<sup style={{ color: COLORS.aiAccent, fontSize: 10, margin: '0 2px' }}>[1]</sup>。桌面端基于 Electron + React + TypeScript，移动端为安卓 AI 浏览器客户端（Kotlin + Jetpack Compose + WebView）<sup style={{ color: COLORS.aiAccent, fontSize: 10, margin: '0 2px' }}>[2]</sup>。其核心特性包括两种主页（浏览器主页 + 画布主页）、分层画布（双指缩放）、AI 助手（每面板独立）、油猴脚本兼容、多端数据互通<sup style={{ color: COLORS.aiAccent, fontSize: 10, margin: '0 2px' }}>[1][3]</sup>。
+                </div>
+                {/* 引用来源 */}
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(74,144,226,0.15)' }}>
+                  <div style={{ fontSize: 10, color: COLORS.onSurfaceVariant, marginBottom: 6 }}>引用来源</div>
+                  {[1,2,3].map(n => {
+                    const r = results.find(r => r.id === n);
+                    return (
+                      <div key={n} style={{ display: 'flex', gap: 6, fontSize: 10, color: COLORS.onSurfaceVariant, marginBottom: 3 }}>
+                        <span style={{ color: COLORS.aiAccent, fontWeight: 600 }}>[{n}]</span>
+                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.url}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* 相关网页 */}
+            <SectionLabel text="相关网页" />
+            <div style={{ padding: '0 12px' }}>
+              {results.map(r => (
+                <div key={r.id} style={{ padding: '10px 12px', background: COLORS.cardBg, borderRadius: 10, marginBottom: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.onSurface, flex: 1 }}>{r.title}</span>
+                    <span style={{ fontSize: 10, color: r.score >= 0.95 ? COLORS.success : r.score >= 0.85 ? COLORS.primary : COLORS.onSurfaceVariant, fontWeight: 600, background: 'rgba(0,0,0,0.04)', padding: '2px 6px', borderRadius: 4 }}>{(r.score * 100).toFixed(0)}%</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: COLORS.onSurfaceVariant, marginTop: 3, fontFamily: 'monospace' }}>{r.url}</div>
+                  <div style={{ fontSize: 12, color: COLORS.onSurface, marginTop: 6, lineHeight: 1.5 }}>{r.snippet}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* 追问建议 */}
+            <SectionLabel text="追问建议" />
+            <div style={{ padding: '0 12px 4px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {followUps.map(q => (
+                <button key={q} style={{ padding: '6px 12px', background: COLORS.cardBg, border: 'none', borderRadius: 16, fontSize: 12, color: COLORS.onSurface, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={COLORS.aiAccent} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 013 3c0 1.5-1 2-1 3 0 2 2 3 2 3v2H8v-2s2-1 2-3c0-1-1-1.5-1-3a3 3 0 013-3z"/><path d="M9 17h6"/></svg>
+                  {q}
+                </button>
+              ))}
+            </div>
+
+            {/* 搜索历史 */}
+            <SectionLabel text="搜索历史" action={<button style={{ background: 'none', border: 'none', fontSize: 11, color: COLORS.onSurfaceVariant, cursor: 'pointer' }}>清空</button>} />
+            <div style={{ padding: '0 12px 4px' }}>
+              {history.map((h, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', marginBottom: 4 }}>
+                  <div style={{ width: 6, height: 6, borderRadius: '50%', background: i === 0 ? COLORS.aiAccent : COLORS.onSurfaceVariant, marginRight: 10, flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12, color: COLORS.onSurface }}>{h.q}</div>
+                    <div style={{ fontSize: 10, color: COLORS.onSurfaceVariant, marginTop: 1 }}>{h.time}</div>
+                  </div>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={COLORS.onSurfaceVariant} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+                </div>
+              ))}
+            </div>
+
+            {/* 热门搜索 */}
+            <SectionLabel text="热门搜索" />
+            <div style={{ padding: '0 12px 16px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {['Jetpack Compose', 'Android WebView', 'SSE 流式', '油猴脚本', 'Room 数据库'].map((t, i) => (
+                <span key={t} style={{ padding: '5px 10px', background: COLORS.cardBg, borderRadius: 14, fontSize: 11, color: COLORS.onSurface, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ fontSize: 10, color: i < 3 ? COLORS.error : COLORS.onSurfaceVariant, fontWeight: 600 }}>{i + 1}</span>
+                  {t}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <BottomBar mode="BROWSER" tabCount={2} />
+        </div>
+      );
+    }
+
+    // =================================================================
+    // 容器：每个 AndroidFrame + 上方 italic 标签
+    // =================================================================
+    function FrameCell({ label, children, frameHeight = 892 }) {
+      return (
+        <div className="frame-cell">
+          <div className="frame-label">{label}</div>
+          {children}
+        </div>
+      );
+    }
+
+    // =================================================================
+    // App
+    // =================================================================
+    function App() {
+      return (
+        <div>
+          <div className="page-title">Living Dashboard · 移动端高保真原型</div>
+          <div className="page-subtitle">
+            基于实际 Kotlin 源码 1:1 还原（M0–M8 已实现真实态） · 反 AI slop · 沉浸感优先 · 对称设计 · 无边框美学<br/>
+            v3 · 2026-06-27 · huashu-design skill 真正调用 · android_frame 设备框 1:1 inline
+          </div>
+          <div className="gallery">
+
+            {/* Row 1：核心主页 + 召唤 AI */}
+            <FrameCell label="BrowserHome · 浏览器主页（pill 搜索框 + 快捷链接）">
+              <AndroidFrame><BrowserHomeScreen /></AndroidFrame>
+            </FrameCell>
+
+            <FrameCell label="CanvasHome · 画布主页 收起态（圆形图标 + AI pill + 收藏网格）">
+              <AndroidFrame><CanvasHomeCollapsedScreen /></AndroidFrame>
+            </FrameCell>
+
+            <FrameCell label="CanvasHome · AI 召唤展开态（思维链折叠 + 工具调用流动条）">
+              <AndroidFrame><CanvasHomeAIExpandedScreen emptyState={false} /></AndroidFrame>
+            </FrameCell>
+
+            <FrameCell label='CanvasHome · 空态（"开始和 AI 对话吧"，淡灰色大字号）'>
+              <AndroidFrame><CanvasHomeAIExpandedScreen emptyState={true} /></AndroidFrame>
+            </FrameCell>
+
+            {/* Row 2：分层画布 Apple Watch 风格四档（修复7：4 档 THUMBNAIL/SUMMARY/INTERACTIVE/FULL） */}
+            <FrameCell label="分层画布 第一档 THUMBNAIL · 缩略图（Apple Watch 风格彩色小球叠加）">
+              <AndroidFrame><CanvasAppleWatchTier1Screen /></AndroidFrame>
+            </FrameCell>
+
+            <FrameCell label="分层画布 第二档 SUMMARY · 缩小版完整组件（不是简化态）">
+              <AndroidFrame><CanvasAppleWatchTier2Screen /></AndroidFrame>
+            </FrameCell>
+
+            <FrameCell label="分层画布 第三档 INTERACTIVE · 完全可用组件（正常大小）">
+              <AndroidFrame><CanvasAppleWatchTier3Screen /></AndroidFrame>
+            </FrameCell>
+
+            <FrameCell label="分层画布 第四档 FULL · 放大查看（zoom>1.0，仅见局部）">
+              <AndroidFrame><CanvasAppleWatchTier4Screen /></AndroidFrame>
+            </FrameCell>
+
+            {/* Row 3：浏览器网页视图 + 底部栏左右滑动切换 AI 对话框（3 状态） */}
+            <FrameCell label="BrowserScreen · 底部工具栏自动收缩（autoHideBar）+ 左右滑动指示">
+              <AndroidFrame><BrowserScreenWithAutoHideScreen /></AndroidFrame>
+            </FrameCell>
+
+            <FrameCell label="底部栏 · 状态 1/3 BROWSER 模式 5 按钮 + 左右滑动指示（设计改进：Home 按钮加转换标识 ↹）">
+              <AndroidFrame><BottomBarSwipeHScreen /></AndroidFrame>
+            </FrameCell>
+
+            <FrameCell label="AI 对话框 · 状态 2/3 收起态（左右滑动替换底部栏为 AI pill + 左右滑动指示）">
+              <AndroidFrame><AIDialogCollapsedScreen /></AndroidFrame>
+            </FrameCell>
+
+            <FrameCell label='AI 对话框 · 状态 3/3 工作态（收起后框内显示"AI 正在浏览 baidu.com..."状态）'>
+              <AndroidFrame><AIDialogWorkingScreen /></AndroidFrame>
+            </FrameCell>
+
+            {/* Row 3.5：三个点 ⋮ 展开态（修复4） */}
+            <FrameCell label="CanvasMoreMenuSheet · CANVAS 模式 ⋮ 展开态（修复4：3 项 · 面板管理/收藏管理/设置）">
+              <AndroidFrame><CanvasMoreMenuSheetScreen /></AndroidFrame>
+            </FrameCell>
+
+            <FrameCell label="MoreMenuSheet · BROWSER 模式 ⋮ 展开态（修复4：10 项 · 添加书签/查看书签/历史/下载/分享/复制链接/设置/设为默认浏览器/清除 Cookie/退出）">
+              <AndroidFrame><BrowserMoreMenuSheetScreen /></AndroidFrame>
+            </FrameCell>
+
+            {/* Row 4：管理类页面 */}
+            <FrameCell label="TabsScreen · 标签管理（网页标签 + 画布面板）">
+              <AndroidFrame><TabsScreen /></AndroidFrame>
+            </FrameCell>
+
+            <FrameCell label="BookmarksScreen · 书签">
+              <AndroidFrame><BookmarksScreen /></AndroidFrame>
+            </FrameCell>
+
+            <FrameCell label="HistoryScreen · 历史记录（按日期分组 + 搜索）">
+              <AndroidFrame><HistoryScreen /></AndroidFrame>
+            </FrameCell>
+
+            {/* Row 5：设置 + AI 配置 */}
+            <FrameCell label="SettingsScreen · 6 分组（含 AI 配置入口 + 全允许模式开关 + 风险提示）">
+              <AndroidFrame><SettingsScreen /></AndroidFrame>
+            </FrameCell>
+
+            <FrameCell label="AiConfigScreen · M8 已实现（5 provider + 自动补全 + 获取模型列表 + 测试连接 + Skills）">
+              <AndroidFrame><AiConfigScreen /></AndroidFrame>
+            </FrameCell>
+
+            {/* Row 6：M8 关键组件 */}
+            <FrameCell label="AgentModeSwitcher · CLOUD/LOCAL/AUTO + 思考等级滑块（4 档，参考 operit）">
+              <AndroidFrame><AgentModeSwitcherScreen /></AndroidFrame>
+            </FrameCell>
+
+            <FrameCell label="AskUserDialog · 120s 超时选项框（单选/多选/自由输入）">
+              <AndroidFrame><AskUserDialogScreen /></AndroidFrame>
+            </FrameCell>
+
+            <FrameCell label="PermissionCard · 橙色普通 + 红色危险 + 白名单按钮（whitelist-btn）">
+              <AndroidFrame><PermissionCardScreen /></AndroidFrame>
+            </FrameCell>
+
+            {/* Row 7：M9 发布 / M10 自动化测试 / M11 AI 搜索 */}
+            <FrameCell label="ReleaseScreen · M9 发布配置（应用信息+签名+构建变体+渠道+构建日志+版本历史）">
+              <AndroidFrame><ReleaseScreen /></AndroidFrame>
+            </FrameCell>
+
+            <FrameCell label="AutoTestScreen · M10 AI 自动化测试（AI 生成+报告+运行+用例+设置）">
+              <AndroidFrame><AutoTestScreen /></AndroidFrame>
+            </FrameCell>
+
+            <FrameCell label="AISearchScreen · M11 AI 搜索（模式三档+AI 总结+网页结果+追问+历史+热门）">
+              <AndroidFrame><AISearchScreen /></AndroidFrame>
+            </FrameCell>
+
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+
+    // ====== 技术规范：Object.assign(window, {...}) 导出，便于外部检视/测试 ======
+    Object.assign(window, {
+      App,
+      AndroidFrame,
+      COLORS,
+      BottomBar,
+      BrowserHomeScreen,
+      CircleIcon,
+      CanvasHomeCollapsedScreen,
+      CanvasHomeAIExpandedScreen,
+      AgentModeSwitcherInline,
+      CanvasAppleWatchTier1Screen,
+      CanvasAppleWatchTier2Screen,
+      CanvasAppleWatchTier3Screen,
+      CanvasAppleWatchTier4Screen,
+      BrowserScreenWithAutoHideScreen,
+      BottomBarSwipeHScreen,
+      AIDialogCollapsedScreen,
+      AIDialogWorkingScreen,
+      CanvasMoreMenuSheetScreen,
+      BrowserMoreMenuSheetScreen,
+      TabsScreen,
+      BookmarksScreen,
+      HistoryScreen,
+      SettingsScreen,
+      AiConfigScreen,
+      AgentModeSwitcherScreen,
+      AskUserDialogScreen,
+      PermissionCardScreen,
+      ReleaseScreen,
+      AutoTestScreen,
+      AISearchScreen,
+      FrameCell,
+    });
+  </script>
+</body>
+</html>

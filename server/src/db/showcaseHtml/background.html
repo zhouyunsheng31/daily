@@ -1,0 +1,365 @@
+<!--
+  Daily 平台展示面板 · 背景层（山水 + 雨水 + 时钟三合一）
+  -----------------------------------------------------------
+  用途：freeHtml widget（isGlobal=true, interactive=false, zIndex=0）
+  注入方式：通过 dangerouslySetInnerHTML 注入画布 DOM，与画布共享 DOM
+  定位：position:fixed; inset:0; pointer-events:none（点击穿透到画布）
+  无外部依赖：所有 CSS/JS/SVG 内联
+  字体：系统字体栈
+-->
+<style>
+  /* ===== 根容器：全屏覆盖、点击穿透、最底层 ===== */
+  .daily-bg-root {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+  }
+
+  /* ===== 天空：深蓝多段渐变，从深夜到地平线微光 ===== */
+  .daily-bg-sky {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 600px 400px at 78% 12%, rgba(180, 210, 255, 0.18), transparent 60%),
+      linear-gradient(180deg,
+        #050b1a 0%,
+        #0a1428 20%,
+        #0f1f3d 40%,
+        #163056 60%,
+        #1f4068 75%,
+        #2a5690 90%,
+        #3a6b9c 100%);
+  }
+
+  /* ===== 月亮：柔和光晕 ===== */
+  .daily-bg-moon {
+    position: absolute;
+    top: 8%;
+    right: 14%;
+    width: 90px;
+    height: 90px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #f4f8ff 0%, #d8e4ff 30%, rgba(200, 220, 255, 0.4) 60%, transparent 75%);
+    box-shadow:
+      0 0 60px 20px rgba(180, 210, 255, 0.25),
+      0 0 120px 40px rgba(140, 180, 240, 0.15);
+    opacity: 0.9;
+  }
+
+  /* ===== 山脉层：SVG 剪影，三层远近 ===== */
+  .daily-bg-mountains {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 22%;
+    width: 100%;
+    height: 45%;
+    pointer-events: none;
+  }
+  .daily-bg-mountains svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  /* ===== 水面：底部倒影 + 微波纹 ===== */
+  .daily-bg-water {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 22%;
+    overflow: hidden;
+    background:
+      linear-gradient(180deg,
+        rgba(20, 45, 80, 0.6) 0%,
+        rgba(12, 30, 58, 0.85) 40%,
+        rgba(6, 16, 35, 0.95) 100%);
+  }
+  /* 水面倒影：山影渐隐 */
+  .daily-bg-water::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 60%;
+    background:
+      linear-gradient(180deg, rgba(30, 60, 100, 0.35) 0%, transparent 80%);
+    -webkit-mask-image: linear-gradient(180deg, black 0%, transparent 90%);
+            mask-image: linear-gradient(180deg, black 0%, transparent 90%);
+  }
+  /* 水面波光：横向高光线 */
+  .daily-bg-water::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background:
+      repeating-linear-gradient(180deg,
+        transparent 0px,
+        transparent 8px,
+        rgba(150, 190, 240, 0.05) 9px,
+        transparent 11px),
+      repeating-linear-gradient(180deg,
+        transparent 0px,
+        transparent 24px,
+        rgba(180, 210, 255, 0.04) 25px,
+        transparent 28px);
+    animation: daily-water-shimmer 6s ease-in-out infinite alternate;
+  }
+  @keyframes daily-water-shimmer {
+    0%   { transform: translateY(0); opacity: 0.7; }
+    100% { transform: translateY(-3px); opacity: 1; }
+  }
+
+  /* ===== 雨水画布 ===== */
+  .daily-bg-rain {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+
+  /* ===== 雾气：地平线柔光带 ===== */
+  .daily-bg-fog {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 20%;
+    height: 12%;
+    background: linear-gradient(180deg, transparent 0%, rgba(120, 160, 210, 0.12) 50%, transparent 100%);
+    filter: blur(8px);
+    pointer-events: none;
+  }
+
+  /* ===== 时钟：玻璃拟态，右上角 ===== */
+  .daily-bg-clock {
+    position: absolute;
+    top: 24px;
+    right: 24px;
+    z-index: 1;
+    padding: 18px 26px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    color: #eaf2ff;
+    text-align: right;
+    pointer-events: none;
+    min-width: 180px;
+  }
+  .daily-bg-clock-time {
+    font-size: 34px;
+    font-weight: 200;
+    letter-spacing: 4px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 20px rgba(140, 180, 255, 0.5);
+  }
+  .daily-bg-clock-date {
+    margin-top: 8px;
+    font-size: 13px;
+    font-weight: 400;
+    letter-spacing: 2px;
+    color: rgba(200, 220, 255, 0.8);
+  }
+  .daily-bg-clock-week {
+    margin-top: 4px;
+    font-size: 11px;
+    letter-spacing: 3px;
+    color: rgba(160, 190, 240, 0.6);
+    text-transform: uppercase;
+  }
+  /* 时钟呼吸光 */
+  .daily-bg-clock::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    border-radius: 18px;
+    background: linear-gradient(135deg, rgba(140, 180, 255, 0.08), transparent 50%);
+    pointer-events: none;
+  }
+</style>
+
+<!-- 根容器 -->
+<div class="daily-bg-root">
+
+  <!-- 天空背景 -->
+  <div class="daily-bg-sky"></div>
+
+  <!-- 月亮 -->
+  <div class="daily-bg-moon"></div>
+
+  <!-- 山脉剪影：远 / 中 / 近三层 -->
+  <div class="daily-bg-mountains">
+    <svg viewBox="0 0 1440 400" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- 远山：最浅、最淡 -->
+      <path d="M0,300 L0,180 L120,140 L240,200 L360,120 L480,180 L600,100 L720,160 L840,110 L960,170 L1080,130 L1200,190 L1320,150 L1440,200 L1440,300 Z"
+            fill="#1a3050" opacity="0.55"/>
+      <!-- 中山：中等深度 -->
+      <path d="M0,320 L0,230 L100,190 L220,250 L340,170 L460,230 L580,160 L700,220 L820,180 L940,240 L1060,190 L1180,250 L1300,200 L1440,240 L1440,320 Z"
+            fill="#142845" opacity="0.75"/>
+      <!-- 近山：最深、最锐利 -->
+      <path d="M0,340 L0,280 L80,230 L180,290 L280,200 L400,270 L520,190 L640,260 L760,210 L880,280 L1000,220 L1120,290 L1240,240 L1360,290 L1440,250 L1440,340 Z"
+            fill="#0a1830" opacity="0.92"/>
+    </svg>
+  </div>
+
+  <!-- 地平线雾气 -->
+  <div class="daily-bg-fog"></div>
+
+  <!-- 水面倒影 -->
+  <div class="daily-bg-water"></div>
+
+  <!-- 雨水画布（JS 动画） -->
+  <canvas class="daily-bg-rain" id="dailyRainCanvas"></canvas>
+
+  <!-- 时钟（玻璃拟态，右上角） -->
+  <div class="daily-bg-clock">
+    <div class="daily-bg-clock-time" id="dailyClockTime">--:--:--</div>
+    <div class="daily-bg-clock-date" id="dailyClockDate">----&#24180;--&#26376;--&#26085;</div>
+    <div class="daily-bg-clock-week" id="dailyClockWeek">---</div>
+  </div>
+
+</div>
+
+<script>
+/* ==========================================================================
+   雨水粒子动画 + 时钟实时更新
+   - requestAnimationFrame 驱动，60fps
+   - 窗口缩放自适应
+   - 单例保护：避免重复注入多次执行
+   ========================================================================== */
+(function () {
+  'use strict';
+
+  // —— 单例保护：若已初始化则先清理旧的 ——
+  if (window.__dailyBgInit) {
+    try { window.__dailyBgCleanup && window.__dailyBgCleanup(); } catch (_) {}
+  }
+  window.__dailyBgInit = true;
+
+  var canvas = document.getElementById('dailyRainCanvas');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  var W = 0, H = 0, dpr = Math.min(window.devicePixelRatio || 1, 2);
+  var drops = [];
+  var DROP_COUNT = 180;       // 雨滴数量
+  var RAIN_ANGLE = 0.18;       // 倾斜角度（弧度），略向右下
+  var rafId = null;
+  var clockTimer = null;
+
+  function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function createDrop() {
+    return {
+      x: Math.random() * (W + 200) - 100,
+      y: Math.random() * H - H,
+      len: 14 + Math.random() * 22,      // 雨滴长度
+      speed: 6 + Math.random() * 8,      // 下落速度
+      opacity: 0.15 + Math.random() * 0.35,
+      thickness: Math.random() < 0.3 ? 1.4 : 0.9
+    };
+  }
+
+  function initDrops() {
+    drops = [];
+    for (var i = 0; i < DROP_COUNT; i++) drops.push(createDrop());
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    ctx.lineCap = 'round';
+    var dx = Math.sin(RAIN_ANGLE);
+    var dy = Math.cos(RAIN_ANGLE);
+
+    for (var i = 0; i < drops.length; i++) {
+      var d = drops[i];
+      var ex = d.x + dx * d.len;
+      var ey = d.y + dy * d.len;
+
+      // 雨滴：半透明浅蓝渐变线
+      var grad = ctx.createLinearGradient(d.x, d.y, ex, ey);
+      grad.addColorStop(0, 'rgba(170, 200, 240, 0)');
+      grad.addColorStop(0.5, 'rgba(180, 215, 255, ' + d.opacity + ')');
+      grad.addColorStop(1, 'rgba(210, 230, 255, ' + (d.opacity * 0.4) + ')');
+
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = d.thickness;
+      ctx.beginPath();
+      ctx.moveTo(d.x, d.y);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+
+      // 下落
+      d.x += dx * d.speed;
+      d.y += dy * d.speed;
+
+      // 回收复用
+      if (d.y > H + 40) {
+        d.x = Math.random() * (W + 200) - 100;
+        d.y = -40;
+      }
+    }
+    rafId = requestAnimationFrame(draw);
+  }
+
+  // —— 时钟更新 ——
+  // 星期映射（用 Unicode 转义避免 file:// 编码问题，注入后 parent 页面 UTF-8 上下文也兼容）
+  var WEEK_MAP = ['\u661f\u671f\u65e5', '\u661f\u671f\u4e00', '\u661f\u671f\u4e8c', '\u661f\u671f\u4e09', '\u661f\u671f\u56db', '\u661f\u671f\u4e94', '\u661f\u671f\u516d'];
+  var elTime = document.getElementById('dailyClockTime');
+  var elDate = document.getElementById('dailyClockDate');
+  var elWeek = document.getElementById('dailyClockWeek');
+
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+
+  function updateClock() {
+    var now = new Date();
+    if (elTime) elTime.textContent = pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+    if (elDate) elDate.textContent = now.getFullYear() + '\u5e74' + pad(now.getMonth() + 1) + '\u6708' + pad(now.getDate()) + '\u65e5';
+    if (elWeek) elWeek.textContent = WEEK_MAP[now.getDay()];
+  }
+
+  // —— 清理函数 ——
+  window.__dailyBgCleanup = function () {
+    if (rafId) cancelAnimationFrame(rafId);
+    if (clockTimer) clearInterval(clockTimer);
+    if (window.__dailyBgResize) window.removeEventListener('resize', window.__dailyBgResize);
+    rafId = null; clockTimer = null;
+  };
+
+  // —— 启动 ——
+  resize();
+  initDrops();
+  updateClock();
+  clockTimer = setInterval(updateClock, 1000);
+  rafId = requestAnimationFrame(draw);
+
+  window.__dailyBgResize = resize;
+  window.addEventListener('resize', function () {
+    resize();
+    initDrops();
+  });
+})();
+</script>

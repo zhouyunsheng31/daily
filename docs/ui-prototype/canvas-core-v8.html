@@ -1,0 +1,1839 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Daily · 画布核心 v8 · 滚轮缩放 + 删除顶部缩放区</title>
+<link rel="icon" href="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" />
+
+<!-- Pinned React 18.3.1 UMD -->
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<!-- Babel standalone：用于手动 classic runtime 转换 -->
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<style>
+  /* === DailyLife Design Tokens（白色主题） === */
+  :root {
+    --bg-canvas: #f5f5f7;
+    --bg-surface: #ffffff;
+    --bg-elevated: #f0f0f2;
+    --bg-hover: rgba(0, 0, 0, 0.05);
+    --bg-active: rgba(0, 0, 0, 0.08);
+    --color-primary: #4A90E2;
+    --color-primary-light: #6BA3E8;
+    --color-primary-dark: #3A7BC2;
+    --color-primary-muted: rgba(74, 144, 226, 0.15);
+    --color-secondary: #50E3C2;
+    --color-accent: #FF6B6B;
+    --text-primary: #1d1d1f;
+    --text-secondary: #86868b;
+    --text-tertiary: #adb5bd;
+    --border-subtle: rgba(0, 0, 0, 0.08);
+    --border-default: rgba(0, 0, 0, 0.12);
+    --border-strong: rgba(0, 0, 0, 0.18);
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.1), 0 2px 4px rgba(0,0,0,0.06);
+    --shadow-lg: 0 8px 28px rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.08);
+    --shadow-xl: 0 16px 40px rgba(0,0,0,0.16), 0 8px 16px rgba(0,0,0,0.1);
+    --shadow-drag: 0 24px 60px rgba(0,0,0,0.22), 0 12px 24px rgba(0,0,0,0.14);
+    --glass-bg: rgba(255, 255, 255, 0.72);
+    --glass-blur: 20px;
+    --glass-border: rgba(255, 255, 255, 0.18);
+    --toolbar-bg: rgba(255, 255, 255, 0.88);
+    --toolbar-border: rgba(0, 0, 0, 0.10);
+    --overlay-bg: rgba(0, 0, 0, 0.35);
+    --radius-xs: 4px;
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 24px;
+    --radius-2xl: 32px;
+    --radius-full: 9999px;
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+    --duration-fast: 150ms;
+    --duration-normal: 250ms;
+    --duration-slow: 400ms;
+  }
+
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg-canvas);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    letter-spacing: -0.01em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    height: 100vh;
+    overflow: hidden;
+  }
+  .font-mono { font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', 'Consolas', monospace; }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+  :focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; border-radius: 2px; }
+  ::selection { background: var(--color-primary-muted); color: var(--text-primary); }
+
+  /* === 下雨特效（背景层） === */
+  @keyframes rainFall {
+    0% { transform: translate3d(0, -120%, 0); opacity: 0; }
+    8% { opacity: 0.5; }
+    100% { transform: translate3d(-40px, 120vh, 0); opacity: 0; }
+  }
+  .rain-drop {
+    position: absolute;
+    width: 1px;
+    background: linear-gradient(to bottom, transparent, rgba(74,144,226,0.4), transparent);
+    animation: rainFall linear infinite;
+    pointer-events: none;
+  }
+
+  /* === 下雪特效（背景层） === */
+  @keyframes snowFall {
+    0% { transform: translate3d(0, -120%, 0); opacity: 0; }
+    10% { opacity: 0.7; }
+    90% { opacity: 0.7; }
+    100% { transform: translate3d(40px, 120vh, 0); opacity: 0; }
+  }
+  .snow-flake {
+    position: absolute;
+    border-radius: 50%;
+    background: radial-gradient(circle, #fff 0%, rgba(255,255,255,0.8) 50%, transparent 100%);
+    animation: snowFall linear infinite;
+    pointer-events: none;
+  }
+
+  /* === 自由 HTML 组件：旋转渐变光球 === */
+  @keyframes orbSpin {
+    0% { transform: rotate(0deg) scale(1); }
+    50% { transform: rotate(180deg) scale(1.08); }
+    100% { transform: rotate(360deg) scale(1); }
+  }
+  .free-orb {
+    border-radius: 50%;
+    background: conic-gradient(from 0deg, rgba(74,144,226,0.55), rgba(80,227,194,0.45), rgba(74,144,226,0.55));
+    filter: blur(0.4px);
+    box-shadow: 0 0 30px rgba(74,144,226,0.4), 0 0 60px rgba(80,227,194,0.25);
+    animation: orbSpin 8s linear infinite;
+    pointer-events: none;
+  }
+
+  /* === 自由 HTML 组件：飘动光点 === */
+  @keyframes particleDrift {
+    0%   { transform: translate(0, 0); opacity: 0; }
+    20%  { opacity: 0.85; }
+    80%  { opacity: 0.85; }
+    100% { transform: translate(140px, -90px); opacity: 0; }
+  }
+  .free-particle {
+    position: absolute;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: radial-gradient(circle, #fff 0%, rgba(80,227,194,0.85) 50%, transparent 100%);
+    box-shadow: 0 0 8px rgba(80,227,194,0.7);
+    animation: particleDrift 6s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  /* === 自由 HTML 组件：浮动光环 === */
+  @keyframes ringPulse {
+    0% { transform: scale(1); opacity: 0.6; }
+    50% { transform: scale(1.2); opacity: 0.3; }
+    100% { transform: scale(1); opacity: 0.6; }
+  }
+
+  /* === AI 浮球呼吸 === */
+  @keyframes aiBallGlow {
+    0%, 100% { box-shadow: 0 6px 18px rgba(74,144,226,0.35), 0 0 0 0 rgba(74,144,226,0.3); }
+    50%      { box-shadow: 0 8px 26px rgba(74,144,226,0.5), 0 0 0 8px rgba(74,144,226,0.08); }
+  }
+  .ai-ball-glow { animation: aiBallGlow 3.2s ease-in-out infinite; }
+
+  /* === 入场动画 === */
+  @keyframes bubbleIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .bubble-in { animation: bubbleIn 0.28s var(--ease-out); }
+  @keyframes popIn { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: scale(1); } }
+  .pop-in { animation: popIn 0.24s var(--ease-out); }
+  @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
+  .slide-in-right { animation: slideInRight 0.32s var(--ease-out); }
+
+  /* === V8 核心：相册式缩放（与 V7 一致）===
+     组件 DOM 位置和 layout 完全不变，只是 transform: scale() 视觉缩小
+     transform-origin: center 保证中心点坐标不变 */
+  .widget-scaler {
+    position: absolute;
+    transform-origin: center center;
+    transition: transform 380ms var(--ease-out);
+    will-change: transform;
+  }
+  /* 拖动时禁用 transition，保证流畅 */
+  .widget-scaler.is-dragging {
+    transition: none;
+    z-index: 100;
+  }
+
+  /* === iframe widget 专属（矩形 + 标题栏 + resize 手柄） === */
+  .iframe-widget {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+    transition: box-shadow var(--duration-normal) var(--ease-out), border-color var(--duration-normal) var(--ease-out);
+    width: 100%; height: 100%;
+    display: flex; flex-direction: column;
+  }
+  .iframe-widget:hover { box-shadow: var(--shadow-lg); }
+  .widget-scaler.is-dragging .iframe-widget {
+    box-shadow: var(--shadow-drag);
+    border-color: var(--color-primary);
+  }
+  .iframe-widget .widget-titlebar {
+    height: 32px; flex-shrink: 0;
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 10px;
+    cursor: grab;
+    user-select: none;
+  }
+  .iframe-widget .widget-titlebar:active { cursor: grabbing; }
+  .iframe-widget .resize-handle {
+    position: absolute;
+    right: 0; bottom: 0;
+    width: 14px; height: 14px;
+    cursor: nwse-resize;
+    background:
+      linear-gradient(135deg, transparent 50%, var(--border-strong) 50%, var(--border-strong) 60%, transparent 60%, transparent 75%, var(--border-strong) 75%, var(--border-strong) 85%, transparent 85%);
+  }
+
+  .dragging * { user-select: none !important; }
+
+  /* === V8：画布平移（与 V7 一致）=== */
+  .pan-canvas {
+    cursor: grab;
+  }
+  .pan-canvas.is-panning {
+    cursor: grabbing !important;
+  }
+  .pan-canvas.is-panning * { user-select: none !important; }
+  .pan-container {
+    position: absolute;
+    inset: 0;
+    will-change: transform;
+  }
+
+  /* === 顶部 Tab === */
+  .tab-btn { transition: color var(--duration-fast) ease, background var(--duration-fast) ease; }
+  .tab-btn:hover { background: var(--bg-hover); }
+  .tab-active { color: var(--color-primary) !important; background: var(--color-primary-muted) !important; }
+
+  /* === 标注胶囊 === */
+  .label-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-family: 'SF Mono', monospace;
+    border-radius: var(--radius-full);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    border: 1px solid var(--border-subtle);
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  .label-bg     { background: rgba(255,255,255,0.78); color: var(--text-secondary); }
+  .label-iframe { background: rgba(74,144,226,0.12); color: var(--color-primary-dark); border-color: rgba(74,144,226,0.25); }
+  .label-free   { background: rgba(80,227,194,0.14); color: #2fa98a; border-color: rgba(80,227,194,0.30); }
+  .label-pop    { background: rgba(255,107,107,0.12); color: #d8514f; border-color: rgba(255,107,107,0.28); }
+  .label-ai     { background: rgba(74,144,226,0.18); color: #fff; border-color: rgba(74,144,226,0.45); }
+  .label-pin    { background: rgba(255,149,0,0.15); color: #c77400; border-color: rgba(255,149,0,0.35); }
+
+  /* === 视图容器 === */
+  .view-container { height: calc(100vh - 56px); overflow: hidden; position: relative; }
+
+  /* === V8 设置面板：accordion 分区 === */
+  .settings-section { border-bottom: 1px solid var(--border-subtle); }
+  .settings-section-header {
+    width: 100%; padding: '14px 0'; display: flex; align-items: center; justify-content: space-between;
+    background: transparent; border: none; cursor: pointer; text-align: left;
+  }
+  .toggle-switch {
+    width: 36px; height: 20px; border-radius: 10px; background: var(--border-strong);
+    position: relative; cursor: pointer; transition: background var(--duration-fast) ease; flex-shrink: 0;
+  }
+  .toggle-switch.on { background: var(--color-primary); }
+  .toggle-switch::after {
+    content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+    border-radius: 50%; background: #fff; transition: transform var(--duration-fast) var(--ease-out);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  }
+  .toggle-switch.on::after { transform: translateX(16px); }
+
+  /* === V8 新增：滚轮缩放视觉提示 === */
+  @keyframes zoomIndicatorIn {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(0.85); }
+    20% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
+  }
+  .zoom-indicator {
+    animation: zoomIndicatorIn 1s var(--ease-out) forwards;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- JSX 源码（V8 修正：用 text/plain 避免 Babel 自动处理导致重复执行） -->
+<script type="text/plain" id="app-source">
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+/* ============================================================
+   SVG 几何线条图标（无 emoji）
+   ============================================================ */
+const SvgIcons = {
+  zoomNormal: (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>),
+  zoomMini:   (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>),
+  zoomIcon:   (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/></svg>),
+  upload:   (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>),
+  panel:    (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>),
+  settings: (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>),
+  close:    (s=14) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>),
+  send:     (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>),
+  chat:     (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-9 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.2A8.5 8.5 0 0 1 4 11.5 8.38 8.38 0 0 1 13 3a8.5 8.5 0 0 1 8 8.5z"/></svg>),
+  calc:     (s=18) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="11" x2="8" y2="11"/><line x1="12" y1="11" x2="12" y2="11"/><line x1="16" y1="11" x2="16" y2="11"/><line x1="8" y1="15" x2="8" y2="15"/><line x1="12" y1="15" x2="12" y2="15"/><line x1="16" y1="15" x2="16" y2="15"/><line x1="8" y1="19" x2="12" y2="19"/></svg>),
+  pdf:      (s=18) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="14" y2="17"/></svg>),
+  music:    (s=18) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>),
+  clock:    (s=18) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>),
+  user:     (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>),
+  lock:     (s=14) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>),
+  check:    (s=14) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>),
+  arrowR:   (s=14) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>),
+  arrowD:   (s=14) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>),
+  bell:     (s=18) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>),
+  pin:      (s=14) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>),
+  sun:      (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>),
+  moon:     (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>),
+  eye:      (s=14) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>),
+  eyeOff:   (s=14) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>),
+  logout:   (s=14) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>),
+  swap:     (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>),
+  pan:      (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M5 9l-3 3 3 3"/><path d="M9 5l3-3 3 3"/><path d="M15 19l-3 3-3-3"/><path d="M19 9l3 3-3 3"/><path d="M2 12h20"/><path d="M12 2v20"/></svg>),
+  folder:   (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>),
+  globe:    (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>),
+  import:   (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12"/><polyline points="8 11 12 15 16 11"/><path d="M3 17v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2"/></svg>),
+  tool:     (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>),
+  layers:   (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>),
+  popup:    (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6v6H9z"/></svg>),
+  shield:   (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>),
+  plus:     (s=14) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>),
+  trash:    (s=14) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>),
+  copy:     (s=14) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>),
+  ban:      (s=14) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>),
+  search:   (s=16) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>),
+};
+
+/* ============================================================
+   共享小组件
+   ============================================================ */
+const LabelChip = ({ kind, children, style }) => (
+  <span className={"label-chip label-" + kind} style={style}>{children}</span>
+);
+
+/* Toggle 开关 */
+const Toggle = ({ on, onClick, title }) => (
+  <div className={"toggle-switch" + (on ? ' on' : '')} onClick={onClick} title={title} data-toggle={on ? 'on' : 'off'} />
+);
+
+/* 实时时钟（背景层基础组件，不受缩放影响） */
+const ClockWidget = ({ position, immune }) => {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  const ss = String(now.getSeconds()).padStart(2, '0');
+  const dateStr = now.getFullYear() + "/" + String(now.getMonth()+1).padStart(2,'0') + "/" + String(now.getDate()).padStart(2,'0');
+  return (
+    <div style={{
+      position: 'absolute', ...position,
+      background: 'var(--glass-bg)', backdropFilter: 'blur(20px)',
+      WebkitBackdropFilter: 'blur(20px)', border: '1px solid var(--glass-border)',
+      borderRadius: 'var(--radius-lg)', padding: '12px 18px', color: 'var(--text-primary)',
+      boxShadow: 'var(--shadow-md)', display: 'flex', alignItems: 'center', gap: 12,
+      zIndex: 2,
+    }}>
+      <div style={{ color: 'var(--color-primary)' }}>{SvgIcons.clock(24)}</div>
+      <div>
+        <div className="font-mono" style={{ fontSize: 22, fontWeight: 600, lineHeight: 1, letterSpacing: '-0.02em' }}>{hh}:{mm}<span style={{ fontSize: 14, opacity: 0.6 }}>:{ss}</span></div>
+        <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>{dateStr}</div>
+      </div>
+      {immune && <LabelChip kind="pin" style={{ position: 'absolute', top: -10, right: -8 }}>不受缩放影响</LabelChip>}
+    </div>
+  );
+};
+
+/* 下雨特效（背景层） */
+const RainEffect = ({ count = 60 }) => {
+  const drops = useMemo(() => Array.from({ length: count }).map((_, i) => ({
+    id: i,
+    left: Math.random() * 100,
+    height: 60 + Math.random() * 80,
+    duration: 0.6 + Math.random() * 0.9,
+    delay: -Math.random() * 2,
+    opacity: 0.3 + Math.random() * 0.4,
+  })), [count]);
+  return (
+    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 1 }}>
+      {drops.map(d => (
+        <div key={d.id} className="rain-drop"
+          style={{ left: d.left + '%', height: d.height + 'px', animationDuration: d.duration + 's', animationDelay: d.delay + 's', opacity: d.opacity }} />
+      ))}
+    </div>
+  );
+};
+
+/* 下雪特效（背景层） */
+const SnowEffect = ({ count = 50 }) => {
+  const flakes = useMemo(() => Array.from({ length: count }).map((_, i) => ({
+    id: i,
+    left: Math.random() * 100,
+    size: 3 + Math.random() * 5,
+    duration: 3 + Math.random() * 4,
+    delay: -Math.random() * 5,
+    opacity: 0.4 + Math.random() * 0.5,
+  })), [count]);
+  return (
+    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 1 }}>
+      {flakes.map(f => (
+        <div key={f.id} className="snow-flake"
+          style={{ left: f.left + '%', width: f.size + 'px', height: f.size + 'px', animationDuration: f.duration + 's', animationDelay: f.delay + 's', opacity: f.opacity }} />
+      ))}
+    </div>
+  );
+};
+
+/* 顶部 Tab 栏 */
+const TopBar = ({ activeView, onViewChange }) => {
+  const tabs = [
+    { id: 'v1', label: '画布主页', desc: '滚轮缩放 · 无顶部缩放区' },
+    { id: 'v2', label: 'AI 对话形态', desc: '浮球 / 任务栏' },
+    { id: 'v3', label: '背景层', desc: '示例' },
+    { id: 'v4', label: '弹出层', desc: '示例' },
+  ];
+  return (
+    <div style={{
+      height: 56, background: 'var(--toolbar-bg)', backdropFilter: 'blur(20px)',
+      WebkitBackdropFilter: 'blur(20px)', borderBottom: '1px solid var(--toolbar-border)',
+      display: 'flex', alignItems: 'center', padding: '0 20px', gap: 4, zIndex: 100, position: 'relative',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 24 }}>
+        <div style={{ width: 26, height: 26, borderRadius: 7, background: 'linear-gradient(135deg, #4A90E2, #50E3C2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 13 }}>D</div>
+        <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' }}>Daily · 画布核心 v8</div>
+      </div>
+      {tabs.map(t => (
+        <button key={t.id} onClick={() => onViewChange(t.id)}
+          className={"tab-btn " + (activeView === t.id ? 'tab-active' : '')}
+          style={{
+            padding: '6px 12px', borderRadius: 'var(--radius-sm)', border: 'none', background: 'transparent',
+            color: 'var(--text-secondary)', fontSize: 13, cursor: 'pointer',
+            display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.15,
+          }}>
+          <span style={{ fontWeight: 600 }}>{t.label}</span>
+          <span style={{ fontSize: 10, opacity: 0.7 }}>{t.desc}</span>
+        </button>
+      ))}
+      <div style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'SF Mono, monospace' }}>滚轮缩放 · 删除顶部缩放区 · 完整设置</div>
+    </div>
+  );
+};
+
+/* ============================================================
+   widget 内容渲染（3 个缩放级别） - 与 V7 完全一致
+   ============================================================ */
+
+/* 完整内容（normal 级别） */
+const FullContent = ({ id, name }) => {
+  if (id === 'w-calc') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div className="font-mono" style={{ background: 'var(--bg-elevated)', padding: '8px 10px', borderRadius: 'var(--radius-sm)', textAlign: 'right', fontSize: 18, marginBottom: 8 }}>1,248</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 4, flex: 1 }}>
+          {['C','+/-','%','÷','7','8','9','×','4','5','6','−','1','2','3','+','0','.','='].map((k,i) => (
+            <div key={i} style={{ background: ['÷','×','−','+','='].includes(k) ? 'var(--color-primary-muted)' : 'var(--bg-elevated)', color: ['÷','×','−','+','='].includes(k) ? 'var(--color-primary-dark)' : 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 'var(--radius-xs)', fontSize: 12, fontWeight: 500 }}>{k}</div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (id === 'w-pdf') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 6 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--text-secondary)' }}>
+          <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>设计文档 v2.pdf</span>
+          <span className="font-mono">3 / 12</span>
+        </div>
+        <div style={{ flex: 1, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', padding: 10, overflow: 'hidden' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>第三章 · 架构设计</div>
+          <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.8 }}>
+            <div>系统采用分层架构，前端使用 React 18...</div>
+            <div>后端服务基于 Node.js，数据库选用...</div>
+            <div>部署方案考虑容器化，使用 Docker...</div>
+            <div style={{ marginTop: 8, opacity: 0.6 }}>部署方案考虑容器化...</div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+          {[1,2,3,4,5].map(i => <div key={i} style={{ width: 4, height: 4, borderRadius: '50%', background: i === 3 ? 'var(--color-primary)' : 'var(--border-strong)' }} />)}
+        </div>
+      </div>
+    );
+  }
+  if (id === 'w-music') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <div style={{ width: 40, height: 40, borderRadius: 'var(--radius-sm)', background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))' }} />
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>Morning Focus</div>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Daily Mix</div>
+          </div>
+        </div>
+        <div style={{ height: 3, background: 'var(--bg-elevated)', borderRadius: 2, position: 'relative' }}>
+          <div style={{ width: '40%', height: '100%', background: 'var(--color-primary)', borderRadius: 2 }} />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-tertiary)' }}>
+          <span>1:24</span><span>3:12</span>
+        </div>
+      </div>
+    );
+  }
+  if (id === 'w-timer') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 8 }}>
+        <div style={{ position: 'relative', width: 100, height: 100 }}>
+          <svg width="100" height="100" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="44" fill="none" stroke="var(--bg-elevated)" strokeWidth="6"/>
+            <circle cx="50" cy="50" r="44" fill="none" stroke="var(--color-primary)" strokeWidth="6" strokeLinecap="round" strokeDasharray="276.46" strokeDashoffset="83" transform="rotate(-90 50 50)"/>
+          </svg>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+            <div className="font-mono" style={{ fontSize: 22, fontWeight: 600 }}>25:00</div>
+            <div style={{ fontSize: 9, color: 'var(--text-secondary)' }}>专注中</div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <div style={{ padding: '3px 12px', background: 'var(--color-primary)', color: '#fff', borderRadius: 'var(--radius-full)', fontSize: 10, fontWeight: 600 }}>暂停</div>
+          <div style={{ padding: '3px 12px', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', borderRadius: 'var(--radius-full)', fontSize: 10 }}>重置</div>
+        </div>
+      </div>
+    );
+  }
+  if (id === 'w-ai') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 6 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-secondary)' }} /> AI 助手
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, overflow: 'hidden' }}>
+          <div style={{ background: 'var(--bg-elevated)', padding: '6px 10px', borderRadius: '10px 10px 10px 2px', fontSize: 11, color: 'var(--text-secondary)', alignSelf: 'flex-start', maxWidth: '90%' }}>帮你做了个计算器</div>
+          <div style={{ background: 'var(--color-primary)', color: '#fff', padding: '6px 10px', borderRadius: '10px 10px 2px 10px', fontSize: 11, alignSelf: 'flex-end', maxWidth: '90%' }}>再帮我加个计时器</div>
+          <div style={{ background: 'var(--bg-elevated)', padding: '6px 10px', borderRadius: '10px 10px 10px 2px', fontSize: 11, color: 'var(--text-secondary)', alignSelf: 'flex-start', maxWidth: '90%' }}>好的，正在生成...</div>
+        </div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <input placeholder="说点什么..." style={{ flex: 1, padding: '4px 8px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-full)', fontSize: 11, outline: 'none' }} />
+          <button style={{ background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: '50%', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>{SvgIcons.send(11)}</button>
+        </div>
+      </div>
+    );
+  }
+  return <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{name}</div>;
+};
+
+/* mini 级别 - AI 设计的精简摘要 HTML */
+const MiniContent = ({ id, name }) => {
+  if (id === 'w-music') {
+    return (
+      <div style={{ padding: 20, height: '100%', display: 'flex', gap: 16, alignItems: 'center', background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+        <div style={{ width: 72, height: 72, borderRadius: 'var(--radius-sm)', background: 'linear-gradient(135deg, #4A90E2, #50E3C2)', flexShrink: 0, boxShadow: '0 4px 12px rgba(74,144,226,0.3)' }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Morning Focus</div>
+          <div style={{ fontSize: 14, color: 'var(--text-secondary)', marginTop: 4 }}>Daily Mix</div>
+          <div style={{ height: 4, background: 'var(--bg-elevated)', borderRadius: 2, marginTop: 10, position: 'relative' }}>
+            <div style={{ width: '40%', height: '100%', background: 'var(--color-primary)', borderRadius: 2 }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4, fontFamily: 'SF Mono, monospace' }}>
+            <span>1:24</span><span>3:12</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  if (id === 'w-pdf') {
+    return (
+      <div style={{ padding: 20, height: '100%', display: 'flex', flexDirection: 'column', gap: 12, background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ width: 28, height: 28, borderRadius: 6, background: '#FF6B6B', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+            <span style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)' }}>设计文档 v2.pdf</span>
+          </div>
+          <span className="font-mono" style={{ fontSize: 14, color: 'var(--text-secondary)', background: 'var(--bg-elevated)', padding: '4px 10px', borderRadius: 'var(--radius-full)' }}>3 / 12</span>
+        </div>
+        <div style={{ flex: 1, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', padding: 14, overflow: 'hidden' }}>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: 'var(--text-primary)' }}>第三章 · 架构设计</div>
+          <div style={{ height: 3, background: 'var(--border-subtle)', borderRadius: 2, marginBottom: 6 }} />
+          <div style={{ height: 3, background: 'var(--border-subtle)', borderRadius: 2, marginBottom: 6, width: '90%' }} />
+          <div style={{ height: 3, background: 'var(--border-subtle)', borderRadius: 2, marginBottom: 6, width: '75%' }} />
+          <div style={{ height: 3, background: 'var(--border-subtle)', borderRadius: 2, width: '60%' }} />
+        </div>
+      </div>
+    );
+  }
+  if (id === 'w-timer') {
+    return (
+      <div style={{ padding: 20, height: '100%', display: 'flex', alignItems: 'center', gap: 20, background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+        <div style={{ position: 'relative', width: 80, height: 80, flexShrink: 0 }}>
+          <svg width="80" height="80" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="44" fill="none" stroke="var(--bg-elevated)" strokeWidth="8"/>
+            <circle cx="50" cy="50" r="44" fill="none" stroke="#FF6B6B" strokeWidth="8" strokeLinecap="round" strokeDasharray="276.46" strokeDashoffset="83" transform="rotate(-90 50 50)"/>
+          </svg>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div className="font-mono" style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>25:00</div>
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)' }}>专注会话</div>
+          <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>进行中 · 番茄工作法</div>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 8, padding: '4px 10px', background: 'rgba(255,107,107,0.12)', borderRadius: 'var(--radius-full)', fontSize: 12, color: '#d8514f', fontWeight: 500 }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#FF6B6B' }} /> 专注中
+          </div>
+        </div>
+      </div>
+    );
+  }
+  if (id === 'w-ai') {
+    return (
+      <div style={{ padding: 20, height: '100%', display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg, #FF9500, #FF6B6B)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg>
+          </div>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)' }}>AI 助手</div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>3 条新消息</div>
+          </div>
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, overflow: 'hidden' }}>
+          <div style={{ background: 'var(--bg-elevated)', padding: '8px 12px', borderRadius: '12px 12px 12px 2px', fontSize: 13, color: 'var(--text-secondary)', alignSelf: 'flex-start', maxWidth: '85%' }}>帮你做了个计算器</div>
+          <div style={{ background: 'var(--color-primary)', color: '#fff', padding: '8px 12px', borderRadius: '12px 12px 2px 12px', fontSize: 13, alignSelf: 'flex-end', maxWidth: '85%' }}>再帮我加个计时器</div>
+        </div>
+      </div>
+    );
+  }
+  if (id === 'w-calc') {
+    return (
+      <div style={{ padding: 20, height: '100%', display: 'flex', flexDirection: 'column', gap: 12, background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg, #4A90E2, #3A7BC2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ color: '#fff', fontSize: 16, fontWeight: 700 }}>=</span>
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)' }}>科学计算器</div>
+        </div>
+        <div className="font-mono" style={{ background: 'var(--bg-elevated)', padding: '12px 16px', borderRadius: 'var(--radius-sm)', textAlign: 'right', fontSize: 24, fontWeight: 600, color: 'var(--text-primary)' }}>1,248</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+          {['7','8','9','÷','4','5','6','×','1','2','3','+'].map((k,i) => (
+            <div key={i} style={{ background: ['÷','×','+'].includes(k) ? 'var(--color-primary-muted)' : 'var(--bg-elevated)', color: ['÷','×','+'].includes(k) ? 'var(--color-primary-dark)' : 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 'var(--radius-xs)', fontSize: 14, fontWeight: 500, height: 28 }}>{k}</div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{name}</div>;
+};
+
+/* icon 级别 - AI 画的有设计感的圆形 HTML 图标 */
+const IconContent = ({ id, name }) => {
+  if (id === 'w-pdf') {
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, background: 'transparent' }} data-icon-shape="circle">
+        <div style={{
+          width: 200, height: 200, borderRadius: '50%',
+          background: 'linear-gradient(135deg, #FF6B6B 0%, #E84545 100%)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 12px 40px rgba(255,107,107,0.35), inset 0 2px 8px rgba(255,255,255,0.25)',
+          position: 'relative',
+        }}>
+          <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="8" y1="13" x2="16" y2="13"/>
+            <line x1="8" y1="17" x2="14" y2="17"/>
+          </svg>
+          <div style={{ position: 'absolute', top: 20, right: 20, width: 8, height: 8, borderRadius: '50%', background: 'rgba(255,255,255,0.4)' }} />
+        </div>
+        <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '0.02em' }}>{name}</div>
+      </div>
+    );
+  }
+  if (id === 'w-music') {
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, background: 'transparent' }} data-icon-shape="circle">
+        <div style={{
+          width: 200, height: 200, borderRadius: '50%',
+          background: 'linear-gradient(135deg, #50E3C2 0%, #2BC9A8 100%)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 12px 40px rgba(80,227,194,0.35), inset 0 2px 8px rgba(255,255,255,0.25)',
+          position: 'relative',
+        }}>
+          <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 18V5l12-2v13"/>
+            <circle cx="6" cy="18" r="3" fill="white"/>
+            <circle cx="18" cy="16" r="3" fill="white"/>
+          </svg>
+          <div style={{ position: 'absolute', top: 24, left: 24, width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.5)' }} />
+          <div style={{ position: 'absolute', bottom: 30, right: 28, width: 4, height: 4, borderRadius: '50%', background: 'rgba(255,255,255,0.3)' }} />
+        </div>
+        <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--text-primary)' }}>{name}</div>
+      </div>
+    );
+  }
+  if (id === 'w-timer') {
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, background: 'transparent' }} data-icon-shape="circle">
+        <div style={{
+          width: 200, height: 200, borderRadius: '50%',
+          background: 'linear-gradient(135deg, #FF9500 0%, #FF6B6B 100%)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 12px 40px rgba(255,149,0,0.35), inset 0 2px 8px rgba(255,255,255,0.25)',
+          position: 'relative',
+        }}>
+          <svg width="90" height="90" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+          <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', width: 6, height: 10, background: 'white', borderRadius: 3 }} />
+        </div>
+        <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--text-primary)' }}>{name}</div>
+      </div>
+    );
+  }
+  if (id === 'w-ai') {
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, background: 'transparent' }} data-icon-shape="circle">
+        <div style={{
+          width: 200, height: 200, borderRadius: '50%',
+          background: 'linear-gradient(135deg, #FF9500 0%, #E84545 100%)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 12px 40px rgba(255,149,0,0.35), inset 0 2px 8px rgba(255,255,255,0.25)',
+          position: 'relative',
+        }}>
+          <svg width="90" height="90" viewBox="0 0 24 24" fill="white">
+            <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"/>
+          </svg>
+          <div style={{ position: 'absolute', top: 20, right: 30, width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.6)' }} />
+          <div style={{ position: 'absolute', bottom: 28, left: 26, width: 4, height: 4, borderRadius: '50%', background: 'rgba(255,255,255,0.4)' }} />
+          <div style={{ position: 'absolute', top: 40, left: 36, width: 3, height: 3, borderRadius: '50%', background: 'rgba(255,255,255,0.3)' }} />
+        </div>
+        <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--text-primary)' }}>{name}</div>
+      </div>
+    );
+  }
+  if (id === 'w-calc') {
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, background: 'transparent' }} data-icon-shape="circle">
+        <div style={{
+          width: 200, height: 200, borderRadius: '50%',
+          background: 'linear-gradient(135deg, #4A90E2 0%, #3A7BC2 100%)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 12px 40px rgba(74,144,226,0.35), inset 0 2px 8px rgba(255,255,255,0.25)',
+          position: 'relative',
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ width: 50, height: 6, background: 'white', borderRadius: 3 }} />
+            <div style={{ width: 50, height: 6, background: 'white', borderRadius: 3 }} />
+          </div>
+          <div style={{ position: 'absolute', top: 24, right: 24, width: 7, height: 7, borderRadius: '50%', background: 'rgba(255,255,255,0.4)' }} />
+        </div>
+        <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--text-primary)' }}>{name}</div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, background: 'transparent' }} data-icon-shape="circle">
+      <div style={{
+        width: 200, height: 200, borderRadius: '50%',
+        background: 'linear-gradient(135deg, #4A90E2, #50E3C2)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        boxShadow: '0 12px 40px rgba(74,144,226,0.3), inset 0 2px 8px rgba(255,255,255,0.25)',
+      }}>
+        <div style={{ fontSize: 60, fontWeight: 700, color: 'white' }}>{name.charAt(0)}</div>
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--text-primary)' }}>{name}</div>
+    </div>
+  );
+};
+
+/* ============================================================
+   V8 完整设置面板（9 个分区 accordion） - 与 V7 一致，保留缩放档位触发值
+   ============================================================ */
+const SettingsPanel = ({ open, onClose, widgets, toggleWidget, theme, setTheme, aiMode, setAiMode, zoomLevel, setZoomLevel, currentRole, setCurrentRole }) => {
+  const [expanded, setExpanded] = useState('display');
+
+  /* 4.1 缩放档位触发值（保留） */
+  const [zoomMax, setZoomMax] = useState(2.0);
+  const [zoomMin, setZoomMin] = useState(0.4);
+
+  /* 4.2 用户账号 */
+  const [user, setUser] = useState({ loggedIn: false, name: '', email: '', role: 'member' });
+  const [loginForm, setLoginForm] = useState({ name: '', email: '' });
+
+  /* 4.3 面板管理 */
+  const [personalPanels, setPersonalPanels] = useState([
+    { id: 'pp1', name: '我的学习面板', active: true },
+    { id: 'pp2', name: '生活面板', active: false },
+  ]);
+  const [communityPanels, setCommunityPanels] = useState([
+    { id: 'cp1', name: '游戏社区面板', active: false },
+  ]);
+  const [newPanelName, setNewPanelName] = useState('');
+
+  /* 4.4 社区发现 */
+  const [officialCommunities, setOfficialCommunities] = useState([
+    { id: 'oc1', name: 'Daily 官方社区', desc: '官方维护的公共社区', added: false },
+    { id: 'oc2', name: '游戏开发者社区', desc: 'HTML5 游戏开发交流', added: false },
+    { id: 'oc3', name: '设计师社区', desc: 'UI/UX 设计分享', added: true },
+  ]);
+  const [manualAddr, setManualAddr] = useState('');
+  const [joinedCommunities, setJoinedCommunities] = useState([
+    { id: 'jc1', name: '设计师社区', addr: 'design.daily.dev' },
+  ]);
+
+  /* 4.5 组件导入 */
+  const [importedComponents, setImportedComponents] = useState([
+    { id: 'ic1', name: 'weather-widget.html', size: '4.2 KB' },
+    { id: 'ic2', name: 'todo-list.html', size: '2.8 KB' },
+  ]);
+  const [pasteCode, setPasteCode] = useState('');
+
+  /* 4.6 AI 工具配置 */
+  const [aiTools, setAiTools] = useState({
+    read: false, write: false, edit: false, bash: false,
+    grep: false, find: false, ls: false,
+  });
+  const toolDescs = {
+    read: '读取服务器文件内容',
+    write: '写入/创建文件',
+    edit: '编辑已有文件内容',
+    bash: '执行 shell 命令（沙箱内）',
+    grep: '正则搜索文件内容',
+    find: '按文件名/路径搜索文件',
+    ls: '列出目录内容',
+  };
+
+  /* 4.7 背景层设置 */
+  const [bgEffect, setBgEffect] = useState('rain');
+  const [showClock, setShowClock] = useState(true);
+
+  /* 4.8 弹出层管理 */
+  const [popupLayers, setPopupLayers] = useState([
+    { id: 'pl1', name: '登录窗口', trigger: '进入时', closeCond: '登录成功后', enabled: true },
+    { id: 'pl2', name: '新手引导', trigger: '进入时', closeCond: '用户点击关闭', enabled: true },
+    { id: 'pl3', name: '广告弹窗', trigger: '定时', closeCond: '定时关闭', enabled: false },
+  ]);
+
+  /* 4.9 管理员功能 */
+  const [adminUsers, setAdminUsers] = useState([
+    { id: 'au1', name: 'user1', email: 'user1@ex.com', role: 'member', banned: false },
+    { id: 'au2', name: 'user2', email: 'user2@ex.com', role: 'member', banned: false },
+    { id: 'au3', name: 'dev', email: 'dev@ex.com', role: 'admin', banned: false },
+  ]);
+  const [apiKey, setApiKey] = useState('');
+  const [aiModel, setAiModel] = useState('gpt-4');
+  const [searchEngines, setSearchEngines] = useState({ local: true, web: true, academic: false, github: true });
+
+  if (!open) return null;
+
+  const toggleSection = (id) => setExpanded(expanded === id ? null : id);
+
+  const doLogin = () => {
+    if (!loginForm.name) return;
+    const role = loginForm.name === 'admin' ? 'admin' : 'member';
+    setUser({ loggedIn: true, name: loginForm.name, email: loginForm.email || (loginForm.name + '@daily.dev'), role });
+    if (setCurrentRole) setCurrentRole(role);
+  };
+  const doLogout = () => {
+    setUser({ loggedIn: false, name: '', email: '', role: 'member' });
+    if (setCurrentRole) setCurrentRole('member');
+  };
+
+  const addPersonalPanel = () => {
+    if (!newPanelName.trim()) return;
+    const id = 'pp' + Date.now();
+    setPersonalPanels(prev => [...prev.map(p => ({ ...p, active: false })), { id, name: newPanelName, active: true }]);
+    setNewPanelName('');
+  };
+  const addCommunityPanel = () => {
+    if (!user.loggedIn) { alert('创建社区面板需要先登录（弹出层 HTML widget）'); return; }
+    if (!newPanelName.trim()) return;
+    const id = 'cp' + Date.now();
+    setCommunityPanels(prev => [...prev.map(p => ({ ...p, active: false })), { id, name: newPanelName, active: true }]);
+    setNewPanelName('');
+  };
+  const switchPanel = (type, id) => {
+    if (type === 'personal') setPersonalPanels(prev => prev.map(p => ({ ...p, active: p.id === id })));
+    else setCommunityPanels(prev => prev.map(p => ({ ...p, active: p.id === id })));
+  };
+  const deletePanel = (type, id) => {
+    if (type === 'personal') setPersonalPanels(prev => prev.filter(p => p.id !== id));
+    else setCommunityPanels(prev => prev.filter(p => p.id !== id));
+  };
+
+  const addOfficialCommunity = (id) => {
+    setOfficialCommunities(prev => prev.map(c => c.id === id ? { ...c, added: true } : c));
+    const c = officialCommunities.find(c => c.id === id);
+    if (c) setJoinedCommunities(prev => [...prev, { id: 'jc' + Date.now(), name: c.name, addr: c.name.toLowerCase().replace(/\s/g, '') + '.daily.dev' }]);
+  };
+  const addManualCommunity = () => {
+    if (!manualAddr.trim()) return;
+    setJoinedCommunities(prev => [...prev, { id: 'jc' + Date.now(), name: manualAddr, addr: manualAddr }]);
+    setManualAddr('');
+  };
+
+  const importComponent = () => {
+    if (!pasteCode.trim()) return;
+    const id = 'ic' + Date.now();
+    setImportedComponents(prev => [...prev, { id, name: 'pasted-' + id + '.html', size: (pasteCode.length / 1024).toFixed(1) + ' KB' }]);
+    setPasteCode('');
+  };
+  const deleteImported = (id) => setImportedComponents(prev => prev.filter(c => c.id !== id));
+
+  const toggleAiTool = (tool) => setAiTools(prev => ({ ...prev, [tool]: !prev[tool] }));
+  const setAllTools = (val) => setAiTools(Object.keys(aiTools).reduce((acc, k) => { acc[k] = val; return acc; }, {}));
+
+  const togglePopup = (id) => setPopupLayers(prev => prev.map(p => p.id === id ? { ...p, enabled: !p.enabled } : p));
+
+  const toggleBan = (id) => setAdminUsers(prev => prev.map(u => u.id === id ? { ...u, banned: !u.banned } : u));
+  const toggleUserRole = (id) => setAdminUsers(prev => prev.map(u => u.id === id ? { ...u, role: u.role === 'admin' ? 'member' : 'admin' } : u));
+
+  /* 分区定义 */
+  const sections = [
+    { id: 'display', label: '主题与显示', icon: 'sun', adminOnly: false },
+    { id: 'account', label: '用户账号', icon: 'user', adminOnly: false },
+    { id: 'panels', label: '面板管理', icon: 'folder', adminOnly: false },
+    { id: 'community', label: '社区发现', icon: 'globe', adminOnly: false },
+    { id: 'import', label: '组件导入', icon: 'import', adminOnly: false },
+    { id: 'aitools', label: 'AI 工具配置', icon: 'tool', adminOnly: false },
+    { id: 'background', label: '背景层设置', icon: 'layers', adminOnly: false },
+    { id: 'popups', label: '弹出层管理', icon: 'popup', adminOnly: false },
+    { id: 'admin', label: '管理员功能', icon: 'shield', adminOnly: true },
+  ];
+
+  const visibleSections = sections.filter(s => !s.adminOnly || user.role === 'admin' || currentRole === 'admin');
+
+  /* 渲染分区内容 */
+  const renderSection = (id) => {
+    if (id === 'display') {
+      return (
+        <div data-settings-section="display">
+          {/* 主题 */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>主题切换</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setTheme('white')} data-theme-btn="white"
+                style={{ flex: 1, padding: '10px', borderRadius: 'var(--radius-sm)', border: theme === 'white' ? '2px solid var(--color-primary)' : '1px solid var(--border-default)', background: theme === 'white' ? 'var(--color-primary-muted)' : 'var(--bg-surface)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 12, color: theme === 'white' ? 'var(--color-primary-dark)' : 'var(--text-secondary)' }}>
+                {SvgIcons.sun(14)} 白色
+              </button>
+              <button onClick={() => setTheme('black')} data-theme-btn="black"
+                style={{ flex: 1, padding: '10px', borderRadius: 'var(--radius-sm)', border: theme === 'black' ? '2px solid var(--color-primary)' : '1px solid var(--border-default)', background: theme === 'black' ? 'var(--color-primary-muted)' : 'var(--bg-surface)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 12, color: theme === 'black' ? 'var(--color-primary-dark)' : 'var(--text-secondary)' }}>
+                {SvgIcons.moon(14)} 黑色
+              </button>
+            </div>
+          </div>
+          {/* AI 对话方式 */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>AI 对话方式（互斥）</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setAiMode('dialog')} data-aimode-btn="dialog"
+                style={{ flex: 1, padding: '10px', borderRadius: 'var(--radius-sm)', border: aiMode === 'dialog' ? '2px solid var(--color-primary)' : '1px solid var(--border-default)', background: aiMode === 'dialog' ? 'var(--color-primary-muted)' : 'var(--bg-surface)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 12, color: aiMode === 'dialog' ? 'var(--color-primary-dark)' : 'var(--text-secondary)' }}>
+                {SvgIcons.panel(14)} 底部对话栏
+              </button>
+              <button onClick={() => setAiMode('ball')} data-aimode-btn="ball"
+                style={{ flex: 1, padding: '10px', borderRadius: 'var(--radius-sm)', border: aiMode === 'ball' ? '2px solid var(--color-primary)' : '1px solid var(--border-default)', background: aiMode === 'ball' ? 'var(--color-primary-muted)' : 'var(--bg-surface)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 12, color: aiMode === 'ball' ? 'var(--color-primary-dark)' : 'var(--text-secondary)' }}>
+                {SvgIcons.chat(14)} 浮球模式
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 6 }}>当前：{aiMode === 'dialog' ? '底部对话栏' : '浮球模式'}</div>
+          </div>
+          {/* V8 保留：缩放档位触发值（无缩放按钮副本，只保留阈值） */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>缩放档位触发值（用户可调）</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)' }}>
+                <span style={{ fontSize: 12 }}>最大档（zoom &gt;）</span>
+                <input type="number" step="0.1" value={zoomMax} onChange={(e) => setZoomMax(parseFloat(e.target.value) || 0)} data-zoom-max-input
+                  style={{ width: 70, padding: '4px 8px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xs)', fontSize: 12, textAlign: 'right', outline: 'none' }} />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)' }}>
+                <span style={{ fontSize: 12 }}>最小档（zoom &lt;）</span>
+                <input type="number" step="0.1" value={zoomMin} onChange={(e) => setZoomMin(parseFloat(e.target.value) || 0)} data-zoom-min-input
+                  style={{ width: 70, padding: '4px 8px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xs)', fontSize: 12, textAlign: 'right', outline: 'none' }} />
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-tertiary)', padding: '0 4px' }}>
+                当前缩放级别：<b style={{ color: 'var(--color-primary)' }}>{zoomLevel}</b>。滚轮缩放时按此阈值吸附到对应档位。
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    if (id === 'account') {
+      return (
+        <div data-settings-section="account">
+          {user.loggedIn ? (
+            <div>
+              <div style={{ padding: 14, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 600 }}>{user.name.charAt(0).toUpperCase()}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{user.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{user.email}</div>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4, padding: '2px 8px', background: user.role === 'admin' ? 'rgba(255,149,0,0.15)' : 'var(--color-primary-muted)', borderRadius: 'var(--radius-full)', fontSize: 10, color: user.role === 'admin' ? '#c77400' : 'var(--color-primary-dark)', fontWeight: 600 }}>
+                    {user.role === 'admin' ? SvgIcons.shield(10) : SvgIcons.user(10)} {user.role === 'admin' ? '管理员' : '成员'}
+                  </div>
+                </div>
+              </div>
+              <button onClick={doLogout} data-logout-btn style={{ width: '100%', padding: '10px', border: '1px solid var(--border-default)', background: 'var(--bg-surface)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 12, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                {SvgIcons.logout(14)} 退出登录
+              </button>
+            </div>
+          ) : (
+            <div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>当前未登录。注册/登录后可同步画布到所有设备。</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <input placeholder="用户名（输入 admin 可体验管理员）" value={loginForm.name} onChange={(e) => setLoginForm({ ...loginForm, name: e.target.value })} data-login-name
+                  style={{ padding: '8px 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 12, outline: 'none' }} />
+                <input placeholder="邮箱（可选）" value={loginForm.email} onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })} data-login-email
+                  style={{ padding: '8px 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 12, outline: 'none' }} />
+                <button onClick={doLogin} data-login-btn style={{ padding: '10px', background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>登录 / 注册</button>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 8, lineHeight: 1.5 }}>
+                角色说明：部署者 = 管理员（admin），普通注册用户 = 成员（member）。管理员可见额外管理功能。
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+    if (id === 'panels') {
+      return (
+        <div data-settings-section="panels">
+          {/* 个人面板 */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>个人面板（可多建）</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {personalPanels.map(p => (
+                <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: p.active ? 'var(--color-primary-muted)' : 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', border: p.active ? '1px solid var(--color-primary)' : '1px solid transparent' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {SvgIcons.folder(14)}
+                    <span style={{ fontSize: 12, fontWeight: p.active ? 600 : 400 }}>{p.name}</span>
+                    {p.active && <span style={{ fontSize: 10, color: 'var(--color-primary)', fontWeight: 600 }}>· 当前</span>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    {!p.active && <button onClick={() => switchPanel('personal', p.id)} data-switch-panel={p.id} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-primary)', fontSize: 11, padding: '2px 6px' }}>切换</button>}
+                    <button onClick={() => deletePanel('personal', p.id)} data-delete-panel={p.id} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-tertiary)', padding: 2, display: 'flex' }}>{SvgIcons.trash(12)}</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* 社区面板 */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>社区面板（可多建，需登录）</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {communityPanels.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-tertiary)', padding: '8px 0' }}>暂无社区面板</div>}
+              {communityPanels.map(p => (
+                <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: p.active ? 'var(--color-primary-muted)' : 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', border: p.active ? '1px solid var(--color-primary)' : '1px solid transparent' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {SvgIcons.globe(14)}
+                    <span style={{ fontSize: 12, fontWeight: p.active ? 600 : 400 }}>{p.name}</span>
+                    {p.active && <span style={{ fontSize: 10, color: 'var(--color-primary)', fontWeight: 600 }}>· 当前</span>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    {!p.active && <button onClick={() => switchPanel('community', p.id)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-primary)', fontSize: 11, padding: '2px 6px' }}>切换</button>}
+                    <button onClick={() => deletePanel('community', p.id)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-tertiary)', padding: 2, display: 'flex' }}>{SvgIcons.trash(12)}</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* 创建新面板 */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>创建新面板</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input placeholder="面板名称..." value={newPanelName} onChange={(e) => setNewPanelName(e.target.value)} data-new-panel-name
+                style={{ flex: 1, padding: '8px 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 12, outline: 'none' }} />
+              <button onClick={addPersonalPanel} data-add-personal-panel style={{ padding: '8px 12px', background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>{SvgIcons.plus(12)} 个人</button>
+              <button onClick={addCommunityPanel} data-add-community-panel style={{ padding: '8px 12px', background: 'var(--bg-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>{SvgIcons.plus(12)} 社区</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    if (id === 'community') {
+      return (
+        <div data-settings-section="community">
+          {/* 官方社区列表 */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>官方社区列表</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {officialCommunities.map(c => (
+                <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)' }}>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 500 }}>{c.name}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>{c.desc}</div>
+                  </div>
+                  <button onClick={() => addOfficialCommunity(c.id)} data-add-official={c.id} disabled={c.added}
+                    style={{ padding: '4px 10px', border: 'none', background: c.added ? 'transparent' : 'var(--color-primary)', color: c.added ? 'var(--text-tertiary)' : '#fff', borderRadius: 'var(--radius-xs)', fontSize: 11, cursor: c.added ? 'default' : 'pointer' }}>
+                    {c.added ? '已添加' : '添加'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* 手动添加 */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>手动添加社区（输入地址）</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input placeholder="https://community.example.com" value={manualAddr} onChange={(e) => setManualAddr(e.target.value)} data-manual-community-input
+                style={{ flex: 1, padding: '8px 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 12, outline: 'none' }} />
+              <button onClick={addManualCommunity} data-add-manual-community style={{ padding: '8px 12px', background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>{SvgIcons.plus(12)} 添加</button>
+            </div>
+          </div>
+          {/* 已加入的社区 */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>已加入的社区</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {joinedCommunities.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-tertiary)', padding: '8px 0' }}>暂未加入任何社区</div>}
+              {joinedCommunities.map(c => (
+                <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {SvgIcons.globe(12)}
+                    <div>
+                      <div style={{ fontSize: 12 }}>{c.name}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text-tertiary)', fontFamily: 'SF Mono, monospace' }}>{c.addr}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    if (id === 'import') {
+      return (
+        <div data-settings-section="import">
+          {/* 手动上传 */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>手动上传组件</div>
+            <div style={{ padding: 16, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', border: '2px dashed var(--border-strong)', textAlign: 'center', marginBottom: 8 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                {SvgIcons.upload(24)}
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>拖拽 HTML 文件到此处，或</div>
+                <button data-upload-file-btn style={{ padding: '6px 14px', background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontSize: 11, cursor: 'pointer' }}>选择文件</button>
+              </div>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 8 }}>或粘贴 HTML 代码：</div>
+            <textarea placeholder="<div>你的组件 HTML...</div>" value={pasteCode} onChange={(e) => setPasteCode(e.target.value)} data-paste-code
+              style={{ width: '100%', minHeight: 60, padding: '8px 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 11, outline: 'none', resize: 'vertical', fontFamily: 'SF Mono, monospace' }} />
+            <button onClick={importComponent} data-import-paste-btn style={{ marginTop: 6, width: '100%', padding: '8px', background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontSize: 12, cursor: 'pointer' }}>导入组件</button>
+          </div>
+          {/* API 上传说明 */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>API 接口上传</div>
+            <div style={{ padding: 12, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', fontFamily: 'SF Mono, monospace', fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+              <div>POST /api/components/upload</div>
+              <div style={{ color: 'var(--text-tertiary)' }}>Content-Type: multipart/form-data</div>
+              <div style={{ color: 'var(--text-tertiary)' }}>Body: {`{ file: "component.html" }`}</div>
+            </div>
+            <button data-copy-api-btn style={{ marginTop: 6, padding: '6px 12px', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 11, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+              {SvgIcons.copy(12)} 复制 API 地址
+            </button>
+          </div>
+          {/* 已导入组件 */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>已导入组件（{importedComponents.length}）</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {importedComponents.map(c => (
+                <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {SvgIcons.import(12)}
+                    <div>
+                      <div style={{ fontSize: 12, fontFamily: 'SF Mono, monospace' }}>{c.name}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>{c.size}</div>
+                    </div>
+                  </div>
+                  <button onClick={() => deleteImported(c.id)} data-delete-imported={c.id} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-tertiary)', padding: 2, display: 'flex' }}>{SvgIcons.trash(12)}</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    if (id === 'aitools') {
+      const toolNames = Object.keys(aiTools);
+      return (
+        <div data-settings-section="aitools">
+          <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 12, lineHeight: 1.5 }}>
+            文件系统工具（PI agent 原本 7 个）。默认全部关闭，用户手动开启。在服务端 Node.js 沙箱内执行。
+          </div>
+          {/* 全部开关 */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+            <button onClick={() => setAllTools(true)} data-all-tools-on style={{ flex: 1, padding: '6px', background: 'var(--color-primary-muted)', color: 'var(--color-primary-dark)', border: '1px solid var(--color-primary)', borderRadius: 'var(--radius-sm)', fontSize: 11, cursor: 'pointer' }}>全部开启</button>
+            <button onClick={() => setAllTools(false)} data-all-tools-off style={{ flex: 1, padding: '6px', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 11, cursor: 'pointer' }}>全部关闭</button>
+          </div>
+          {/* 工具列表 */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {toolNames.map(t => (
+              <div key={t} data-ai-tool={t} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)' }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 500, fontFamily: 'SF Mono, monospace' }}>{t}</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>{toolDescs[t]}</div>
+                </div>
+                <Toggle on={aiTools[t]} onClick={() => toggleAiTool(t)} title={t + ' 工具开关'} />
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 10, lineHeight: 1.5 }}>
+            另有 30 个自定义工具（browser_* / fs-cli / docker-cli / canvas-cli 等）始终保留，不在此处控制。
+          </div>
+        </div>
+      );
+    }
+    if (id === 'background') {
+      return (
+        <div data-settings-section="background">
+          {/* 背景图片 */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>背景图片</div>
+            <div style={{ padding: 14, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', border: '2px dashed var(--border-strong)', textAlign: 'center' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                {SvgIcons.upload(20)}
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>上传图片作为画布背景</div>
+                <button data-bg-upload-btn style={{ padding: '5px 12px', background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontSize: 11, cursor: 'pointer' }}>选择图片</button>
+              </div>
+            </div>
+          </div>
+          {/* 特效选择 */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>特效选择</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {[{ id: 'rain', label: '下雨' }, { id: 'snow', label: '下雪' }, { id: 'none', label: '无' }].map(opt => (
+                <button key={opt.id} onClick={() => setBgEffect(opt.id)} data-bg-effect={opt.id}
+                  style={{ flex: 1, padding: '8px', borderRadius: 'var(--radius-sm)', border: bgEffect === opt.id ? '2px solid var(--color-primary)' : '1px solid var(--border-default)', background: bgEffect === opt.id ? 'var(--color-primary-muted)' : 'var(--bg-surface)', cursor: 'pointer', fontSize: 11, color: bgEffect === opt.id ? 'var(--color-primary-dark)' : 'var(--text-secondary)' }}>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {/* 基础组件 */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>基础组件</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {SvgIcons.clock(14)}
+                <span style={{ fontSize: 12 }}>时钟显示</span>
+              </div>
+              <Toggle on={showClock} onClick={() => setShowClock(!showClock)} title="时钟开关" />
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 8, lineHeight: 1.5 }}>
+              背景层始终存在，不随相册缩放消失。AI 可以上传图片、加特效、放基础组件。
+            </div>
+          </div>
+        </div>
+      );
+    }
+    if (id === 'popups') {
+      const triggerOptions = ['进入时', '条件', '定时', '手动'];
+      const closeOptions = ['登录成功后', '用户点击关闭', '定时关闭', 'AI 主动关闭'];
+      return (
+        <div data-settings-section="popups">
+          <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 12, lineHeight: 1.5 }}>
+            弹出层支持全功能触发：进入时 / 条件 / 定时 / 手动。多个弹出层可叠加。
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {popupLayers.map(p => (
+              <div key={p.id} data-popup-layer={p.id} style={{ padding: 12, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', border: p.enabled ? '1px solid var(--color-primary)' : '1px solid var(--border-subtle)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>{p.name}</div>
+                  <Toggle on={p.enabled} onClick={() => togglePopup(p.id)} title={p.name + ' 开关'} />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 10, color: 'var(--text-tertiary)', width: 50 }}>触发：</span>
+                    <select value={p.trigger} onChange={(e) => setPopupLayers(prev => prev.map(x => x.id === p.id ? { ...x, trigger: e.target.value } : x))} data-popup-trigger={p.id}
+                      style={{ flex: 1, padding: '3px 6px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xs)', fontSize: 10, outline: 'none', background: 'var(--bg-surface)' }}>
+                      {triggerOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 10, color: 'var(--text-tertiary)', width: 50 }}>关闭：</span>
+                    <select value={p.closeCond} onChange={(e) => setPopupLayers(prev => prev.map(x => x.id === p.id ? { ...x, closeCond: e.target.value } : x))} data-popup-close={p.id}
+                      style={{ flex: 1, padding: '3px 6px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xs)', fontSize: 10, outline: 'none', background: 'var(--bg-surface)' }}>
+                      {closeOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+    if (id === 'admin') {
+      return (
+        <div data-settings-section="admin">
+          {/* 用户管理 */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>用户管理（封禁 / 角色分配）</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {adminUsers.map(u => (
+                <div key={u.id} data-admin-user={u.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: u.banned ? 'rgba(255,107,107,0.08)' : 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', opacity: u.banned ? 0.6 : 1 }}>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 500 }}>{u.name} {u.banned && <span style={{ fontSize: 10, color: '#d8514f' }}>· 已封禁</span>}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>{u.email}</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <button onClick={() => toggleUserRole(u.id)} data-role-toggle={u.id} title="切换角色"
+                      style={{ padding: '3px 8px', border: '1px solid var(--border-default)', background: u.role === 'admin' ? 'rgba(255,149,0,0.15)' : 'transparent', color: u.role === 'admin' ? '#c77400' : 'var(--text-secondary)', borderRadius: 'var(--radius-xs)', fontSize: 10, cursor: 'pointer' }}>
+                      {u.role === 'admin' ? '管理员' : '成员'}
+                    </button>
+                    <button onClick={() => toggleBan(u.id)} data-ban-toggle={u.id} title="封禁/解封"
+                      style={{ padding: '3px', border: 'none', background: 'transparent', cursor: 'pointer', color: u.banned ? 'var(--color-secondary)' : '#d8514f', display: 'flex' }}>
+                      {u.banned ? SvgIcons.check(12) : SvgIcons.ban(12)}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* AI 配置管理 */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>AI 配置管理</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 4 }}>API Key</div>
+                <input type="password" placeholder="sk-..." value={apiKey} onChange={(e) => setApiKey(e.target.value)} data-admin-apikey
+                  style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 12, outline: 'none', fontFamily: 'SF Mono, monospace' }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 4 }}>模型</div>
+                <select value={aiModel} onChange={(e) => setAiModel(e.target.value)} data-admin-model
+                  style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 12, outline: 'none', background: 'var(--bg-surface)' }}>
+                  <option value="gpt-4">GPT-4</option>
+                  <option value="gpt-4o">GPT-4o</option>
+                  <option value="claude-3.5-sonnet">Claude 3.5 Sonnet</option>
+                  <option value="glm-4">GLM-4</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          {/* 搜索引擎配置 */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>工具 / 搜索引擎配置</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {Object.entries(searchEngines).map(([k, v]) => (
+                <div key={k} data-search-engine={k} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {SvgIcons.search(12)}
+                    <span style={{ fontSize: 12, textTransform: 'capitalize' }}>{k}</span>
+                  </div>
+                  <Toggle on={v} onClick={() => setSearchEngines(prev => ({ ...prev, [k]: !v }))} title={k + ' 搜索引擎开关'} />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, background: 'var(--overlay-bg)', backdropFilter: 'blur(4px)',
+      WebkitBackdropFilter: 'blur(4px)', zIndex: 200, display: 'flex', justifyContent: 'flex-end',
+    }} data-settings-overlay="true">
+      <div onClick={(e) => e.stopPropagation()} className="slide-in-right"
+        style={{
+          width: 380, height: '100vh', background: 'var(--bg-surface)',
+          boxShadow: 'var(--shadow-xl)', display: 'flex', flexDirection: 'column',
+          borderLeft: '1px solid var(--border-subtle)',
+        }} data-settings-panel="true">
+        {/* 头部 */}
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontSize: 18, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ color: 'var(--color-primary)' }}>{SvgIcons.settings(20)}</span> 设置
+          </div>
+          <button onClick={onClose} data-settings-close style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-tertiary)', padding: 4, display: 'flex' }}>{SvgIcons.close(18)}</button>
+        </div>
+
+        {/* 分区列表（accordion） */}
+        <div style={{ flex: 1, overflow: 'auto', padding: '0 24px' }} data-settings-sections>
+          {visibleSections.map(s => (
+            <div key={s.id} className="settings-section" data-section-id={s.id}>
+              <button onClick={() => toggleSection(s.id)} data-section-toggle={s.id}
+                style={{ width: '100%', padding: '14px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ color: expanded === s.id ? 'var(--color-primary)' : 'var(--text-secondary)' }}>{SvgIcons[s.icon](16)}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: expanded === s.id ? 'var(--color-primary)' : 'var(--text-primary)' }}>{s.label}</span>
+                  {s.adminOnly && <span style={{ fontSize: 9, padding: '1px 6px', background: 'rgba(255,149,0,0.15)', color: '#c77400', borderRadius: 'var(--radius-full)', fontWeight: 600 }}>ADMIN</span>}
+                </div>
+                <span style={{ color: 'var(--text-tertiary)', transition: 'transform var(--duration-fast) ease', display: 'flex', transform: expanded === s.id ? 'rotate(180deg)' : 'none' }}>{SvgIcons.arrowD(14)}</span>
+              </button>
+              {expanded === s.id && (
+                <div style={{ padding: '0 0 16px 0' }} data-section-content={s.id}>
+                  {renderSection(s.id)}
+                </div>
+              )}
+          </div>
+        ))}
+
+        </div>
+
+        {/* 底部信息 */}
+        <div style={{ padding: '12px 24px', borderTop: '1px solid var(--border-subtle)', fontSize: 10, color: 'var(--text-tertiary)', textAlign: 'center' }}>
+          Daily · 画布核心 v8 · {visibleSections.length} 个设置分区
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ============================================================
+   视图 1：画布主页（V8 核心 · 删除顶部缩放区 + 滚轮缩放 + 视觉提示）
+   - V8 变更：删除顶部「个人面板 + 三个缩放按钮」整个区域
+   - 缩放只通过滚轮触发（向上放大 / 向下缩小，吸附三档）
+   - 缩放时短暂显示当前级别提示（1 秒后消失）
+   - 保留：画布平移、自由HTML不可拖、iframe可拖、相册式 transform: scale
+   ============================================================ */
+const View1Canvas = () => {
+  const [zoomLevel, setZoomLevel] = useState('normal');
+  const zoomScales = { normal: 1, mini: 0.5, icon: 0.2 };
+
+  const [widgets, setWidgets] = useState([
+    { id: 'w-pdf', x: 60, y: 90, w: 280, h: 320, name: 'PDF 阅读器', type: 'iframe', icon: 'pdf', color: '#FF6B6B', visible: true },
+    { id: 'w-music', x: 380, y: 120, w: 240, h: 170, name: '音乐播放器', type: 'iframe', icon: 'music', color: '#50E3C2', visible: true },
+    { id: 'w-timer', x: 660, y: 90, w: 200, h: 220, name: '专注计时', type: 'iframe', icon: 'clock', color: '#FF9500', visible: true },
+    { id: 'w-ai', x: 900, y: 120, w: 240, h: 260, name: 'AI 助手', type: 'iframe', icon: 'chat', color: '#FF9500', visible: true },
+    { id: 'w-calc', x: 380, y: 330, w: 260, h: 300, name: '科学计算器', type: 'iframe', icon: 'calc', color: '#4A90E2', visible: true },
+  ]);
+
+  /* 自由 HTML 组件 - 不可拖动，只有初始位置，通过 CSS 动画自动移动 */
+  const freeComponents = [
+    { id: 'free-orb', x: 640, y: 380, w: 90, h: 90 },
+    { id: 'free-particles', x: 150, y: 420, w: 200, h: 120 },
+    { id: 'free-ring', x: 900, y: 330, w: 60, h: 60 },
+  ];
+
+  const [aiMode, setAiMode] = useState('dialog');
+  const [aiExpanded, setAiExpanded] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [theme, setTheme] = useState('white');
+  const [currentRole, setCurrentRole] = useState('member');
+  /* 画布平移 */
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  /* 正在拖动的组件 id，用于视觉反馈 */
+  const [draggingId, setDraggingId] = useState(null);
+  /* V8 新增：滚轮缩放视觉提示 */
+  const [zoomIndicator, setZoomIndicator] = useState(null); /* { level, key } */
+  const zoomTimerRef = useRef(null);
+
+  const toggleWidget = (id) => {
+    setWidgets(prev => prev.map(w => w.id === id ? { ...w, visible: !w.visible } : w));
+  };
+
+  /* ============================================================
+     画布平移逻辑（与 V7 一致）
+     ============================================================ */
+  const startPan = useCallback((e) => {
+    if (e.target !== e.currentTarget) return;
+    e.preventDefault();
+    const startX = e.clientX, startY = e.clientY;
+    const ox = panOffset.x, oy = panOffset.y;
+    setIsPanning(true);
+
+    const move = (ev) => {
+      const dx = ev.clientX - startX, dy = ev.clientY - startY;
+      setPanOffset({ x: ox + dx, y: oy + dy });
+    };
+    const up = () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      setIsPanning(false);
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  }, [panOffset]);
+
+  /* ============================================================
+     iframe widget 拖拽逻辑（与 V7 一致）
+     ============================================================ */
+  const startWidgetDrag = useCallback((e, id) => {
+    if (zoomLevel !== 'normal') return;
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX, startY = e.clientY;
+    const item = widgets.find(w => w.id === id);
+    if (!item) return;
+    const ox = item.x, oy = item.y;
+    setDraggingId(id);
+    document.body.classList.add('dragging');
+
+    const move = (ev) => {
+      const dx = ev.clientX - startX, dy = ev.clientY - startY;
+      const nx = Math.max(0, ox + dx), ny = Math.max(0, oy + dy);
+      setWidgets(prev => prev.map(p => p.id === id ? { ...p, x: nx, y: ny } : p));
+    };
+    const up = () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      document.body.classList.remove('dragging');
+      setDraggingId(null);
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  }, [zoomLevel, widgets]);
+
+  const onResizeMouseDown = (e, id) => {
+    if (zoomLevel !== 'normal') return;
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX, startY = e.clientY;
+    const w = widgets.find(w => w.id === id);
+    const ow = w.w, oh = w.h;
+    const move = (ev) => {
+      const dx = ev.clientX - startX, dy = ev.clientY - startY;
+      setWidgets(prev => prev.map(p => p.id === id ? { ...p, w: Math.max(160, ow + dx), h: Math.max(120, oh + dy) } : p));
+    };
+    const up = () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  };
+
+  /* ============================================================
+     V8 核心：滚轮缩放（唯一缩放入口）+ 视觉提示
+     - 滚轮向下 → 缩小（normal → mini → icon）
+     - 滚轮向上 → 放大（icon → mini → normal）
+     - 吸附到三档，缩放时显示当前级别提示 1 秒后消失
+     ============================================================ */
+  const triggerZoomIndicator = useCallback((level) => {
+    /* 用 key 变化触发动画重放 */
+    setZoomIndicator({ level: level, key: Date.now() });
+    if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current);
+    zoomTimerRef.current = setTimeout(() => {
+      setZoomIndicator(null);
+      zoomTimerRef.current = null;
+    }, 1000);
+  }, []);
+
+  const onWheel = (e) => {
+    let next = zoomLevel;
+    if (e.deltaY > 30) {
+      /* 向下滚 → 缩小 */
+      if (zoomLevel === 'normal') next = 'mini';
+      else if (zoomLevel === 'mini') next = 'icon';
+    } else if (e.deltaY < -30) {
+      /* 向上滚 → 放大 */
+      if (zoomLevel === 'icon') next = 'mini';
+      else if (zoomLevel === 'mini') next = 'normal';
+    }
+    if (next !== zoomLevel) {
+      setZoomLevel(next);
+      triggerZoomIndicator(next);
+    }
+  };
+
+  /* 清理定时器 */
+  useEffect(() => {
+    return () => {
+      if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current);
+    };
+  }, []);
+
+  const currentScale = zoomScales[zoomLevel];
+  const zoomLabels = { normal: '正常 (100%)', mini: '缩小版 (50%)', icon: '图标 (20%)' };
+
+  return (
+    <div className={"view-container pan-canvas" + (isPanning ? ' is-panning' : '')} style={{ background: 'var(--bg-canvas)' }} onWheel={onWheel} data-ai-mode={aiMode} data-view="v1-canvas" data-panning={isPanning ? 'true' : 'false'} data-zoom-level={zoomLevel}>
+      {/* === V8：顶部缩放区域已整个删除，缩放只通过滚轮触发 === */}
+
+      {/* === 背景层（不平移，固定在视口）=== */}
+      <div style={{ position: 'absolute', inset: 0, zIndex: 0, overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(74,144,226,0.04), rgba(80,227,194,0.06), rgba(245,245,247,0.8))' }} />
+        <RainEffect count={45} />
+        <ClockWidget position={{ top: 90, right: 24 }} immune={zoomLevel !== 'normal'} />
+      </div>
+
+      {/* === V8 新增：滚轮缩放视觉提示（1 秒后消失）=== */}
+      {zoomIndicator && (
+        <div key={zoomIndicator.key} className="zoom-indicator" data-zoom-indicator={zoomIndicator.level}
+          style={{ position: 'absolute', top: '50%', left: '50%', zIndex: 90, background: 'var(--glass-bg)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-full)', padding: '10px 20px', boxShadow: 'var(--shadow-lg)', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-primary)', fontSize: 13, fontWeight: 600 }}>
+          <span style={{ color: 'var(--color-primary)' }}>{zoomIndicator.level === 'normal' ? SvgIcons.zoomNormal(16) : zoomIndicator.level === 'mini' ? SvgIcons.zoomMini(16) : SvgIcons.zoomIcon(16)}</span>
+          {zoomLabels[zoomIndicator.level]}
+        </div>
+      )}
+
+      {/* === V8 组件层（pan-container，可平移）=== */}
+      <div className="pan-container" data-pan-container="true" onMouseDown={startPan}
+        style={{ zIndex: 10, transform: 'translate(' + panOffset.x + 'px, ' + panOffset.y + 'px)' }}
+        data-zoom-level={zoomLevel} data-pan-x={panOffset.x} data-pan-y={panOffset.y}>
+        {/* iframe widget × 5（可拖动） */}
+        {widgets.filter(w => w.visible).map(w => (
+          <div key={w.id} className={"widget-scaler" + (draggingId === w.id ? ' is-dragging' : '')}
+            data-widget-id={w.id} data-draggable="true" data-zoom-scale={currentScale}
+            onClick={zoomLevel !== 'normal' ? () => setZoomLevel('normal') : undefined}
+            style={{ left: w.x, top: w.y, width: w.w, height: w.h, transform: 'scale(' + currentScale + ')', cursor: zoomLevel !== 'normal' ? 'pointer' : 'default' }}>
+            {zoomLevel === 'normal' ? (
+              <div className="iframe-widget" style={{ position: 'relative' }}>
+                <div className="widget-titlebar" onMouseDown={(e) => startWidgetDrag(e, w.id)}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: w.color }} />
+                    <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{w.name}</span>
+                    <span className="font-mono" style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>.html</span>
+                  </div>
+                  <button style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-tertiary)', padding: 2, display: 'flex' }}
+                    onClick={(e) => { e.stopPropagation(); setWidgets(prev => prev.filter(p => p.id !== w.id)); }}>
+                    {SvgIcons.close(12)}
+                  </button>
+                </div>
+                <div style={{ padding: 10, flex: 1, overflow: 'hidden', background: 'var(--bg-surface)' }}>
+                  <FullContent id={w.id} name={w.name} />
+                </div>
+                <div className="resize-handle" onMouseDown={(e) => onResizeMouseDown(e, w.id)} />
+                <LabelChip kind="iframe" style={{ position: 'absolute', top: -20, left: 0 }}>iframe · 可拖拽</LabelChip>
+              </div>
+            ) : zoomLevel === 'mini' ? (
+              <MiniContent id={w.id} name={w.name} />
+            ) : (
+              <IconContent id={w.id} name={w.name} />
+            )}
+          </div>
+        ))}
+
+        {/* === 自由 HTML 组件（不可拖动！pointer-events: none 让点击穿透到 pan-container）=== */}
+        <div className="widget-scaler" data-widget-id="free-orb" data-free-html="true" data-zoom-scale={currentScale}
+          style={{ left: freeComponents[0].x, top: freeComponents[0].y, width: freeComponents[0].w, height: freeComponents[0].h, transform: 'scale(' + currentScale + ')', pointerEvents: 'none' }}>
+          <div className="free-orb" style={{ width: '100%', height: '100%' }} />
+          {zoomLevel === 'normal' && <LabelChip kind="free" style={{ position: 'absolute', top: -20, left: -10, whiteSpace: 'nowrap' }}>自由 HTML · 不可拖动</LabelChip>}
+        </div>
+        <div className="widget-scaler" data-widget-id="free-particles" data-free-html="true" data-zoom-scale={currentScale}
+          style={{ left: freeComponents[1].x, top: freeComponents[1].y, width: freeComponents[1].w, height: freeComponents[1].h, transform: 'scale(' + currentScale + ')', pointerEvents: 'none' }}>
+          {[0,1,2,3,4].map(i => (
+            <div key={i} className="free-particle" style={{ left: (i*40) + 'px', top: ((i%2)*40) + 'px', animationDelay: (i*1.2) + 's' }} />
+          ))}
+          {zoomLevel === 'normal' && <LabelChip kind="free" style={{ position: 'absolute', top: -20, left: 0 }}>自由 HTML · 不可拖动</LabelChip>}
+        </div>
+        <div className="widget-scaler" data-widget-id="free-ring" data-free-html="true" data-zoom-scale={currentScale}
+          style={{ left: freeComponents[2].x, top: freeComponents[2].y, width: freeComponents[2].w, height: freeComponents[2].h, transform: 'scale(' + currentScale + ')', pointerEvents: 'none' }}>
+          <div style={{ width: '100%', height: '100%', borderRadius: '50%', border: '2px solid rgba(80,227,194,0.5)', animation: 'orbSpin 10s linear infinite' }} />
+        </div>
+      </div>
+      {/* === 组件层结束 === */}
+
+      {/* === AI 对话方式互斥 === */}
+      {aiMode === 'dialog' && (
+        <div style={{ position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)', width: 'min(560px, 90%)', background: 'var(--glass-bg)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-full)', padding: '8px 8px 8px 18px', display: 'flex', alignItems: 'center', gap: 6, boxShadow: 'var(--shadow-md)', zIndex: 85 }} data-bottom-bar="true" data-ai-mode={aiMode}>
+          <input placeholder="输入消息或指令..." style={{ flex: 1, border: 'none', background: 'transparent', fontSize: 13, color: 'var(--text-primary)', outline: 'none' }} />
+          <button data-upload-btn="bottom" title="上传组件" style={{ border: 'none', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{SvgIcons.upload(16)}</button>
+          <button title="发送" style={{ background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>{SvgIcons.send(15)}</button>
+          <button onClick={() => setSettingsOpen(true)} data-settings-btn="bottom" title="设置" style={{ background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, boxShadow: '0 2px 8px rgba(74,144,226,0.3)' }}>{SvgIcons.settings(16)}</button>
+          <button onClick={() => setAiMode('ball')} data-mode-switch="to-ball" title="切换到浮球模式" style={{ border: 'none', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{SvgIcons.swap(16)}</button>
+        </div>
+      )}
+      {aiMode === 'ball' && (
+        <div style={{ position: 'absolute', right: 0, bottom: 0, zIndex: 95, pointerEvents: 'none' }} data-ai-ball-wrapper="true">
+          <div style={{ position: 'relative', pointerEvents: 'auto' }}>
+            {aiExpanded && (
+              <div className="pop-in" style={{ position: 'absolute', right: 24, bottom: 90, width: 300, background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-xl)', border: '1px solid var(--border-subtle)', overflow: 'hidden' }}>
+                <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--color-secondary)' }} /> AI 助手</div>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <button onClick={() => setAiMode('dialog')} data-mode-switch="to-dialog" title="切换到底部对话栏" style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-secondary)', padding: 4, display: 'flex', borderRadius: 'var(--radius-xs)' }}>{SvgIcons.swap(16)}</button>
+                    <button onClick={() => setSettingsOpen(true)} data-settings-btn="ai" title="设置" style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-secondary)', padding: 4, display: 'flex', borderRadius: 'var(--radius-xs)' }}>{SvgIcons.settings(16)}</button>
+                    <button onClick={() => setAiExpanded(false)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-tertiary)', padding: 4, display: 'flex' }}>{SvgIcons.close(14)}</button>
+                  </div>
+                </div>
+                <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 200, overflow: 'auto' }}>
+                  <div className="bubble-in" style={{ alignSelf: 'flex-end', maxWidth: '80%', background: 'var(--color-primary)', color: '#fff', padding: '8px 12px', borderRadius: '14px 14px 4px 14px', fontSize: 12 }}>帮我做一个计算器</div>
+                  <div className="bubble-in" style={{ alignSelf: 'flex-start', maxWidth: '80%', background: 'var(--bg-elevated)', padding: '8px 12px', borderRadius: '14px 14px 14px 4px', fontSize: 12 }}>好的，我帮你创建一个计算器组件。正在生成 HTML...</div>
+                </div>
+                <div style={{ padding: 10, borderTop: '1px solid var(--border-subtle)', display: 'flex', gap: 6 }}>
+                  <input placeholder="说点什么..." style={{ flex: 1, padding: '6px 10px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-full)', fontSize: 12, outline: 'none' }} />
+                  <button style={{ background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: '50%', width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>{SvgIcons.send(13)}</button>
+                </div>
+              </div>
+            )}
+            <div onClick={() => setAiExpanded(!aiExpanded)} data-ai-ball="true" className="ai-ball-glow" style={{ position: 'absolute', right: 24, bottom: 24, width: 56, height: 56, borderRadius: '50%', background: 'linear-gradient(135deg, var(--color-primary), var(--color-primary-dark))', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#fff', border: '2px solid rgba(255,255,255,0.6)' }}>
+              {aiExpanded ? SvgIcons.close(22) : SvgIcons.chat(22)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 设置面板 */}
+      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} widgets={widgets} toggleWidget={toggleWidget} theme={theme} setTheme={setTheme} aiMode={aiMode} setAiMode={setAiMode} zoomLevel={zoomLevel} setZoomLevel={setZoomLevel} currentRole={currentRole} setCurrentRole={setCurrentRole} />
+    </div>
+  );
+};
+
+/* ============================================================
+   视图 2：AI 对话演示（浮球 + 底部任务栏两种形态）
+   ============================================================ */
+const View2AI = () => {
+  const [mode, setMode] = useState('ball');
+  const [expanded, setExpanded] = useState(true);
+  return (
+    <div className="view-container" style={{ background: 'linear-gradient(135deg, #4A90E2 0%, #50E3C2 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} data-view="v2-ai">
+      <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-xl)', padding: 32, boxShadow: 'var(--shadow-xl)', maxWidth: 520 }} data-ai-demo-card>
+        <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 8 }}>AI 对话形态</h2>
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20 }}>浮球与底部任务栏可互相切换，两种形态互斥。</p>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+          <button onClick={() => setMode('ball')} data-mode-btn="ball" style={{ flex: 1, padding: '10px 14px', border: '1px solid ' + (mode === 'ball' ? 'var(--color-primary)' : 'var(--border-default)'), background: mode === 'ball' ? 'var(--color-primary-muted)' : 'transparent', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 13, fontWeight: 500, color: mode === 'ball' ? 'var(--color-primary)' : 'var(--text-secondary)' }}>浮球模式</button>
+          <button onClick={() => setMode('dialog')} data-mode-btn="dialog" style={{ flex: 1, padding: '10px 14px', border: '1px solid ' + (mode === 'dialog' ? 'var(--color-primary)' : 'var(--border-default)'), background: mode === 'dialog' ? 'var(--color-primary-muted)' : 'transparent', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 13, fontWeight: 500, color: mode === 'dialog' ? 'var(--color-primary)' : 'var(--text-secondary)' }}>底部任务栏</button>
+        </div>
+        {mode === 'ball' ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 24, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)' }}>
+            <div onClick={() => setExpanded(!expanded)} data-ai-ball="true" className="ai-ball-glow" style={{ width: 56, height: 56, borderRadius: '50%', background: 'linear-gradient(135deg, var(--color-primary), var(--color-primary-dark))', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#fff' }}>{expanded ? SvgIcons.close(22) : SvgIcons.chat(22)}</div>
+          </div>
+        ) : (
+          <div style={{ padding: 12, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-full)', display: 'flex', gap: 6 }} data-bottom-bar="true">
+            <input placeholder="输入消息..." style={{ flex: 1, border: 'none', background: 'transparent', fontSize: 13, outline: 'none' }} />
+            <button style={{ background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: '50%', width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>{SvgIcons.send(14)}</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/* ============================================================
+   视图 3：背景层演示（下雨/下雪/时钟/渐变）
+   ============================================================ */
+const View3Background = () => {
+  const [effect, setEffect] = useState('rain');
+  return (
+    <div className="view-container" style={{ background: 'var(--bg-canvas)', position: 'relative', overflow: 'hidden' }} data-view="v3-bg">
+      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(74,144,226,0.08), rgba(80,227,194,0.06))' }} />
+      {effect === 'rain' && <RainEffect count={80} />}
+      {effect === 'snow' && <SnowEffect count={60} />}
+      <ClockWidget position={{ top: 40, left: 40 }} immune={true} />
+      <div style={{ position: 'absolute', bottom: 40, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 8, zIndex: 10 }}>
+        <button onClick={() => setEffect('rain')} data-bg-btn="rain" style={{ padding: '8px 16px', border: '1px solid ' + (effect === 'rain' ? 'var(--color-primary)' : 'var(--border-default)'), background: effect === 'rain' ? 'var(--color-primary)' : 'var(--bg-surface)', color: effect === 'rain' ? '#fff' : 'var(--text-secondary)', borderRadius: 'var(--radius-full)', cursor: 'pointer', fontSize: 12 }}>下雨</button>
+        <button onClick={() => setEffect('snow')} data-bg-btn="snow" style={{ padding: '8px 16px', border: '1px solid ' + (effect === 'snow' ? 'var(--color-primary)' : 'var(--border-default)'), background: effect === 'snow' ? 'var(--color-primary)' : 'var(--bg-surface)', color: effect === 'snow' ? '#fff' : 'var(--text-secondary)', borderRadius: 'var(--radius-full)', cursor: 'pointer', fontSize: 12 }}>下雪</button>
+        <button onClick={() => setEffect('none')} data-bg-btn="none" style={{ padding: '8px 16px', border: '1px solid ' + (effect === 'none' ? 'var(--color-primary)' : 'var(--border-default)'), background: effect === 'none' ? 'var(--color-primary)' : 'var(--bg-surface)', color: effect === 'none' ? '#fff' : 'var(--text-secondary)', borderRadius: 'var(--radius-full)', cursor: 'pointer', fontSize: 12 }}>无特效</button>
+      </div>
+      <div style={{ position: 'absolute', top: 40, right: 40, background: 'var(--glass-bg)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', padding: '12px 16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--glass-border)', fontSize: 12, color: 'var(--text-secondary)' }}>
+        背景层始终存在，不随相册缩放消失
+      </div>
+    </div>
+  );
+};
+
+/* ============================================================
+   视图 4：弹出层演示（登录窗口/引导/广告）
+   ============================================================ */
+const View4Popup = () => {
+  const [popup, setPopup] = useState('login');
+  return (
+    <div className="view-container" style={{ background: 'var(--bg-canvas)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} data-view="v4-popup">
+      <div style={{ textAlign: 'center' }}>
+        <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 16 }}>弹出层演示</h2>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginBottom: 24 }}>
+          <button onClick={() => setPopup('login')} data-popup-btn="login" style={{ padding: '8px 16px', border: '1px solid ' + (popup === 'login' ? 'var(--color-primary)' : 'var(--border-default)'), background: popup === 'login' ? 'var(--color-primary-muted)' : 'transparent', color: popup === 'login' ? 'var(--color-primary)' : 'var(--text-secondary)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 12 }}>登录窗口</button>
+          <button onClick={() => setPopup('guide')} data-popup-btn="guide" style={{ padding: '8px 16px', border: '1px solid ' + (popup === 'guide' ? 'var(--color-primary)' : 'var(--border-default)'), background: popup === 'guide' ? 'var(--color-primary-muted)' : 'transparent', color: popup === 'guide' ? 'var(--color-primary)' : 'var(--text-secondary)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 12 }}>新手引导</button>
+          <button onClick={() => setPopup('ad')} data-popup-btn="ad" style={{ padding: '8px 16px', border: '1px solid ' + (popup === 'ad' ? 'var(--color-primary)' : 'var(--border-default)'), background: popup === 'ad' ? 'var(--color-primary-muted)' : 'transparent', color: popup === 'ad' ? 'var(--color-primary)' : 'var(--text-secondary)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 12 }}>广告弹窗</button>
+        </div>
+        {popup === 'login' && (
+          <div className="pop-in" style={{ width: 320, background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-xl)', padding: 24, textAlign: 'left' }} data-popup-content="login">
+            <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, textAlign: 'center' }}>登录</h3>
+            <input placeholder="用户名" style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 13, marginBottom: 10, outline: 'none' }} />
+            <input type="password" placeholder="密码" style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 13, marginBottom: 16, outline: 'none' }} />
+            <button style={{ width: '100%', padding: '10px', background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>登录</button>
+          </div>
+        )}
+        {popup === 'guide' && (
+          <div className="pop-in" style={{ width: 360, background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-xl)', padding: 24, textAlign: 'left' }} data-popup-content="guide">
+            <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>欢迎使用 Daily</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>Daily 是一个画布 + AI Agent 的平台。你可以通过 AI 对话生成 HTML 组件，也可以手动上传。</p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button style={{ flex: 1, padding: '8px', background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontSize: 12, cursor: 'pointer' }}>开始使用</button>
+              <button style={{ flex: 1, padding: '8px', background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 12, cursor: 'pointer' }}>跳过</button>
+            </div>
+          </div>
+        )}
+        {popup === 'ad' && (
+          <div className="pop-in" style={{ width: 360, background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-xl)', padding: 0, textAlign: 'left', overflow: 'hidden' }} data-popup-content="ad">
+            <div style={{ height: 120, background: 'linear-gradient(135deg, #4A90E2, #50E3C2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 18, fontWeight: 600 }}>Daily Pro</div>
+            <div style={{ padding: 16 }}>
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>升级到 Pro 版本，解锁更多 AI 工具和社区功能。</p>
+              <button style={{ width: '100%', padding: '8px', background: 'var(--color-primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>立即升级</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/* ============================================================
+   App 根组件
+   ============================================================ */
+const App = () => {
+  const [activeView, setActiveView] = useState('v1');
+  const views = [
+    { id: 'v1', label: '画布核心', component: View1Canvas },
+    { id: 'v2', label: 'AI 对话', component: View2AI },
+    { id: 'v3', label: '背景层', component: View3Background },
+    { id: 'v4', label: '弹出层', component: View4Popup },
+  ];
+  const Current = views.find(v => v.id === activeView).component;
+  return (
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <TopBar activeView={activeView} onViewChange={setActiveView} />
+      <Current />
+    </div>
+  );
+};
+
+window.App = App;
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+
+<script>
+/* Babel 手动转换：classic runtime */
+(function() {
+  var src = document.getElementById('app-source').textContent;
+  var out = Babel.transform(src, { presets: [['react', { runtime: 'classic' }]] }).code;
+  var script = document.createElement('script');
+  script.textContent = out;
+  document.head.appendChild(script);
+})();
+</script>
+</body>
+</html>

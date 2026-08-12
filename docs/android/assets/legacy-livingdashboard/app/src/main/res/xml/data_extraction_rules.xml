@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- M0 无需云备份的数据 -->
+    </cloud-backup>
+    <device-transfer>
+        <!-- M0 无需设备迁移的数据 -->
+    </device-transfer>
+</data-extraction-rules>

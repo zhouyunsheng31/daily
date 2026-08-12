@@ -1,0 +1,201 @@
+<!--
+  Daily 平台展示面板 · 鼠标流动粒子尾迹
+  -----------------------------------------------------------
+  用途：freeHtml widget（isGlobal=true, interactive=false, zIndex=9999）
+  注入方式：通过 dangerouslySetInnerHTML 注入画布 DOM
+  定位：position:fixed; inset:0; z-index:9999; pointer-events:none（点击穿透）
+  特效：监听 document.mousemove，产生青色→紫色渐变粒子尾迹
+        粒子有缓动衰减（速度递减 + 透明度递减 + 半径缩小）
+        使用 additive blending 产生发光叠加效果
+  无外部依赖，60fps
+-->
+<style>
+  .daily-trail-root {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  .daily-trail-root canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+</style>
+
+<div class="daily-trail-root">
+  <canvas id="dailyTrailCanvas"></canvas>
+</div>
+
+<script>
+/* ==========================================================================
+   鼠标流动粒子尾迹
+   - 监听 document.mousemove（pointer-events:none 也能收到事件）
+   - 每次移动产生 3~5 个粒子，带随机速度扩散
+   - 颜色：青色 #00e5ff → 紫色 #b026ff 随粒子寿命渐变
+   - 缓动衰减：speed *= 0.94, alpha -= 0.016, radius *= 0.98
+   - additive blending（globalCompositeOperation='lighter'）产生发光叠加
+   - 拖尾：每帧用低透明度黑色覆盖而非完全清空，产生残影拖尾
+   ========================================================================== */
+(function () {
+  'use strict';
+
+  // —— 单例保护 ——
+  if (window.__dailyTrailInit) {
+    try { window.__dailyTrailCleanup && window.__dailyTrailCleanup(); } catch (_) {}
+  }
+  window.__dailyTrailInit = true;
+
+  var canvas = document.getElementById('dailyTrailCanvas');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  var W = 0, H = 0, dpr = Math.min(window.devicePixelRatio || 1, 2);
+  var particles = [];
+  var MAX_PARTICLES = 600;
+  var mouseX = -999, mouseY = -999;
+  var prevMouseX = -999, prevMouseY = -999;
+  var rafId = null;
+  var throttleLast = 0;
+
+  function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  // 颜色插值：青色(0,229,255) → 紫色(176,38,255)
+  function colorAt(t) {
+    // t: 0(新生,青) → 1(消亡,紫)
+    var r = Math.round(0   + (176 - 0)   * t);
+    var g = Math.round(229 + (38 - 229)  * t);
+    var b = Math.round(255 + (255 - 255) * t);
+    return { r: r, g: g, b: b };
+  }
+
+  function spawn(x, y, count) {
+    for (var i = 0; i < count; i++) {
+      if (particles.length >= MAX_PARTICLES) particles.shift();
+      var angle = Math.random() * Math.PI * 2;
+      var spd = 0.5 + Math.random() * 2.5;
+      particles.push({
+        x: x,
+        y: y,
+        vx: Math.cos(angle) * spd,
+        vy: Math.sin(angle) * spd - 0.3,   // 略微上飘
+        life: 0,                           // 寿命 0→1
+        decay: 0.012 + Math.random() * 0.012,
+        radius: 2 + Math.random() * 4,
+        baseRadius: 0
+      });
+      particles[particles.length - 1].baseRadius = particles[particles.length - 1].radius;
+    }
+  }
+
+  function onMouseMove(e) {
+    var now = performance.now();
+    // 节流：16ms 内只处理一次（约 60fps）
+    if (now - throttleLast < 12) return;
+    throttleLast = now;
+
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+
+    if (prevMouseX < -100) {
+      prevMouseX = mouseX;
+      prevMouseY = mouseY;
+    }
+    // 根据移动速度产生粒子数（快速移动更多粒子）
+    var dx = mouseX - prevMouseX;
+    var dy = mouseY - prevMouseY;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    var count = Math.min(6, 2 + Math.floor(dist / 12));
+
+    spawn(mouseX, mouseY, count);
+
+    // 在路径上插值补充粒子，避免快速移动出现断点
+    if (dist > 20) {
+      var steps = Math.min(4, Math.floor(dist / 25));
+      for (var s = 1; s <= steps; s++) {
+        var ix = prevMouseX + dx * (s / steps);
+        var iy = prevMouseY + dy * (s / steps);
+        spawn(ix, iy, 2);
+      }
+    }
+    prevMouseX = mouseX;
+    prevMouseY = mouseY;
+  }
+
+  function draw() {
+    // 拖尾效果：用低透明度覆盖代替完全清空
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+    ctx.fillRect(0, 0, W, H);
+
+    // 叠加发光
+    ctx.globalCompositeOperation = 'lighter';
+
+    for (var i = particles.length - 1; i >= 0; i--) {
+      var p = particles[i];
+
+      // 更新位置 + 缓动衰减
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vx *= 0.94;
+      p.vy *= 0.94;
+      p.vy += 0.02; // 微重力
+
+      p.life += p.decay;
+      p.radius = p.baseRadius * (1 - p.life * 0.6);
+
+      if (p.life >= 1 || p.radius < 0.3) {
+        particles.splice(i, 1);
+        continue;
+      }
+
+      var c = colorAt(p.life);
+      var alpha = (1 - p.life) * 0.9;
+
+      // 外发光（大半径低透明）
+      var glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.radius * 4);
+      glow.addColorStop(0, 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',' + (alpha * 0.5) + ')');
+      glow.addColorStop(1, 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius * 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 核心亮点
+      ctx.fillStyle = 'rgba(255, 255, 255, ' + (alpha * 0.7) + ')';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    rafId = requestAnimationFrame(draw);
+  }
+
+  // —— 清理函数 ——
+  window.__dailyTrailCleanup = function () {
+    if (rafId) cancelAnimationFrame(rafId);
+    if (window.__dailyTrailMove) document.removeEventListener('mousemove', window.__dailyTrailMove);
+    if (window.__dailyTrailResize) window.removeEventListener('resize', window.__dailyTrailResize);
+    rafId = null;
+    particles = [];
+  };
+
+  // —— 启动 ——
+  resize();
+  window.__dailyTrailMove = onMouseMove;
+  window.__dailyTrailResize = resize;
+  document.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('resize', resize);
+  rafId = requestAnimationFrame(draw);
+})();
+</script>

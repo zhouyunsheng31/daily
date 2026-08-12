@@ -1,0 +1,200 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Debug / tool output (transient, must never be committed)
+*-stdout.txt
+*-stderr.txt
+tsc-*.txt
+vite-*.txt
+
+# Local search / scratch lists (transient, unrelated to repo)
+?-list.txt
+
+# Local review script — contains hard-coded credentials. NEVER commit.
+review.mjs
+
+# Review helper scripts that may carry credentials. NEVER commit.
+# Match any path, any extension, any casing.
+**/chatst*.cjs
+**/chatst*.js
+**/chatst*.ts
+**/send_review.cjs
+**/send_review.py
+
+# OS / build artifacts
+Thumbs.db
+*.tsbuildinfo
+
+# Runtime databases (SQLite + temp IndexedDB backups)
+# 注意：只忽略运行时数据库文件，不忽略源码目录 client/android/.../data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+server/data/
+
+# Phase 14: 根目录 data/ 包含 PostgreSQL 数据（pgdata/，数百 MB）+ SQL 备份 + 临时测试脚本
+# 用 /data/ 锚定根目录，不影响 client/android/.../data/ 等源码目录
+/data/
+
+# Transient debug output
+_workspace_diff.txt
+
+# External/unrelated files
+contest-registration/
+
+# Test artifacts (one-off debugging, not part of the test suite)
+test-sudoku-page.tsx
+test-sudoku.html
+test_sudoku.py
+_debug.py
+
+# E2E test script — contains hard-coded API Key. NEVER commit.
+test-stepfun-e2e.ps1
+
+# Environment variables (contain API keys). NEVER commit.
+.env
+.env.local
+.env.*.local
+.env.server
+.env.prod
+
+# Trae IDE working directory
+.trae/
+
+# Server diagnostic files (pre-existing, not part of codebase)
+server/diag-ws-script.txt
+server/diag-ws.mjs
+server/test-ws.mjs
+
+# Electron build output
+out/
+dist-electron/
+
+# Build outputs (G10: 构建产物目录，体积大不应入 git)
+build-out/
+build-out-v1/
+build-out-v2/
+build-out-v3/
+release/
+pkg-staging/
+
+# Android local config
+client/android/local.properties
+client/android/.gradle/
+client/android/.gradle-home/
+client/android/app/build/
+client/android/build/
+.gradle-cache/
+
+# Keystores (M8 签名，Spec 8.2 行 1814)
+# 路径固定 F:\allmylife\keystores\living-dashboard.jks，密码通过环境变量传入
+# 任何 jks / keystore 文件绝不能入 git（含密钥）
+*.jks
+*.keystore
+F:/allmylife/keystores/
+
+# 临时调试文件（UI dump、截图、logcat、build log）
+ui_*.xml
+ui_*.png
+m8_*.txt
+m8_*.xml
+m8_*.png
+*_logcat_*.txt
+*_build_log.txt
+
+# 临时 APK 解压目录（调试 Android APK 时产生，体积大且无关）
+tmp_apk_check/
+
+# Robolectric 临时依赖目录（DefaultSdkProvider.class 等，本机路径相关，不应入 git）
+org/robolectric/
+
+# M3 临时调试文件
+m3_test_fix*.txt
+
+# Pi Agent 认证文件（含敏感信息）
+.pi/auth.json
+
+# 临时 npm cache（Phase 10 构建脚本为绕过 TRAE 沙箱对 F:\allmylife\npm-cache 的限制，重定向到项目内；构建后自动清理）
+.npm-cache/
+
+# Phase 11.1 测试产物（vitest coverage + playwright report）
+coverage/
+playwright-report/
+test-results/
+.npm-prefix/
+
+# D1：Electron e2e 测试产物（playwright html 报告 + smoke 截图）
+e2e-report/
+e2e/screenshots/
+
+# Phase 15 batch 7: Electron desktop runtime user data cache (auto-recreated)
+.dev-userdata/
+
+# 临时截图、验证脚本、调试文件（根目录散落）
+/*.png
+/build_log*.txt
+/_check_db.py
+/_verify.py
+/canvas_screenshot.png
+/现在我们分三个问题分别来讨论：.txt
+
+# 验证产物目录
+/docs/verify/
+/screenshots/
+/.tmp/
+/test/
+
+# e2e 临时调试脚本
+/e2e/login-input-debug*.mjs
+/e2e/login-input-repro.mjs
+
+# server 临时诊断文件
+/server/daily.db.bak
+/server/test/diag-ws-*.ts
+
+# client/web 验证截图
+/client/web/验证截图/
+
+# Additional large dirs for GitHub upload
+.gradle-cache/
+.npm-cache/
+build/
+build-out/
+build-out-v1/
+build-out-v2/
+build-out-v3/
+release/
+pkg-staging/
+screenshots/
+tmp_apk_check/
+*.apk
+*.aab
+
+# Android dev: 临时目录（测试产物/日志等，不入库；归档走 docs/android/perf-reports/）
+tmp/
+
+# Operit 运行时自动备份（聊天/对象存储，持续增长，不入库）
+.backup/

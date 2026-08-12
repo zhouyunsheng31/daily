@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Daily · UI 原型总览</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #f5f5f7;
+      --card: #ffffff;
+      --accent: #4A90E2;
+      --accent-light: rgba(74, 144, 226, 0.15);
+      --accent-hover: #3A7BC2;
+      --text-primary: #1d1d1f;
+      --text-secondary: #86868b;
+      --text-tertiary: #adb5bd;
+      --border: rgba(0, 0, 0, 0.08);
+      --shadow: rgba(0, 0, 0, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text-primary);
+    }
+
+    .app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    .header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 1px 3px var(--shadow);
+      z-index: 10;
+    }
+
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+    }
+
+    .brand-name {
+      font-family: 'Newsreader', Georgia, serif;
+      font-size: 28px;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: -0.5px;
+    }
+
+    .brand-tag {
+      font-size: 13px;
+      color: var(--text-tertiary);
+      letter-spacing: 0.5px;
+    }
+
+    .nav {
+      display: flex;
+      gap: 8px;
+      background: var(--bg);
+      padding: 4px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+
+    .nav-btn {
+      padding: 8px 16px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: all 200ms ease;
+      font-family: inherit;
+    }
+
+    .nav-btn:hover {
+      background: var(--accent-light);
+      color: var(--accent);
+    }
+
+    .nav-btn.active {
+      background: var(--accent);
+      color: white;
+    }
+
+    .content {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .frame-wrapper {
+      position: absolute;
+      inset: 0;
+      display: none;
+    }
+
+    .frame-wrapper.active {
+      display: block;
+    }
+
+    .frame-wrapper iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+
+    .info-bar {
+      background: var(--card);
+      border-top: 1px solid var(--border);
+      padding: 8px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      color: var(--text-tertiary);
+    }
+
+    .info-left {
+      display: flex;
+      gap: 24px;
+    }
+
+    .info-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    .open-btn {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 500;
+      transition: color 200ms ease;
+    }
+
+    .open-btn:hover {
+      color: var(--accent-hover);
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="brand">
+        <div class="brand-name">Daily</div>
+        <div class="brand-tag">UI 原型总览 · 画布 + AI Agent</div>
+      </div>
+      <nav class="nav">
+        <button class="nav-btn active" data-target="canvas">画布核心 v3</button>
+        <button class="nav-btn" data-target="auxiliary">辅助页面 v2</button>
+      </nav>
+    </header>
+
+    <main class="content">
+      <div class="frame-wrapper active" id="frame-canvas">
+        <iframe src="./canvas-core-v3.html" title="画布核心页面 v3"></iframe>
+      </div>
+      <div class="frame-wrapper" id="frame-auxiliary">
+        <iframe src="./auxiliary-pages-v2.html" title="辅助页面 v2"></iframe>
+      </div>
+    </main>
+
+    <footer class="info-bar">
+      <div class="info-left">
+        <div class="info-item">
+          <span class="dot"></span>
+          <span id="current-page">画布核心：三层模型 / 相册缩放 / AI 对话 / 背景层 / 弹出层</span>
+        </div>
+      </div>
+      <div>
+        <a href="./canvas-core.html" target="_blank" class="open-btn" id="open-direct">在新标签打开 →</a>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    const navBtns = document.querySelectorAll('.nav-btn');
+    const frames = document.querySelectorAll('.frame-wrapper');
+    const currentPageEl = document.getElementById('current-page');
+    const openDirectEl = document.getElementById('open-direct');
+
+    const pageInfo = {
+      canvas: {
+        text: '画布核心 v3：缩放集成在画布主页（正常→缩小版→图标）+ AI 对话 + 背景层 + 弹出层',
+        href: './canvas-core-v3.html'
+      },
+      auxiliary: {
+        text: '辅助页面 v2：登录 / 设置 / 面板切换 / 社区发现 / 组件导入',
+        href: './auxiliary-pages-v2.html'
+      }
+    };
+
+    navBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const target = btn.dataset.target;
+        navBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        frames.forEach(f => f.classList.remove('active'));
+        document.getElementById(`frame-${target}`).classList.add('active');
+        currentPageEl.textContent = pageInfo[target].text;
+        openDirectEl.href = pageInfo[target].href;
+      });
+    });
+  </script>
+</body>
+</html>

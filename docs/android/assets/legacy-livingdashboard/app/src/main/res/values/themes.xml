@@ -1,0 +1,4 @@
+<resources>
+    <!-- M0 用 Material3，主题继承 Material3.DayNight.NoActionBar（Compose 应用只需空主题） -->
+    <style name="Theme.LivingDashboard" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

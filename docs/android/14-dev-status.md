@@ -1,0 +1,80 @@
+# 14 · 开发状态快照与开工基线（2026-08-15）
+
+> 本文是 Android 端开工时的「现场快照」，记录：仓库/远端情况、脚手架 zip 包位置与内容、环境实测基线、已拍板决策。
+> 目的：任何时候（换设备/换 AI/断档）重新接手，读本文 + 13-dev-toolchain 即可知道「我们从哪里开始、东西放在哪」。
+
+## 1. GitHub 远端情况（2026-08-15 用用户 token 实测）
+
+- 账号：`zhouyunsheng31`
+- 仓库：**`zhouyunsheng31/daily`**（private，默认分支 `main`，约 21MB，description "Daily repository"）
+- 历史：仅 2 个 commit（`65849783` Initial commit 2026-07-13；`3ba8d6f4` chore: upload event project to GitHub 2026-07-25）
+  → **远端是 7-25 的旧快照，无后续更新；工作区本地内容才是权威最新版**（docs/android/*、13-dev-toolchain 等 8 月文件均不在远端）
+- **GitHub Actions：workflow 数量为 0**（`actions/workflows` 返回空），CI 从零建
+- ⚠️ 首次推送需要 `--force` 建立本地权威历史（远端旧历史与本地无共同祖先，见 §5 执行记录）
+
+## 2. 脚手架压缩包位置（重要，勿丢）
+
+| 项 | 值 |
+|---|---|
+| 原始 zip | **`/sdcard/workspace_42e234d4.zip`**（2,120,078 字节 ≈ 2.1MB） |
+| 解压目录 | 工作区 `tmp/workspace_42e234d4/42e234d4-cbbc-4a0e-83bf-8645ffb1b2ac/` |
+| 来源 | Operit 生成的 Android 模板（README 注明"Operit Android 项目"） |
+
+### 包内资产清单
+
+| 文件 | 说明 |
+|---|---|
+| `tools/aapt2/aapt2-arm64-v8a` | **ARM64 aapt2**（ReVanced 构建，v1.0.0，SHA-256 `e5b5ff7f0d4f6ecd7fa5d05d77fed3f09f6f1bf80f078b8aada82bc578848561` 已校验一致）——解决 proot 本地构建最大障碍 |
+| `setup_android_env.sh`（19KB） | 一键环境脚本：装 OpenJDK17 + Gradle 9.1.0（国内镜像测速）+ Android cmdline-tools/SDK35/build-tools35 + aapt2 替换（SDK 与 Gradle 缓存双路径）+ wrapper 指向本地 zip + 关 aapt2 daemon（proot 兼容） |
+| `gradle/libs.versions.toml` | AGP `9.0.0` / composeBom `2026.01.01` / coreKtx 1.10.1 / activityCompose 1.8.0 等 |
+| `app/build.gradle.kts` | 含 aapt2 `linux-aarch64` resolutionStrategy 强制替换 + `android.aapt2.process.daemon=false` 说明 |
+| `gradle/wrapper/` | gradle-wrapper.jar + properties（**distributionUrl 被脚本改成 `file://` 本地路径，提交前必须恢复官方 URL**） |
+| `settings.gradle.kts` | 阿里云/华为云镜像仓库（国内网络友好；CI 上保留 google()/mavenCentral()） |
+| 模板工程 | `com.java.myapplication` 单模块 Compose 空壳（Hello World），**不可直接用，需改造** |
+
+### 模板已知问题（改造时必须处理）
+
+1. `libs.versions.toml` 的 plugins 引用 `version.ref = "kotlin"`，但 `[versions]` 里**没有定义 kotlin**（README 里写了 2.3.10）→ 需补 `kotlin = "2.3.10"`
+2. 包名/namespace `com.java.myapplication` → 必须改为 `xyz.shadowshub.daily`
+3. minSdk 24 → 文档要求 26
+4. 单模块 → 文档要求多模块（app/core/app-runtime/overlay-runtime/capability/packages/sync + baselineprofile/macrobenchmark）
+5. gradlew 权限是 `-rw-------` → 需 chmod +x（Git mode 100755）
+6. 无 CI workflow → 需按 13 号文档 §6 写 `.github/workflows/android.yml`
+7. 无 Koin/OkHttp-SSE/Room-KSP/DataStore/WebKit/WorkManager/Coil/detekt 依赖 → 补 Version Catalog
+
+## 3. 环境实测基线（2026-08-15，与 13 号文档 §1 一致并更新）
+
+| 项目 | 实测值 | 影响 |
+|---|---|---|
+| 架构 | aarch64（Android 12 内核） | 只能跑 ARM64 二进制 |
+| Ubuntu | 24.04 风格 proot，HOME=/root | Node v24 可用 |
+| **Java/JDK** | 未安装 | 本地构建需 `apt install openjdk-17-jdk` |
+| Gradle / Android SDK / adb | 未安装 | 本地构建需 setup 脚本 |
+| **git** | 未安装（本轮已 `apt install git`） | 本地版本管理已就绪 |
+| 存储 | 220G 总量，**24G 可用（90% 已用）** | 缓存预算 ≤6GB，禁模拟器 |
+| 内存 | 7.2G 总，**available ≈ 2.0G** | 本地大构建有被杀风险，云端为权威 |
+| unzip | 无（用 python3 zipfile 解压） | — |
+
+## 4. 已拍板执行决策（本轮确认）
+
+1. **主路径 = GitHub Actions 云构建**（权威、可复现、日志可查）；**本地 ARM64 构建 = 可选加速**（zip 包已解 aapt2 障碍，但受内存/存储限制）。
+2. 本地构建成功定义（13 号文档 §9）：同一 commit 本地与云端都能 assembleDebug 且 APK 行为一致；否则云端权威。
+3. **先本地 git init 建基线 → 后续开发有回滚点**；首次推送 GitHub 用 `--force` 一次性替换远端旧快照（用户已确认）。
+4. `client/android/` 旧 LivingDashboard 工程（2026-07-29，Hilt/AGP8.2.2/单模块，196 个 .kt）**不删除，移入 `tmp/legacy-livingdashboard/` 存档**（其中 AI 对话/WS 实现有参考价值，且是自有代码可复用）。
+5. 签名纪律：debug keystore 走 GitHub Secret（base64）统一签名；release keystore 手机离线生成后进私有加密存储，绝不入库/对话/日志。
+6. ⚠️ 安全记录：用户曾将 GitHub PAT 直接发在对话中，**该 token 已视为暴露，需在 GitHub 后台 revoke 并重新签发**；后续凭证只走环境变量/Secret。
+
+## 5. 执行记录（时间线）
+
+- 2026-08-15：README/12-roadmap 更新、新增 13-dev-toolchain（云构建主路径）
+- 2026-08-15：拿到脚手架 zip（/sdcard/workspace_42e234d4.zip）并解压存档
+- 2026-08-15：确认 GitHub 仓库 zhouyunsheng31/daily（private，无 Actions）
+- 2026-08-15：安装 git、本地仓库初始化 + 基线 commit、旧 LivingDashboard 存档（见 git log）
+- 下一步：M0-1 脚手架改造 → 首次 push（--force 建历史）→ CI 绿 → 手机装 APK 验证四 Tab
+
+## 6. 相关文档索引
+
+- 总索引/决策：`docs/android/README.md`（D1–D14）
+- 工具链与云构建：`docs/android/13-dev-toolchain.md`
+- 路线图：`docs/android/12-roadmap.md`（M0-1 完成定义 §11）
+- 工程结构：`docs/android/02-architecture.md`

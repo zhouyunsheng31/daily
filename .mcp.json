@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "living-dashboard": {
+      "command": "node",
+      "args": ["f:\\allmylife\\event\\mcp\\dist\\index.js"],
+      "env": {
+        "DASHBOARD_PROJECT_ROOT": "f:\\allmylife\\event"
+      }
+    }
+  }
+}

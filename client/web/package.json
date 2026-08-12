@@ -1,0 +1,37 @@
+{
+  "name": "daily-web",
+  "private": true,
+  "version": "0.6.0-s15",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b --noEmit"
+  },
+  "dependencies": {
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "react-router-dom": "^7.1.0",
+    "zustand": "^5.0.14",
+    "idb": "^8.0.3",
+    "uuid": "^14.0.0",
+    "lucide-react": "^1.17.0",
+    "katex": "^0.16.11",
+    "pdfjs-dist": "^4.8.69",
+    "html-to-image": "^1.11.13",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@types/uuid": "^10.0.0",
+    "@types/node": "^22.10.0",
+    "@vitejs/plugin-react": "^6.0.1",
+    "tailwindcss": "^4.1.0",
+    "@tailwindcss/vite": "^4.1.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.0.12",
+    "@types/katex": "^0.16.7"
+  }
+}

@@ -1,0 +1,77 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: daily-postgres
+    restart: unless-stopped
+    mem_limit: 512m
+    mem_reservation: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-daily}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-daily}
+      POSTGRES_DB: ${POSTGRES_DB:-daily}
+    ports:
+      - "${PG_PORT:-5432}:5432"
+    volumes:
+      # 数据卷挂载到非 C 盘路径（Windows: F:\allmylife\event\data\pgdata）
+      - ${PGDATA_HOST_PATH:-F:/allmylife/event/data/pgdata}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-daily} -d ${POSTGRES_DB:-daily}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - daily-net
+
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    container_name: daily-server
+    restart: unless-stopped
+    mem_limit: 1g
+    mem_reservation: 512m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3456
+      DATABASE_URL: postgresql://${POSTGRES_USER:-daily}:${POSTGRES_PASSWORD:-daily}@postgres:5432/${POSTGRES_DB:-daily}
+      SERVER_TOKEN: ${SERVER_TOKEN:-}
+      PI_MODEL: ${PI_MODEL:-stepfun/step-3.7-flash}
+      PI_API_KEY: ${PI_API_KEY:-}
+      PI_API_ENDPOINT: ${PI_API_ENDPOINT:-}
+      VITE_STEPFUN_API_KEY: ${STEPFUN_API_KEY:-}
+      # SQLite 迁移用：宿主机 data 目录挂载到容器 /host-data（docker-migrate.bat 使用）
+      SQLITE_PATH: ${SQLITE_PATH:-/host-data/daily.db}
+      # Phase S11: Web 端认证 + CORS + 静态托管
+      WEB_ACCESS_PASSWORD: ${WEB_ACCESS_PASSWORD:-}
+      JWT_SECRET: ${JWT_SECRET:-}
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+      WEB_PUBLIC_DIR: ${WEB_PUBLIC_DIR:-./public}
+    ports:
+      - "${SERVER_PORT:-3456}:3456"
+    volumes:
+      # 挂载宿主机 data 目录（只读）用于 SQLite→PG 迁移
+      - ${DATA_HOST_PATH:-F:/allmylife/event/data}:/host-data:ro
+      # Phase 14 修复：挂载 .pi/skills 到容器内 /app/.pi/skills（只读）
+      # piBridge.ts 第 1052 行 join(cwd, '.pi', 'skills')，cwd=/app，需要 /app/.pi/skills
+      # 让云端 AI 模式下 DefaultResourceLoader.additionalSkillPaths 能读到 Skill
+      - ./.pi/skills:/app/.pi/skills:ro
+    networks:
+      - daily-net
+
+networks:
+  daily-net:
+    driver: bridge

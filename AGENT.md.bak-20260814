@@ -1,0 +1,1824 @@
+# Daily / webOS
+
+## 主产品方向（2026-07-30 决策）
+
+Daily 正从“可持久化的个人生活管理面板”演进为一个**移动端优先、AI-native 的网页操作系统（webOS）**。旧 Dashboard 不再承载新 Shell；无限画布未来作为系统内置 App 存续。
+
+核心产品形态：
+
+- **AI 助手即系统主页**：首次打开自动进入游客身份并直达 AI 助手页，以简洁、灵动的对话气泡承载纯文字交互；首版不包含 ASR、TTS 或其他语音能力。
+- **游客优先账户**：登录不是使用门槛；系统自动分配游客身份与免费余额，邮箱验证码登录只用于绑定、同步和游客资产迁移。
+- **余额与支付**：余额、用量预估和支付页面属于 P0；真实支付 API 接入前只提供 UI、订单状态设计与供应商抽象，不伪造扣款成功。
+- **独立 AI 控制**：模型选择与四档思考强度（快速/平衡/深度/极深）是两个独立 P0 配置，通过 Provider Adapter 映射真实 API 参数。
+- **HTML App 运行时**：系统中的 App 以版本化 HTML 包为主要形态，在 sandbox iframe 中运行，通过受控 SDK 与系统交互。
+- **AI 生成与修改 App**：上传、商店安装之外，AI 生成是最主要的 App 创建路径；每次修改产生不可变的新版本，支持回滚。
+- **权限中介**：App 和 Agent 不直接获得系统能力；最终授权是“平台安全策略 ∩ 用户授权 ∩ Agent 工具权限 ∩ App 能力声明”。
+- **文件工作区**：提供面向用户和 Agent 的虚拟文件系统，授权可细化到本次/会话/永久、指定目录、只读/写入/删除/执行。
+- **应用分发**：支持本地上传、AI 生成、应用商店安装，后续支持社区发布、审核、版本更新与撤回。
+- **PWA 优先**：先交付移动端 Web 版本，目标是可安装、离线壳可用、接近原生 App 的启动与任务切换体验；桌面 Shell 后续共享运行时能力。
+- **商业模式**：围绕 AI 用量、云存储和套餐权益计费；计费不能绕过权限、版本和用量审计。若后续托管 OpenWebUI、SillyTavern 等服务型项目，还必须单独核算 CPU、内存、运行时长和流量，不能只按空间收费。
+
+### 架构策略与边界
+
+采用**同仓并行新壳、逐步替换旧壳**，而不是新开完全独立仓库，也不把现有 `client/web/` 原地硬改成手机 OS：
+
+- 新建 `client/shell-web/` 承载移动端优先的 PWA Shell；确认移动端模型后再扩展桌面形态。
+- 新建 `shared/app-sdk/`、`shared/app-manifest/`、`shared/permission-model/` 等共享契约，Shell、运行时与服务端不得各自复制协议常量。
+- 复用 `server/` 的 auth、pi agent、WS 事件流、工具调用、社区与上传基础设施，并以增量模块演进 App 包、版本、安装、权限、文件和计费能力。
+- `client/web/` 与根目录 Electron 渲染端进入**维护模式**：原则上只修阻断问题，不继续叠加 webOS 交互；其无限画布最终收敛为内置 Canvas App。
+- MVP 只支持**静态 HTML App 包**。外部 URL App 与长期运行的托管服务 App 暂不进入首版，避免过早引入网络代理、服务编排和更复杂的安全边界。
+- HTML App 必须通过 `iframe sandbox` + `MessageChannel` + Permission Broker 使用宿主能力；禁止把鉴权令牌、对象存储密钥、文件系统句柄或任意宿主 DOM 能力直接暴露给 iframe。
+- App Version 不可变；AI 修改、用户编辑或商店升级都创建新版本，安装实例只切换版本指针，并保留来源与审计链。
+- AI 可以即时生成 App 和受控主题包，但不得直接改写运行中的 Shell 源码；Shell 个性化必须走校验过的 design tokens、壁纸、模糊和动画配置，并保留安全主题回退。
+
+### 当前阶段约束（2026-07-31 状态更新）
+
+当前处于**方向 A 已选定、P0 Shell 已实现、DeepSeek Provider 已接通并完成核心回归，进入收尾与后续规划阶段**：
+
+1. 继续维护本规则、架构规划、P0 功能清单和回归记录。
+2. `client/shell-web/` 已承载方向 A「安静智能」的生产级移动端优先 PWA Shell；后续新增功能必须优先复用共享契约和现有 `/webos/api/` 命名空间。
+3. 现有 Legacy Dashboard、`client/web/` 和 Electron 渲染端继续维护模式；除阻断问题外，不把新的 webOS 交互继续叠加到旧壳。
+4. 不得把 AI 生成结果直接写入运行中的 Shell 源码；App 只能通过版本化 HTML 包、校验、sandbox iframe、MessageChannel 和 Permission Broker 运行。
+5. P0 之外的公共应用商店、社区分发、云容器编排、长期运行托管服务 App 和桌面 Shell 暂不提前实现。
+6. 支付、邮箱验证码 Provider 尚未接入时，只能展示明确的 unavailable 状态；不得创建假订单、伪造验证码或伪造到账成功。
+7. 方向 A 仍是首版唯一主题；B/C 仅保留为后续主题参考。
+8. **`create_webos_app` 工具已删除（2026-08-14 用户决策）**：AI 创建 App 唯一路径 =「文件夹即 App」（`agent_fs_mkdir apps/<名称>/` + `agent_fs_write index.html`，系统自动注册+即时建版本）；REST `POST /webos/api/apps` 保留（日后可单独做「粘贴 HTML 生成 App」入口）。**中文文件夹名已支持**（`APP_ID_PATTERN` 放宽为 Unicode 字母/数字/空格/._:-，仍排除路径分隔符，`appFilesRoot` 另有 `includes('..')` 防穿越；trash 路由/公开素材端点同步 Unicode 化）；`tool_execution_end` 的 `drainPendingAppEvents` 提前到所有工具分支之前消费（文件夹方式 mkdir/write 的 app_created/app_updated 推送不丢失）。
+## webOS 后端端点快速索引
+
+新 Shell 使用独立的 `/webos/api/` 命名空间，避免修改 Legacy Dashboard 的 `/api/` 路由和既有 WS 协议。所有端点（除 `/api/auth/guest` 游客发放和既有登录端点）都继承现有 JWT `authMiddleware`，前端必须使用 `credentials: 'include'`。
+
+| 端点 | 用途 | 状态 |
+|---|---|---|
+| `GET /api/auth/guest` | 发放游客 JWT（已有端点） | 可用 |
+| `GET /webos/api/bootstrap` | Shell 启动、游客余额、AI 配置、默认应用、支付/邮箱状态 | P0 |
+| `PUT /webos/api/ai/config` | 独立保存 `flash` 模型与 `low/medium/high/max` 思考档 | P0 |
+| `GET /webos/api/usage` | 余额与用量摘要 | P0 占位 |
+| `POST /webos/api/chat/stream` | pi agent 会话（pi-coding-agent + DeepSeek V4 Flash）SSE 流式对话 | P0；服务端读取 `DEEPSEEK_API_KEY` |
+| `GET/POST /webos/api/apps` | App 列表与静态 HTML App 创建 | P0 |
+| `POST /webos/api/apps/generate` | AI 生成静态 HTML App | P0 |
+| `GET /webos/api/apps/:appId` | App 及不可变版本详情 | P0 |
+| `POST /webos/api/apps/:appId/install` | 安装并切换 active version | P0 |
+| `POST /webos/api/apps/:appId/versions` | 创建新不可变版本 | P0 |
+| `PUT /webos/api/apps/:appId/active-version` | 原子切换版本指针 | P0 |
+| `POST /webos/api/apps/:appId/rollback` | 回滚到指定版本 | P0 |
+| `GET/PUT/DELETE /webos/api/apps/:appId/storage/:key` | `app.storage.private` 私有数据 | P0 |
+| `GET /webos/api/payment/products` | 套餐展示 | Provider 未接入 |
+| `POST /webos/api/payment/orders` | 创建订单 | 明确返回 `503 PAYMENT_UNAVAILABLE`，不伪造成功 |
+| `GET /webos/api/email` | 邮箱绑定状态 | P0 |
+| `POST /webos/api/email/send-code` | 请求验证码 | 旧绑定语义端点；**登录/注册请用 `/api/auth/email/*`**，本端点仍返回 503 |
+| `POST /webos/api/email/verify` | 验证并迁移游客资产 | 旧绑定语义端点；**登录/注册请用 `/api/auth/email/*`**，本端点仍返回 503 |
+| `POST /api/auth/email/send-code` | 邮箱验证码发送（免鉴权；注册/重置密码时验证邮箱归属） | P0（2026-08-02，Resend） |
+| `POST /api/auth/email/register` | 注册：验证码验证邮箱 + 设置密码 + 创建账号 + 自动登录（免鉴权） | P0（2026-08-02） |
+| `POST /api/auth/email/login` | 密码登录（免鉴权，无需验证码；游客身份自动迁移资产） | P0（2026-08-02） |
+| `POST /api/auth/email/reset-password` | 忘记密码：验证码验证邮箱后重置密码并登录（免鉴权） | P0（2026-08-02） |
+| `GET /api/admin/webos/chat-logs?userKey=&conversationId=&page=&limit=` | **对话记录查询**（管理端，requireAdmin；2026-08-11） | 上线 |
+| `GET /api/admin/webos/sessions?userKey=&conversationId=&limit=` | **统一对话 log 查询**（管理端；2026-08-13）——一次 chat/stream 请求一行，events JSON 含**完整事件序列（user 消息 + AI 思考 reasoning + 文字 + 工具调用 + App 事件）** | 上线 |
+| `GET /api/admin/webos/trace?userKey=&conversationId=&appId=&hours=` | **自动整合诊断**（管理端；2026-08-13）——把①统一对话 log（含 reasoning）②工作区 execution.log（AI 工具调用轨迹）③App 版本历史 合并为一条时间线，查「AI 干了什么/怎么想的/来回折腾几次」一条命令看全 | 上线 |
+
+> **查 bug 必须查对话记录（2026-08-11 用户决策；2026-08-13 升级）**：排查用户反馈的 AI 对话问题（消息重复发送/扣费异常/回复丢失/上下文错乱等），**第一步必须先查对话记录看完整内容**，不要只凭用量统计数字和 pm2 日志猜。三个层级：
+> 1. **快速浏览**：`webos_chat_logs` 表 / `GET /api/admin/webos/chat-logs?userKey=user:<id>`——user/assistant 纯文本（2026-08-11 起）。
+> 2. **完整过程（含 AI 思考 reasoning）**：`webos_chat_sessions` 表 / `GET /api/admin/webos/sessions?userKey=user:<id>&conversationId=`——一次请求一行，`events` JSON 含 user 消息 + thinking_delta（AI 思考全文）+ delta（输出）+ 工具调用 + App 事件 + 状态。**reasoning 内容只在此表**（chat_logs 只存纯文本）。
+> 3. **自动整合时间线**：`GET /api/admin/webos/trace?userKey=user:<id>&appId=&hours=`——把对话事件 + 工作区 execution.log（工具调用轨迹，含参数摘要与成败）+ App 版本历史（谁在何时建了哪个版本）合并排序，一条命令还原「AI 当时怎么想的、干了什么、为什么没生效」。
+> 查询示例：`GET /api/admin/webos/trace?userKey=user:fb9f2d90-a79c-4ab4-af3e-c3b13fb668d6&appId=app-ffba5f82-df55-472a-8733-1605733a584b&hours=12`。
+
+> **用户级 skills/记忆隔离（2026-08-11 修复）**：此前所有用户（含游客）共享全局 `.pi/skills-webos/`（myself 记忆互串 + 站长画像泄露给所有游客）。修复：① 用户级 skills 放各自工作区 `skills/`（首次创建时从全局模板复制干净版）；② 全局 `.pi/skills-webos/` 只保留系统级只读 skill（design 等），myself 模板已清空 references；③ `createWebosSession` 的 `skillsDir = [用户级, 全局]`，缓存 key 含 scope（不同用户不共享 resourceLoader）；④ `read` 工具支持 `skills/...`（用户级）；`manage_skill` 只写用户级，系统级只读保护；⑤ 线上 145 个存量工作区已迁移（站长画像保留在其工作区副本，146 个非站长工作区 references 已清空）。验证：游客 A 写入「我叫张三」→ A 工作区 user-profile.md 有记录，游客 B/C 工作区无记录、AI 明确回答「不知道你的名字」。
+
+> **✅ 已修复：消息重复发送（2026-08-11 根因定位并修复）**：现象是用户（站长，魅族 Lucky 08 WebView）发一条消息，服务端收到**两条完全相同的 chat/stream 请求**（两个不同 requestId，第二条在第一条 done 后约 122ms 到达，`n=1` 无历史、`SAME dup=no`、`disconnected=false`），AI 回复两次、token 双倍。**根因（确定性结构性 bug，非竞态/IME/WebView 特有）**：前端 `runConversationTurn` 的断流重试循环（2026-08-06 引入）**成功路径缺少 `break`**——`streamChat` 正常返回后循环直接进入 attempt=1，用闭包捕获的同一份 `sendMessages` 把同一个请求原样重发一次（n=1 无历史 = 闭包原始消息列表，故第二条不可能来自 submit/IME 重放）。因此**自 2026-08-06 起每条消息都被确定性处理两次、双倍扣积分**。**修复（2026-08-11 落地，详见 `docs/bug-duplicate-chat-request.md` §9）**：① 主修复——成功路径加 `break`；② 服务端防御——新增 `recentChatDone`，done/bg-finished（仅成功）后 5s 窗口内同会话同 thinking 同内容重复请求 → `409 CHAT_DUPLICATE_RECENT`（rebuild 豁免）；③ `streamChat` 透传服务端 error.code；④ 前端 409 优雅处理（撤销乐观消息 + INFLIGHT 恢复后台任务）；⑤ `sendMessage` 入口诊断日志（来源/convId/消息数/streaming 状态）。验证：server/shell-web tsc、vite build 通过；单元模拟修复前稳定 2 次请求、修复后恰好 1 次、断流重试兜底未破坏。**待部署后观察**：pm2 不再出现 `chat done sent` 后紧跟同内容 `chat req ... SAME`；`webos_chat_logs` 不再出现同 conv 同内容双 request_id；评估 08-06 至修复上线期间受影响用户的双倍扣费补偿。排查全程记录见 `docs/bug-duplicate-chat-request.md`（2026-08-11）。
+
+### webOS Provider 环境变量
+
+- `DEEPSEEK_API_KEY` 仅在服务端读取，禁止放入 `VITE_*`、Shell bundle、日志、原型或 Git。
+- `DEEPSEEK_MODEL` 可选；pi 内置 provider 名/模型名，默认 `deepseek/deepseek-v4-flash`（DeepSeek V4 Flash，官方思考深度四档 `low/medium/high/max`）。
+- **思考深度不需要任何模型拆分配置**：webOS 的 UI 四档直接映射为 pi 的 thinkingLevel（low/medium/high/xhigh→max），由 pi 的 DeepSeek provider 发送 `reasoning_effort`；App 生成内部固定关闭思考（pi `off`）。已废弃 `DEEPSEEK_CHAT_MODEL` / `DEEPSEEK_REASONER_MODEL` / `DEEPSEEK_API_ENDPOINT`（旧自研直连时代的变量，禁止恢复）。
+- 邮箱和支付 Provider 尚未接入时，接口只能返回明确 unavailable 状态，不能创建假订单或伪造到账。
+
+
+
+现有系统是一个可持久化的个人生活管理面板，保留能力包括：
+
+- **pi agent 驱动**：AI 是用户与画布交互的主要方式，通过 pi（`@earendil-works/pi-coding-agent`）提供 agent 能力，模型用 step-3.7-flash
+- **自动保存**：所有组件状态（PDF页码、音乐播放进度、文本内容等）通过 IndexedDB 持久化，关闭浏览器后可恢复
+- **HTML Widget**：agent 可自由生成任意 HTML 页面摆放到画布上（sandbox iframe 渲染）
+- **30+ 个 AI 工具**：含 HTML widget 增删改查、storage 读写、浏览器工具、搜索工具、弹出层工具、ask_user 等，另含 7 个默认禁用的可选文件系统工具（spec §7）
+- **多面板管理**：支持创建多个面板，每个面板有独立的组件布局
+- **自由画布**：左键拖动平移画布，滚轮缩放，组件可自由拖拽和调整大小
+
+
+## 技术栈
+
+### 前端
+- React 19 + TypeScript 6 + Vite 8
+- Zustand 5（状态管理）
+- Tailwind CSS v4
+- IndexedDB（idb 持久化）
+- pdfjs-dist / katex / lucide-react
+
+### 后端（pi 桥接服务）
+- Node.js + Express 5 + TypeScript（`server/` 目录）
+- better-sqlite3（`data/daily.db`）
+- **pi agent**（`@earendil-works/pi-coding-agent` + `@earendil-works/pi-ai`）— 提供 agent 能力
+- **WebSocket**（`ws`）— 前后端双向通信，转发 pi 事件流 + 工具调用
+- 后端不直接读写存储，大多数工具通过 WS 转发前端执行；7 个文件系统工具在服务端 pi 沙箱内运行（spec §7）
+
+## 项目结构
+
+```
+src/                        # Electron 桌面端渲染进程（旧，仍保留）
+client/
+└── web/                    # Daily Web 端（React + Vite，Phase 6 当前主力）
+    ├── src/
+    │   ├── api/            # API client（panels/widgets/communities/...）
+    │   ├── components/
+    │   │   ├── settings/   # 设置页 section（AIApiConfig/CommunityDiscovery/...）
+    │   │   ├── widgets/    # 画布组件（HtmlCanvasWidget）
+    │   │   ├── Workspace.tsx
+    │   │   └── ...
+    │   ├── pages/          # Settings / Login / Admin
+    │   ├── stores/         # Zustand stores（useAppStore/useAIStore/useUserStore/...）
+    │   └── ...
+    └── package.json
+src/                        # 桌面端（Electron，与 web 共享部分代码）
+├── api/                    # 后端 API 抽象层（adapter.ts 的 withFallback 支持 IndexedDB 回退）
+├── components/
+│   ├── widgets/            # 2 个内置组件类型（HtmlCanvasWidget + FreeHtmlComponent）+ 动态 widget 机制（custom_widgets 表 + 上传/社区分发）
+│   ├── Workspace.tsx       # 画布（平移、缩放、组件渲染）
+│   ├── WidgetContainer.tsx # 组件容器（右键菜单、拖拽、缩放）
+│   ├── UnifiedToolbar.tsx  # 顶部工具栏（面板管理、模式切换）
+│   ├── Minimap.tsx         # 小地图
+│   ├── FloatingOrb.tsx     # 浮动球菜单
+│   ├── AddWidgetMenu.tsx   # 添加组件 FAB 按钮
+│   └── SettingsPanel.tsx   # 设置面板
+├── hooks/                  # useDraggable, useResizable
+├── registry/               # Widget 注册表（widgetDefinitions, builtIn）
+├── stores/                 # Zustand store（useAppStore, useAIStore）
+├── types/                  # TypeScript 类型定义
+└── utils/
+    ├── db.ts / dbV2.ts     # IndexedDB 封装
+    ├── dbStores/           # 各类实体数据 store（含 htmlWidgets, kvStorage）
+    ├── wsToolHandlers.ts   # WS 工具回调（HTML widget / storage / 浏览器 / 弹出层等工具的前端实现）
+    └── ...
+server/                     # Node.js 后端（pi 桥接服务，Web + 桌面共用）
+└── src/
+    ├── index.ts            # Express HTTP + WS 服务入口
+    ├── piBridge.ts         # pi agent session + 30+ customTools（含 7 个文件系统工具）
+    ├── ws.ts               # WebSocket 服务器
+    ├── routes/             # REST API（auth/panels/widgets/communities/...）
+    ├── officialCommunities.ts  # Phase 6 联邦社区官方清单（硬编码）
+    ├── middleware/         # auth / error
+    └── db/                 # schema.ts(PG) + schema-sqlite.ts + connection
+docs/                       # 文档（见下方"开发者文档"索引）
+```
+
+## 开发者文档
+
+Phase 6 起新增专门开发者文档，放在 `docs/` 下，面向二次开发/组件开发/部署：
+
+| 文档 | 路径 | 内容 |
+|---|---|---|
+| 开发者指南（主入口） | [docs/developer-guide.md](docs/developer-guide.md) | 项目介绍 / 快速开始 / 项目结构 / 组件/API/部署/社区概览 |
+| 组件开发规范 | [docs/component-spec.md](docs/component-spec.md) | 两类组件接口 / 沙箱约束 / 能力声明 / iframe widget vs 自由 HTML 组件 / 示例 |
+| API 文档 | [docs/api-reference.md](docs/api-reference.md) | 认证 / 面板 / 组件上传 / 社区 / 工具设置 / WS 协议 |
+| 部署指南 | [docs/deployment-guide.md](docs/deployment-guide.md) | Docker Compose / 环境变量 / PG/SQLite / Nginx / HTTPS/WSS |
+| 端到端流程 | [docs/end-to-end-workflow.md](docs/end-to-end-workflow.md) | 本地开发组件 → 上传 → 画布摆放 → 社区发布 完整流程图 |
+
+设计文档：[docs/superpowers/specs/2026-07-07-daily-web-design.md](docs/superpowers/specs/2026-07-07-daily-web-design.md)（§9 社区功能、§12 开发者文档）。
+
+## 关键交互
+
+- **左键拖动空白区域**：平移画布
+- **滚轮**：缩放画布
+- **左键拖动组件**：移动组件
+- **右键组件**：弹出上下文菜单（最小化、关闭、编辑样式）
+- **左下角浮动球**：面板管理 + 设置入口
+- **右下角 + 按钮**：添加组件
+
+## 开发命令
+
+```bash
+# 需要 Node.js，路径：D:\nodejs\node-v22.16.0-win-x64
+$env:PATH = "D:\nodejs\node-v22.16.0-win-x64;" + $env:PATH
+
+# 启动后端服务（终端 1）
+cd f:\allmylife\event\server
+npm run dev
+
+# 启动 Electron 开发服务器（终端 2，前端 + 主进程）
+cd f:\allmylife\event
+npm run dev
+
+# TypeScript 类型检查
+npm run typecheck
+
+# 构建 Electron 应用
+npm run build
+
+# 打包成 Windows exe
+npm run build:win
+```
+
+## Git 流程
+
+**git 路径**：`C:\Program Files\Git\cmd\git.exe`（用户机器上 git 不在 PATH，必须用绝对路径）。
+
+**PowerShell 坑**：`cd <path> && "C:\...git.exe" status` 在 PowerShell 中会被解析为 `cd` 后的相对路径 + `&&` 触发命令执行错误。**改用 `cwd` 参数**：
+
+```powershell
+# 推荐：cwd 参数（RunCommand 工具用此方式）
+& "C:\Program Files\Git\cmd\git.exe" status
+# 并在工具调用时设置 cwd = "f:\allmylife\event"
+
+# 或：先 cd 再调 git（但避免 && 链）
+cd f:\allmylife\event
+& "C:\Program Files\Git\cmd\git.exe" status
+```
+
+**提交前必做清单**（缺一不可）：
+
+1. **类型检查**：`npx tsc --noEmit`（exit 0、零错误）
+2. **构建检查**：`npx tsc -b && npx vite build`（exit 0、零警告）
+3. **状态确认**：`git status --short`（看是否有未预期文件）
+4. **凭证扫描**：`grep -rE "EMAIL|PASSWORD|Bearer|@qq\.com|chat\.st0722" .` 在要 add 的文件里（**绝不能**有明文凭证）
+5. **ignore 验证**：`git check-ignore -v <可疑文件>`（确认 .gitignore 生效）
+
+**提交规范**（conventional commits）：
+
+```
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+```
+
+| type | 用途 |
+|---|---|
+| `feat` | 新功能 |
+| `fix` | 修 bug |
+| `chore` | 杂项（gitignore、依赖、脚本） |
+| `docs` | 文档 |
+| `refactor` | 重构（无功能变化） |
+| `test` | 测试 |
+
+subject ≤ 50 字符，body 用 `-` 列表。每行 ≤ 72 字符。
+
+**危险操作禁令**：
+
+- ❌ `git add -A` / `git add .`（会扫到凭证文件）→ **必须精确 add 文件名**
+- ❌ `git push --force` / `git push --force-with-lease`
+- ❌ `git reset --hard` / `git checkout .` / `git restore .`
+- ❌ 任何修改已 commit 历史的操作（`rebase`、`filter-branch`、`commit --amend` 已 push 的 commit）
+- ❌ 把含明文凭证的文件加入仓库（用 `git rm --cached` 也不行——只能重写历史才能彻底清除）
+
+**已保护的凭证模式**（`.gitignore` 已配置，**不要主动取消**）：
+
+- `review.mjs`
+- `**/chatst*.{cjs,js,ts}`
+- `**/send_review.{cjs,py}`
+
+**典型提交流程**：
+
+```powershell
+# 1. 验证
+$env:PATH = "D:\nodejs\node-v22.16.0-win-x64;" + $env:PATH
+cd f:\allmylife\event
+npx tsc --noEmit
+
+# 2. 查看
+& "C:\Program Files\Git\cmd\git.exe" status --short
+
+# 3. 精确 add
+& "C:\Program Files\Git\cmd\git.exe" add <file1> <file2> ...
+
+# 4. 复核 staged
+& "C:\Program Files\Git\cmd\git.exe" diff --cached --stat
+
+# 5. 提交
+& "C:\Program Files\Git\cmd\git.exe" commit -m "feat(scope): subject" -m "body line 1" -m "body line 2"
+```
+
+**项目当前路线图说明**：每完成一个 Phase 都要 commit。**禁止把多 Phase 混在一个 commit**——一旦需要回滚会带垮别的 Phase。
+
+## pi Agent 集成
+
+项目通过 pi（`@earendil-works/pi-coding-agent`）提供 agent 能力，替代旧版自研 LLM 后端。
+
+### 架构
+
+- **后端**（`server/src/piBridge.ts`）：创建 pi agent session，注册 30+ 个 customTools（含 7 个默认禁用的文件系统工具），大多数通过 WS 转发工具调用到前端执行，文件系统工具在服务端 pi 沙箱内运行（spec §7）
+- **前端**（`src/stores/useAIStore.ts`）：WS 客户端，订阅 pi 事件流（text_delta / tool_call / tool_result / agent_end）驱动 UI
+- **存储统一**：大多数工具通过 WS 转发前端执行，前端用 `adapter.ts` 的 `withFallback()` 访问数据（自动协调 IndexedDB/API），后端不直接读写存储；文件系统工具例外，在服务端 pi 沙箱内运行
+
+### AI 工具概览（pi defineTool，30+ 个）
+
+工具分多类（详见 `server/src/piBridge.ts` 的 `customTools` 数组）：
+
+- **HTML Widget 工具**：`create_html_widget` / `update_html_widget` / `delete_html_widget` / `list_widgets` / `set_widget_mini_html` / `set_widget_icon_html`（决策38/39）
+- **背景层 + 弹出层工具**（spec §3.2/§3.3）：`set_background` / `upload_background_image` / `add_effect` / `place_basic_component` / `show_popup` / `dismiss_popup`
+- **Storage 工具**：`storage_read` / `storage_write`（前端 `adapter.ts` 的 `withFallback()`）
+- **浏览器工具**（操作当前活跃的网页组件）：`browser_eval` / `browser_get_dom` / `browser_click` / `browser_input` / `browser_scroll` / `browser_wait_for` / `browser_screenshot` / `browser_navigate` / `browser_get_url` / `browser_get_title` / `browser_back` / `browser_forward` / `browser_reload` / `browser_get_cookie` / `browser_set_cookie` / `browser_open` / `browser_switch_tab` / `browser_list_tabs`
+- **用户互动**：`ask_user`（Phase 8 批次5 模块D：AI 主动向用户提问，系统工具不可禁用）
+- **搜索工具**（Phase S9）：`local_search`（路由到客户端）+ `web_search` / `academic_search` / `github_search`（直接调外部 API）
+- **系统工具**：`query_capabilities`（查询组件能力声明，不可禁用）
+- **文件系统工具**（Phase 3，spec §7）：7 个 PI 原生工具，在服务端沙箱内运行，默认禁用，需用户手动开启
+
+#### 工具启用过滤（Phase S4，spec 9.3.4 节）
+
+`getEnabledCustomTools()` 从 `tool_settings` 表读取用户配置：
+- 系统工具（`canDisable=false`）永远启用
+- 其他工具：表中有记录用表中值，否则用 `defaultEnabled`（30 个工具默认启用，7 个文件系统工具默认禁用）
+
+### pi 前置条件（Windows）
+
+- **git-bash 路径**：`C:\Program Files\Git\bin\bash.exe`（pi 在 Windows 需要 bash，**禁止用 WSL bash**）
+- **pi 依赖**：`@earendil-works/pi-coding-agent` + `@earendil-works/pi-ai`（装在 `server/`）
+- **模型**：step-3.7-flash（custom provider 直连 api.stepfun.com）
+- **配置**：`~/.pi/agent/models.json` 注册自定义 provider
+
+### WS 协议
+
+```typescript
+// 后端 → 前端（工具调用请求）
+{ kind: 'tool_call', requestId, tool, params }
+
+// 前端 → 后端（工具调用响应）
+{ kind: 'tool_result', requestId, success, data?, error? }
+
+// 后端 → 前端（pi 事件流转发）
+{ kind: 'pi_event', event: 'text_delta'|'tool_call_start'|'tool_call_end'|'agent_end', data }
+```
+
+- 超时：30s，超时返回 `{success: false, error: 'timeout'}`
+- 并发：每个工具调用独立 requestId，支持并发
+
+## 开发路线图
+
+项目当前执行 **v3 路线图**（`docs/roadmap_v3.md`）：
+
+- 9 条设计原则（AI 为主方向）
+- 5 章用户手册
+- 精简改造方案见 `docs/specs/event-simplification-v3.md`（pi agent + 无限画布 + HTML widget）
+
+> v1/v2 路线图已删除，仅保留 v3。
+
+## 已知注意事项
+
+- **右键菜单**：必须用 `createPortal` 渲染到 `document.body`，因为 `canvas-container` 的 `transform` 会使 `position: fixed` 失效
+- **渐变背景**：workspace 需添加 `custom-bg` 类使背景透明，否则会覆盖 app-root 的渐变
+- **拖拽抖动**：useDraggable/useResizable 中必须用 `useRef` 存储最新回调，避免 stale closure
+- **组件注册**：新组件需同时在 `builtIn.ts`、`WidgetContainer.tsx`、`AddWidgetMenu.tsx` 三处注册
+
+## 排查经验：视觉偏移类问题
+
+### 案例：刷新后小窗偏移 + 缩放中心偏移
+
+**现象**：刷新页面后，Minimap 视口矩形与实际视角严重偏移；滚轮缩放中心不在鼠标指针处，而是在上方。
+
+**根因**：`.panel-layer` 缺少 `overflow: hidden`，隐藏面板的溢出内容撑大了父容器 `wsArea` 的 `scrollHeight`，浏览器自动设置 `scrollTop=1555`，导致所有基于 `getBoundingClientRect` 的坐标计算偏移。
+
+**排查思路**：
+
+1. **先实测 DOM 状态，不要纯靠代码推理**——遇到"偏移"问题，第一时间在浏览器控制台检查 `scrollTop`、`scrollHeight`、`getBoundingClientRect()` 等实际值，而不是反复读代码猜测
+2. **CSS 布局问题纯看代码很难发现**——`overflow` 缺失导致的 `scrollTop` 偏移，代码逻辑完全正确但运行时状态已被 CSS 副作用污染
+3. **不要思维惯性**——用户报告"偏移"不一定是数据/状态问题，也可能是 CSS 布局引起的 DOM 状态异常
+4. **隐藏元素也会影响布局**——`display:none` 的子元素不影响，但 `visibility:hidden` 或仅用 `z-index` 隐藏的元素如果溢出父容器，仍会撑大 `scrollHeight`
+
+**修复要点**：
+
+- `panel-layer` 添加 `overflow: hidden`（根本修复）
+- 所有坐标计算（Minimap 视口、缩放中心、点击跳转）加入 `scrollTop`/`scrollLeft` 补偿（防御性修复）
+- `computeMapping` 的边界计算必须包含当前视口范围，否则视口矩形可能超出 minimap 可见区域
+
+**涉及文件**：`src/index.css`、`src/components/Minimap.tsx`、`src/components/Workspace.tsx`
+
+### 案例：刷新后视角位置丢失
+
+**现象**：刷新页面后画布视角被重置，未恢复到刷新前位置。
+
+**排查思路**：
+
+1. `beforeunload` 中异步请求（`panelsApi.updatePanel`）会被浏览器取消 → 改用 `fetch + keepalive: true`
+2. 异步仍不可靠 → 增加 `sessionStorage` 作为同步缓存层，初始化时优先读取
+3. `setCanvasTransform` 只更新顶层状态，不同步 `panels` 数组 → 初始化时用 sessionStorage 值覆盖 activePanel 的 canvasTransform
+4. 初始化后增加校验步骤，确保最终状态与 sessionStorage 一致
+
+**涉及文件**：`src/App.tsx`、`src/stores/useAppStore.ts`
+
+### 案例：修复了不存在的组件——8轮对抗审查全漏
+
+**现象**：用户报告"无法给面板重命名"。搜索代码发现 `Sidebar.tsx` 有重命名逻辑，于是围绕它修复了24项问题，经过8轮对抗审查全部通过。但用户反馈"重命名按钮根本不存在"——启动浏览器验证后发现 `Sidebar` 组件从未被引入到页面，面板列表实际在 `UnifiedToolbar.tsx` 的 popover 中。
+
+**根因**：对抗审查只审查了代码逻辑的正确性，没有验证最基本的前提——**被修改的组件是否真的渲染在页面上**。
+
+**教训**：
+
+1. **对抗审查必须包含运行时验证**——代码写得再完美，如果组件没被挂载到页面，等于零。审查第一步就应该确认修改的组件是否在渲染树中
+2. **搜索到相关代码 ≠ 找到了问题所在**——`Sidebar.tsx` 确实有重命名代码，但它不是用户看到的界面。必须通过 `import` 链或浏览器 DOM 验证，确认代码与用户界面的对应关系
+3. **审查维度不能只有代码质量**——8轮审查覆盖了竞态、IME、CSS、可访问性，却漏掉了"组件是否被使用"这个最基本的问题。审查清单应包含：① 组件是否被引入 ② 组件是否在渲染树中 ③ 修改是否对用户可见
+
+**涉及文件**：`src/components/UnifiedToolbar.tsx`（实际使用的面板菜单）、`src/components/Sidebar.tsx`（未使用的遗留组件，已在 Phase 1 删除）
+
+### 通用原则
+
+- **遇到偏移，先查 scrollTop/scrollLeft**——这是最常见却被最易忽略的原因
+- **beforeunload 中不能依赖异步操作**——用同步 API（sessionStorage）+ `fetch keepalive` 组合
+- **React hooks 顺序必须一致**——条件返回前的 hooks 不能放在条件返回之后
+
+### 当前实现与回归状态（2026-07-31）
+
+> 部署运维手册（服务器信息、SSH 凭证、部署命令、验证清单、故障排查）见 **`docs/webos-deployment-ops.md`**，
+> 无需再向用户询问域名/路径/密码。
+
+### P0 Shell 与 AI Provider
+
+- 方向 A「安静智能」Shell 已在 `client/shell-web/` 实现：AI 助手是默认主页（**唯一 AI 入口**）；系统桌面提供传统图标网格和 Dock；文件、设置、余额与支付、App Runtime 均为独立系统页（Builder 已随单一对话入口方向移除）。
+- **AI 能力统一走 pi agent 链路（pi-coding-agent + pi-ai）**：`/webos/api/chat/stream` 复用 `piBridge.createWebosSession()`，模型为 pi 内置 `deepseek/deepseek-v4-flash`（DeepSeek V4 Flash，可用 `DEEPSEEK_MODEL` 覆盖），API Key 由服务端 `DEEPSEEK_API_KEY` 经 AuthStorage 注入；**禁止恢复自研 DeepSeek HTTP 直连**（旧 `deepseek-chat`/`deepseek-reasoner` 模型名与 `fetchProvider/requestCompletion` 等函数已删除）。
+- **思考深度 = DeepSeek 官方四档 `low/medium/high/max`**（默认 `medium`）：UI 四档 → pi thinkingLevel（low/medium/high/xhigh→max）→ DeepSeek `reasoning_effort`。因 pi 内置 deepseek-v4-flash 定义把 low/medium 标为 null（会被静默升级为 high），`createWebosSession` 会通过 `ModelRegistry.registerProvider` 覆盖模型定义以启用全部四档。App 生成不再单独开会话，生成质量与速度直接取决于用户当前思考档。
+- **对话内创建 App（2026-07-31 单一入口方向，当日收尾再简化）**：`/webos/api/chat/stream` 的 pi 会话注入 `create_webos_app` 工具（`createWebosSession(principal.key, thinking, { customTools })`），pi agent 识别用户建 App 意图时**在对话中直接生成 HTML 并以 `{ name?, html }` 参数调用工具**；服务端工具只做安全校验（`validateAppHtml` + `validateGeneratedHtml`：禁 iframe/object/embed/base/外部 URL/data:text/html、占位符检测、`vm.Script` 语法校验、大小限制）与入库，**不再开独立 `:gen` 生成会话、不再有专用生成 prompt（APP_GENERATION_SYSTEM_PROMPT / appGenerationPrompt / generatedHtml 已删除）**。`POST /webos/api/apps/generate` 端点已删除，对话工具是唯一 App 创建路径。工具执行结果经会话 `tool_execution_end` 事件以 `{type:'app_created', appId}` SSE 推送前端；前端刷新 bootstrap 后自动打开 App 运行页。
+- **App 运行时 localStorage polyfill**：iframe `sandbox="allow-scripts"`（opaque origin）下访问 `window.localStorage` 抛 SecurityError，任何模型生成的 App 默认用 localStorage 持久化会直接崩溃。bootstrap（`APP_RUNTIME_BOOTSTRAP`）在文档 `<head>` 开头注入（先于 App 脚本执行），检测到 localStorage 不可用时用 `Object.defineProperty` 覆盖为内存态兼容实现（getItem/setItem/removeItem/clear/key/length），SDK MessageChannel 连接后异步把数据落到 `app.storage.private`（setItem fire-and-forget 推送、connect 后 list() 拉取存量 hydrate）。
+- 计费基于 pi 会话 `agent_end` 事件的真实 token usage（assistant 消息的 `usage.input/output`），取不到时回退到 `estimateMinor` 估算；不伪造扣费。**工具内不再单独扣费**（无独立生成会话），对话（含生成 HTML 的 token）统一在 `done` 事件按真实 usage 扣减；**扣费不弹出底部 toast 通知**。
+
+### 已完成回归
+
+- 真实 DeepSeek V4 Flash 对话：`low` 档真实生效（不再被 clamp 为 high）、`max`→xhigh 正确、SSE 流式 `delta` 正常、会话按 principal 复用（二次响应 1s）、扣费正确。
+- **对话内直接创建 App（2026-07-31 简化后回归）**：`/webos/api/chat/stream` 发"做一个待办清单 App"→ SSE 事件流 `start → delta(确认) → tool_execution(pi 直接生成 HTML 并调用 create_webos_app) → app_created(appId) → delta(总结) → done`；**无独立 `:gen` 会话（日志确认）**；前端收到 `app_created` 刷新 bootstrap 后自动打开 App 运行页（「待办清单」v1.0.0 sandbox iframe 运行）；生成的 HTML 质量正常（渐变背景/圆角卡片/移动端适配/viewport/系统字体栈），App 使用 localStorage（polyfill 触发场景）。本地与线上（curl + 浏览器）均验证通过。
+- **localStorage polyfill 验证**：sandbox opaque origin 下原生 `localStorage` 访问抛 SecurityError（实测无 NATIVE_OK），polyfill 覆盖后 setItem/getItem 正常（实测 POLYFILL_OK:v）；线上 bootstrap 已部署（`<head>` 开头注入、先于 App 脚本执行）。
+- **档位循环切换验证**：composer 旁「思考」chip 点击循环 深(high)→极深(max)→浅(low)→中(medium)→深(high) 全部生效（线上真实点击验证）；模型 chip 为纯展示（当前唯一可用）。
+- **孤立 tool 消息 400 自愈验证**：重启后 high/medium 档"你好"均正常流式回复（坏会话缓存已清空自动恢复）；agent_end 检测 stop=error 或 usage 全 0 时 dispose 会话 + 不扣费 + 返回 error 事件（WEBOS_AI_EMPTY_RESPONSE），重发即恢复。
+- **pi 会话忙自动重试**：`chat/stream` 复用会话时若 pi 抛 `Agent is already processing`（客户端断连后立即重连等），服务端 dispose 该用户全部 webOS 会话并重建重试一次（`busyRetried`），不再直接报错。
+- **空 assistant 消息防御**：AI 回复为空时前端 store 会残留空气泡；`sendMessage` 发送前过滤 content 为空的 assistant 消息，避免 `validateMessages` 400 导致对话卡死。
+- **线上偶发"high 档零输出"排查记录**：2026-07-31 曾出现重启后 high 档请求仅 `start+done`、无 delta、usage 回退估算（约等于 API 空响应或实例瞬时状态），重启后同代码不可复现；已通过直连 DeepSeek API、pi 最小复现脚本（`createAgentSession`/`createWebosSession` 直接 prompt）逐一排除 API/pi 层问题。若再遇，先看 pm2 日志 `[webos] chat prompt done ... events=...` 确认 `agent_end` 是否触发，并用 `curl` 直连 API 对比。
+- 线上运维注意：pm2 restart 多次出现 `EADDRINUSE`（旧实例未完全退出），当前以 `ss -tlnp` 确认唯一监听进程后正常；部署后可用 nginx access log 核对请求实际到达与 HTTP 状态码。
+- 真实 App 生成：`off` 思考 11-16s 返回完整可运行 HTML（倒计时器/待办清单），进入 `sandbox="allow-scripts"` Runtime 无报错。
+- 生成 HTML 校验：占位符检测、`vm.Script` 语法校验、非法结果自动重试一次；`agent_end` 提取内容为空时报 `WEBOS_AI_EMPTY_RESPONSE`。
+- PWA `manifest.webmanifest` 与 `icon-192.svg`、`icon-512.svg` 均可访问，manifest 使用 `display: standalone`。
+- App Version 创建和 rollback 已验证：rollback 只切换 active version 指针，不覆盖历史版本。
+- 支付和邮箱验证码接口保持明确 unavailable，不伪造订单、验证码或支付成功。
+
+### 账号系统：邮箱验证码登录/注册（2026-08-02，Resend 已接入）
+
+**产品决策（用户）**：正常账号密码体系——**注册时用验证码验证邮箱归属，之后用「邮箱 + 密码」直接登录（无需验证码）**；忘记密码可用验证码重置。登录入口在 AI 对话页右上角；登录窗口不主动弹出；登录形态为**居中弹窗**（design skill 规范：移动优先 + 桌面居中浮起，不用底部 Sheet）；桌面切换按钮为「图标+文字」胶囊；支持 AI 对话页 ↔ 桌面页左右滑动切换。
+
+**Linux.do 调研结论**：Linux.do **不是邮箱验证码注册**——是邀请制 + 人工审核（填写用户名/邮箱 + ~50 字申请自述，人工审核激活；历史上曾用 GitHub OAuth + 邀请码）。我们自研验证码注册是更轻量的模式，无需效仿。
+
+**后端**（`server/src/routes/emailAuth.ts`，免鉴权挂 `/api/auth`，在 authMiddleware 之前）：
+
+- `POST /api/auth/email/send-code` {email}：6 位数字码、10 分钟有效、60s 冷却/邮箱、IP 限频（20/h）、Resend 发送（fetch REST，零依赖）
+- `POST /api/auth/email/register` {email, password, code}：验证码验证邮箱归属 → 设置密码（scrypt）→ 创建账号（username=邮箱前缀，冲突加数字后缀）→ 签发 JWT 登录；已注册邮箱返回 409
+- `POST /api/auth/email/login` {email, password}：密码登录（无需验证码），IP 限频 60/h
+- `POST /api/auth/email/reset-password` {email, password, code}：验证码验证后重置密码并登录（忘记密码；也用于早期无密码账号补设密码）
+- 验证码一次性使用、恒定时间比较、attempts 上限 5 次；**游客资产迁移**——请求携带游客 JWT 且该账号从未使用过 webOS 时，把游客 `webos_state` 整体迁移到用户 scope（register/login/reset 共用 `migrateGuestAssets`）；迁移失败不阻断
+- Resend 环境变量：`RESEND_API_KEY`（仅服务端）、`RESEND_FROM_EMAIL`（如 no-reply@shadowshub.xyz，需 Resend 已验证域名）、`RESEND_FROM_NAME`（显示名，默认 **Daily**——不设则 QQ 等邮箱把地址前缀 no-reply 当显示名）
+- 健壮性：`dns.setDefaultResultOrder('ipv4first')`（api.resend.com 双栈解析，无 IPv6 路由环境连 IPv6 会 ETIMEDOUT）；fetch 加 `AbortSignal.timeout(15s)` + 3 次退避重试；5xx 重试、4xx 不重试
+
+**鉴权联动**：`middleware/auth.ts` 对多用户 JWT 附带 email/username（users 表查询 + 60s TTL 缓存）；`webos.ts` Principal 增加 email，bootstrap 的 `session.user` 返回 email（共享契约 `WebOsSession.user.email` 已扩展）。
+
+**前端**（`client/shell-web`）：
+
+- AI 对话页 header：游客显示「登录」按钮（KeyRound 图标+文字），已登录显示邮箱前缀（绿点标记），点击打开登录 Sheet；「桌面」按钮改为深色胶囊「图标+桌面」
+- `LoginPanel`：**居中弹窗**（design skill 规范：圆角卡片、柔和阴影、fadeUp 动效、tabs 切换），登录/注册/忘记密码三态；注册=验证码验证邮箱+设置密码，登录=邮箱+密码（无需验证码），忘记密码=验证码重置；60s 重发倒计时；已登录态显示账户信息+退出登录；成功登录/注册后 refreshBootstrap 自动切换正式用户
+- 设置页 account-card 从旧的 503 绑定表单改为「登录/注册」或「账户管理（退出）」入口；旧 `/webos/api/email/*` 绑定端点保留 503 不再被前端使用
+- 滑动切换：AI 页左滑 → 桌面；桌面左边缘热区（仅触屏设备，iframe 会吞触摸事件）右滑 → AI 页；`useSwipeNavigation` 忽略纵向滚动
+
+**回归记录（真实 Resend + SQLite + 本地服务）**：
+
+- send-code 真实送达 QQ 邮箱；Resend 记录确认 from=`"Daily <no-reply@shadowshub.xyz>"`（显示名生效，早期无显示名版本 QQ 列表显示 no-reply 已修复）
+- 错误分支：60s 冷却 429、未发码验证 400 EXPIRED、非法格式 400 INVALID_CODE/EMAIL 全部正确
+- 端到端：游客建 App → 验证码 436627 → 注册（migrated=true）→ bootstrap 返回 email + 迁移后的 App（「迁移测试App」+「系统桌面」）+ 余额 100；验证码二次使用返回 400（一次性 ✓）
+- 测试环境坑：proot 沙箱访问 api.resend.com 间歇 ETIMEDOUT（约 30%，node/tsx/curl 均如此，线上服务器无此问题）；pkill 杀进程需遍历 /proc 精确取 PID（basename 会取到 cmdline 而非 PID）
+
+### 用户分层 / Token 配额 / AI 用量计量（2026-08-02，new-api 风格）
+
+**产品决策（用户）**：用户分三层——游客（未注册未登录）、会员（已登录）、套餐用户（9.9 元/1 亿 token，支付未开通仅展示）。token 配额：游客 1 万 / 登录 10 万 / 套餐 1 亿；用完拦截对话并提示「建议升级套餐或加客服 QQ 2893334965；测试阶段联系客服可免费获取」。登录入口=AI 对话页右上角按钮，登录后该按钮即个人主页入口；「设置」系统页已删除（个人主页承载账户/AI 用量/余额/套餐/隐私边界；AI 思考档配置在对话页 composer 旁）。
+
+**后端**：
+- `StoredState.tokens = { quota, used }`；`defaultState(principal)` 按身份给配额（游客 1 万/登录 10 万）；游客资产迁移到账号时 token 配额升级为 10 万全新额度；admin 可调 quota（≥1 亿视为套餐用户）
+- `chat/stream`：**按 DeepSeek 真实 usage（input+output）扣减 token**（拿不到时按字符估算回退）；`remainingTokens<=0` 时返回 402 `TOKEN_INSUFFICIENT`（含套餐与 QQ 提示）；不再有余额豁免
+- **用量落库**：新表 `webos_ai_usage`（new-api 风格，每个请求一行：user_key/user_email/kind/model/thinking/prompt+completion+tokens/status/error_code/ip/created_at）；ok/failed/insufficient/empty_response 都记；管理后台统计/审计用
+- **注册/登录记录 IP**：users 表加 `registered_ip/last_login_ip`（`db/migrations.ts ensureUserIpColumns`，启动时幂等迁移）；防批量注册，后台可按 IP 检索
+- **Admin API**（`server/src/routes/adminWebos.ts`，挂 `/api/admin/webos`，requireAdmin）：`GET /users`（用户+游客统一列表：token/用量/IP/资产）、`GET /usage/summary?days=`（按 kind/status/day 聚合）、`GET /usage?userKey=`（明细分页）、`PUT /tokens {userKey, quota}`（套餐开通/客服补偿）
+- `paymentState()` 改为单个套餐产品「1 亿 Token 套餐 ¥9.9」（unavailable）
+- BUILTIN_APPS 移除 `system.settings`；DeepSeek 账号级并发 2500（flash），`user_id` 隔离参数待 pi provider 支持后接入（P1）
+
+**前端**（`client/shell-web`）：
+- 新增 `ProfileView`（个人主页）：账户信息+分层徽章、token 用量（剩余大字+进度条）、套餐卡片（¥9.9 未开放+客服 QQ）、文件入口、隐私边界；`ScreenView` 变为 assistant/desktop/files/profile/app
+- 登录后 header 账户按钮（邮箱前缀）→个人主页；游客→登录面板；余额按钮显示剩余 token
+- 删除 SettingsView/BillingView 及对应桌面图标；登录面板保持居中弹窗（登录=邮箱+密码/注册=验证码+密码/忘记密码=验证码重置）
+- token 不足：chat 返回 402 时 request() 抛错 → toast 显示完整提示（含 QQ）
+
+**回归记录（真实 DeepSeek + SQLite + 本地/线上验证）**：
+- 游客 bootstrap kind=guest tokens={10000,0,10000}；真实对话 totalTokens=578→used=578 remaining=9422（done 事件带 totalTokens/usedTokens/remainingTokens）
+- admin /users 正确显示游客 quota/used/appCount（parseState 需兼容 SQLite adapter 已解析的 JSON 对象——踩坑已修）；/usage/summary、/usage 明细、PUT /tokens 调整后 bootstrap 生效
+- 配额调 0 后 chat 返回 402 TOKEN_INSUFFICIENT（文案含 QQ 2893334965）✓
+- 线上：游客真实扣减 491 tokens、admin API 全通、ADMIN_USERNAMES=2893334965 已配（该邮箱注册即 admin）
+- 待办：DeepSeek usage 含 cacheRead（totalTokens 含缓存读，pi 的 usage 只暴露 input/output，当前按 input+output 扣减，缓存读未计——后续可按比例折算）
+
+### 管理后台 admin.shadowshub.xyz（2026-08-02 上线）
+
+- **形态**：独立子域 + 独立前端项目 `client/admin-web/`（同仓独立模块：独立 package/构建，复用根 node_modules；桌面优先，design skill 安静浅色 tokens）
+- **部署**：产物 `/var/www/daily-admin/public`（nginx 静态托管；注意不能放 /root 下——nginx worker 无权限）；`/api/` 同源反代 127.0.0.1:3456（免 CORS）；nginx 配置 `/etc/nginx/sites-available/admin-daily`；HTTPS 由 certbot 自动续期（`--redirect`）
+- **功能**：登录（邮箱+密码，仅 admin 角色可进）→ 仪表盘（近 7 天请求数/tokens/分层/状态/每日趋势条形图）+ 用户与用量（注册用户+游客列表、搜索、封禁/角色、token 配额调整弹窗、AI 用量明细弹窗）
+- **管理员**：服务器 `.env` 已加 `ADMIN_USERNAMES=2893334965`——该邮箱注册即 admin；登录入口 = admin.shadowshub.xyz
+- 上线验证：首页/JS 200、API 反代健康、非 admin 访问 admin API 401、HTTP→HTTPS 301 ✓
+
+### 支付接入（2026-08-02，zpay 易支付渠道，代码就绪待审核通过启用）
+
+- **渠道**：ZPAY（https://z-pay.cn/，易支付兼容接口，无需营业执照；已付款开通，商户审核约 1 个工作日）
+- **文档要点**：下单 `POST https://zpayz.cn/mapi.php`（form-data，返回 payurl/qrcode/img）；回调 GET notify_url（MD5 验签，响应体返回字符串 `success` 否则按 0/15/15/30/180/1800…秒重发）；签名=参数按 ASCII 排序（sign/sign_type/空值除外）拼 `a=b&c=d&e=f` + 商户密钥 MD5 小写
+- **后端**（`server/src/payment/zpay.ts` + `routes/zpayNotify.ts` + webos.ts 端点）：
+  - `webos_pay_orders` 表（两套 schema）：商户订单号 id、user_key、商品、金额（分）、type(alipay/wxpay)、status(pending/paid)、zpay_trade_no、IP、创建/支付时间
+  - `POST /webos/api/payment/orders`：**仅已登录账号可购买**（游客 401 GUEST_NOT_ALLOWED）；10 分钟内未支付订单复用；下单成功返回 payUrl/qrcode/img
+  - `GET /webos/api/payment/orders/:orderId`：本人订单状态（前端 3s 轮询）
+  - `GET /webos/api/payment/notify`：**免鉴权**（index.ts 在 authMiddleware 之前单独挂载）；验签+pid+金额+param(user_key) 四重校验；幂等（已 paid 直接 success）；入账=quota 提升到 1 亿（`PLAN_TOKEN_QUOTA`）
+  - `paymentState().providerStatus`：未配置密钥时 `unavailable`（前端显示"支付渠道审核中"，不会创建假订单）
+- **环境变量**（仅服务端 .env）：`ZPAY_PID` / `ZPAY_KEY`（后台「API信息」页）；可选 `ZPAY_API_BASE`、`PAY_NOTIFY_URL`（默认 https://shadowshub.xyz/webos/api/payment/notify）
+- **前端**：ProfileView 套餐卡片按 providerStatus 显示「立即购买 / 登录后购买 / 支付渠道审核中」；PayPanel 居中弹窗（design skill）：选支付宝/微信 → 下单 → 二维码 img + 跳转收银台 → 3s 轮询 → 到账 refreshBootstrap 自动关闭
+- **验证**：本地+线上未配置时 products=unavailable、游客下单 401、notify 503 fail、`webos_pay_orders` 表已建；**真实支付链路待审核通过、填上 ZPAY_PID/ZPAY_KEY 后做端到端测试**（下单→扫码→回调入账→quota 到 1 亿）
+- 部署注意：`payment/zpay.ts` 是**新目录**（server/src/payment/），scp 时先 mkdir
+
+### 支付渠道切换 + 积分制（2026-08-02 晚，用户决策）
+
+- **zpay 已整体移除**（用户：zpay 不支持 AI 产品）：`payment/zpay.ts`、`routes/zpayNotify.ts`、`webos_pay_orders` 表（两套 schema）、index.ts 回调挂载、.env 变量全部删除；`POST /webos/api/payment/orders` 与订单查询统一返回 `503 PAYMENT_UNAVAILABLE`，不创建假订单/伪造到账。**计划接入爱发电（afdian.com）**（paymentState 预留 `provider:'afdian'`；届时新增免鉴权回调 + 验签 + quota 提升到 990 入账）。
+- **统一积分制（1 积分 = ¥0.01）**，解决"不同模型 token 不同价"的架构问题：
+  - `server/src/billing/pricing.ts`（新目录）计费核心：`chatCostMinor`（DeepSeek 官方价×1.5 售价×高峰倍率）、`imageCostMinor`（生图 ¥16/¥60 每百万）、`fixedCostMinor`（搜索 ¥0.02/次、TTS ¥0.5/千字符预留）；`billingCatalog()`/`isDeepSeekPeak()`/`deepSeekPeakMultiplier()`
+  - **DeepSeek 峰谷定价**：北京时间每日 9:00-12:00、14:00-18:00 价格 ×2（官方规则，适用所有计费项），已在对话计费应用
+  - `StoredState.tokens` → `credits`（旧数据自动迁移：1亿→990、10万→1000、1万→100）；`chargeTokens`→`chargeCredits`、`remainingTokens`→`remainingCredits`、`estimateTokens`→`estimateCostMinor`；游客 100 / 会员 1000 / 套餐 990 积分
+  - bootstrap 返回 `credits` + `billing`（peak/peakMultiplier/catalog）；done 事件 usage 带 `usedCredits/remainingCredits/peak`；余额不足 402 `TOKEN_INSUFFICIENT`（文案含客服微信 fangyan876）
+  - 管理后台：用户列表积分显示、`PUT /api/admin/webos/credits` 调整额度（`/tokens` 兼容保留）
+  - 前端（shell-web/admin-web）：余额 chip、个人主页（剩余积分+进度条+高峰提示）、会话侧边栏、登录面板文案全部改积分；对话真实扣费验证 ✅（不足 1 分钱 round 为 0，属粒度设计）；生图扣积分验证 ✅（512 图 1 积分）；bootstrap billing.catalog ✅；支付 503 ✅
+  - SSH 访问：**2026-08-03 起密码登录已禁用，仅密钥**（私钥 `ssh-keys/daily_server_ed25519`，勿用旧密码）
+
+### 上线就绪（2026-08-02 推广前补全）
+
+- **合规页**：`/daily/terms.html`（自包含静态页：服务条款+隐私政策，含 AI 生成内容免责、第三方数据披露、未成年人限制、客服 QQ）；注册表单增加「我已阅读并同意《服务条款与隐私政策》」勾选（未勾选不可注册）
+- **自动备份**：`/root/daily/backup-daily.cjs`（cron 每日 03:00）：SQLite VACUUM INTO 备份 + 工作区 tar，保留 14 天，日志 backup.log（已上线并实测）
+- **邮件额度**：Resend 免费约 100 封/天；sendEmail 对 429/rate-limit 返回明确 `EMAIL_DAILY_LIMIT`（"今日发送量已达上限"），超量需升级 Resend 套餐
+- 推广规模预判：单机（3.7G 内存/30G 磁盘）数百用户无压力；DeepSeek 成本后台实时可查；**对象存储与支付渠道非推广硬门槛**（文件功能未开放、测试期客服 QQ 发放额度即可）
+
+### 对话 UI 修复 + 头像可换 + 提示词精简 + 称呼询问重做（2026-08-03 深夜）
+
+**卡加载页大 bug 修复（2026-08-03 晚，用户实测发现）**：
+
+- 现象：部署定制加载页"最短展示时长"后，**页面永远卡在加载页进不去**（用户描述为"对话区位置全错/变小"——实际是主界面从未渲染）
+- 根因：`App.tsx` 的 bootHeld 逻辑用 `useEffect` 的 cleanup 清除 setTimeout；`setBootHeld(true)` 触发重渲染后 cleanup 清掉 timer，新 effect 因 `bootHeld=true` 不再重设 timer → bootHeld 永远 true → 永远显示加载页
+- 修复：改用 `bootScheduledRef` 保证整个生命周期只调度一次，timer 存 ref 不被 cleanup 清除；`showBootScreen = (booting && !ready) || bootHeld` 不变
+- 浏览器实测：页面正常进入主界面、发消息、流式回复、折叠全部正常
+
+**主页标语不再被自动消息顶掉（称呼询问重做）**：
+
+- 之前：系统自动注入一条"我该怎么称呼你"消息到对话列表 → 主页标语（greeting）消失，只剩问候消息（且与标语文案重复）
+- 现在：**不再注入对话 UI**；改为在「登录且未设置称呼且本地从未问过且是第一条消息」时，把系统引导消息**前置进发送给服务端的消息列表**（`sendMessage` 内 unshift）——标语保留、消息仍真实进入 AI 上下文，AI 看到后主动询问称呼
+
+**AI 提示词精简（不再"太好动"）**：
+
+- 把 Logo / 头像 / 称呼 / 加载页 / 上传文件 / 客服 6 条冗长说明合并压缩为每条一句的简洁条目（总字数约减半），保留全部能力但减少 AI 的多余动作与自我发挥空间
+
+**用户消息名称与头像**：
+
+- 用户气泡旁名称由硬编码「你」改为**用户称呼**（display_name，未设置时回退邮箱前缀；游客显示「我」）
+- **用户头像可更换**：消息旁头像点击 → 头像面板（居中弹窗）→ 上传图片（png/jpg/svg/webp ≤2MB，写工作区 `system/avatar.<ext>`）；游客引导登录；AI 也可用 agent_fs_write 改 system/avatar.svg 帮用户换头像；bootstrap.avatar + `GET/POST /webos/api/avatar`
+- AI 头像改用系统 Logo（LogoMark，AI 可替换，与品牌一致）
+
+**思考过程与工具调用折叠（修复联动 bug）**：
+
+- 修复「点一个思考折叠，全部一起动」：折叠状态改为**按 segment index 独立**（Record<number, boolean>）
+- 思考过程：**正在流式输出时默认展开**（实时可见），思考完成自动折叠为一行「已思考 N 字」，点击展开
+- 工具调用：有工具在运行时展开显示实时状态；**全部完成后自动折叠为一行摘要**「使用了 N 个工具」（点击展开明细 + 收起按钮）
+
+- 验证：server/shell-web tsc、vite build 通过；线上 bootstrap.avatar（游客 null）✓、游客上传头像 403 ✓、AI 对话链路正常 ✓、前端已部署
+
+- **游客不支持上传**：`POST /workspace/files` 对游客返回 `403 GUEST_NOT_ALLOWED`（"登录后获得 10GB 空间"）；前端文件页游客显示「登录后上传（10GB）」按钮、➕ 面板上传对游客改为引导登录（前端拦截 + 后端强制双保险）
+- **空间上限按身份区分**：`workspaceLimitFor(key)`——游客 200MB（仅供 AI 生成物/App 素材），**已登录用户 10GB**（`MEMBER_WORKSPACE_BYTES`）；`agent_fs_write` 总量检查、上传端点、列表接口（workspaceLimitBytes）统一使用该函数
+- 验证：server/shell-web tsc、vite build 通过；线上游客上传 403 ✓、游客列表 limit=200MB ✓、前端已部署
+
+### 系统问候称呼 + 发送框 ➕ 菜单 + 定制加载页 + 后台任务确认（2026-08-03）
+
+**系统主动询问称呼（消息进 AI 上下文）**：
+
+- 前端 `AssistantHome`：登录且 `displayNameSet=false`（从未设置自定义称呼）且对话为空且本地从未问过时，自动注入一条系统引导消息（assistant 分段）：「在开始之前，我该怎么称呼你呢？…」
+- 该消息存在于本地 messages，用户回复时会被包含进发送给服务端的消息列表 → **真实进入 AI 上下文**；AI 根据提示词用新工具 `set_display_name`（服务端新增，写 users.display_name）持久化称呼
+- 触发记忆：localStorage `daily-webos-name-asked:<userId>`（问过一次不再重复）；bootstrap `session.user.displayNameSet` 由 authMiddleware `getUserMeta` 返回
+
+**发送框 ➕ 弹出面板（composer 精简）**：
+
+- 原 composer 上方常驻的「模型/思考 chips + 粘贴 HTML」移入 ➕ 弹出面板（向上铺出，fadeUp 动效）：① 上传文件（直接传 home/uploads/，AI 可读）② 粘贴 HTML 创建 App ③ 思考强度 chips
+- 发送框左侧 ➕ 圆形按钮（active 蓝色高亮），composer 区只剩一条输入框，视觉更干净
+
+**定制加载页（AI 可替换）**：
+
+- 工作区 `system/boot.html`（自包含 HTML，AI 可写）→ 启动时以 sandbox iframe 渲染；无则默认动画
+- 工作区 `system/boot.json`（`{"durationMs": 500-10000}`，默认 1200）→ 加载页**最短展示时长**（bootstrap 就绪后不足时长则保持加载页到点再进主界面）
+- bootstrap 返回 `boot: { html, durationMs }`；AI 提示词已说明（用户说"换个加载页/显示久一点"时读写这两个文件）
+- 回归：写入 boot.html + boot.json → bootstrap 返回自定义 HTML + durationMs=2500 ✓（线上实测）
+
+**AI 后台运行确认（关浏览器后任务继续）**：
+
+- 结论：**支持**。SSE 断连只停止前端转发（`disconnected` 标记），`runPiPrompt` 在服务端继续执行到完成（180s 超时），pi 会话上下文保留，用户回来可继续对话
+- 修复一个缺口：原实现断连后直接 return（不扣费不落库，任务白干）→ 现改为断连后照常按真实 usage 扣 token + 落库（状态 ok/failed），日志 `background task finished (client disconnected)`
+- 局限：无"异步任务队列 + 结果通知"，中断后的结果只能下次打开对话时从上下文感知（AI 会续上）
+
+- 验证：server `tsc --noEmit`、shell-web `tsc -b --noEmit`、`vite build` 通过；已部署（前端 dist + 后端 5 文件）
+
+**反人机验证（发送验证码前）**：
+
+- `POST /api/auth/email/puzzle`（免鉴权）：签发一道两位数加减算术题（内存 Map，5 分钟有效，**一次性**）
+- `POST /api/auth/email/send-code` 强制要求 `puzzleId + answer`，通过校验才真正发码；答错/过期/重用一律 `400 PUZZLE_REQUIRED`
+- 前端登录面板：点「获取验证码」→ 内联出现「人机验证：7 - 4 = ?」+ 答案输入框 → 提交通过后自动发送验证码；答错自动换新题
+- 定位：与 IP 限频互补（IP 限频防刷、算术题防脚本批量轰炸邮箱）
+- 回归：无答案 400 ✓、答错 400 ✓、正确回答通过（进入真实发码）✓、同一题目重用 400 ✓（本地+线上）
+
+**管理后台入口看不到（根因修复）**：
+
+- 根因：`emailAuth.ts` 邮箱注册路径**固定写死 role='member'**，没有应用 `ADMIN_USERNAMES` 机制（旧版 auth.ts 的 register 有，邮箱注册漏了）→ 站长账号 2893334965@qq.com 一直是 member
+- 修复：register 角色判定与 auth.ts 一致（用户名在 ADMIN_USERNAMES → admin）；**线上数据已直接 UPDATE 为 admin**
+- 注意：JWT 里的 role 是登录时签发的——**已登录用户需要退出重新登录**才能拿到 admin 角色（前端 ProfileView 才显示「管理后台」入口）
+
+**用户称呼（AI 对话界面显示名）**：
+
+- users 表新增 `display_name` 列（`ensureDisplayNameColumn` 幂等迁移）
+- `POST /api/auth/email/profile` {displayName}：登录态修改称呼（1-20 字，禁控制字符，IP 限频 30/h）
+- authMiddleware `getUserMeta` 优先返回 display_name；bootstrap `session.user.username` = 称呼 ?? 邮箱前缀
+- 前端：个人主页 account-card 新增「AI 对话中的称呼」输入 + 保存；AI 对话页 header 头像按钮与时段问候语（「晚上好，xxx。今天想做点什么？」）都显示称呼
+- 回归：profile 未登录 401 ✓、display_name 列迁移成功 ✓
+
+**AI 对话头部精简（design skill：克制、呼吸感、去重）**：
+
+- 删除重复身份行（原 header 账户按钮 + identity 行的「邮箱/游客ID + 在线」两处重复）
+- header 重构：左侧 Logo+Daily（去掉 NOW 小字）；右侧 = 余额 chip（紧凑胶囊）+ 桌面圆形图标按钮 + 账户（登录：圆形头像+称呼胶囊，admin 高亮蓝；游客：弱化「登录」胶囊）
+- 问候语按时段（早上好/中午好/下午好/晚上好/夜深了）+ 称呼，保留日期
+
+- 验证：server `tsc --noEmit`、shell-web `tsc -b --noEmit`、`vite build` 全部通过；本地+线上回归通过（见上）；已部署（前端 dist + 后端 6 文件 + 数据修复）
+
+**登录系统（对照 OWASP / NIST SP 800-63B 补齐专业要素）**：
+
+- 服务端 `emailAuth.ts`：密码策略升级为 **8-64 位 + 至少 3 类字符（小写/大写/数字/符号）+ 弱密码黑名单（40+ 常见口令）+ 密码不得包含邮箱本地部分**（注册/重置共用 `validatePassword`）；**登录失败账户锁定**（同一邮箱连续失败 5 次锁 15 分钟，与既有 IP 限频互补）；新增 `POST /api/auth/email/change-password`（已登录改密：验证旧密码 → 新密码强度校验 → 更新，IP 限频 20/h，成功后清失败计数）
+- 前端 `LoginPanel`：**再次输入密码确认**（注册/忘记密码/修改密码三处表单）+ **密码强度指示条**（PasswordMeter：太弱/较弱/中等/强 + 提示文案，与服务端规则一致）+ **显示/隐藏密码切换**（所有密码输入框）+ **已登录面板修改密码入口**（登录弹窗内直接改密，无需验证码）；登录错误提示剩余可尝试次数
+- 回归（真实服务验证）：`12345678`/`password123` 注册 400 INVALID_PASSWORD ✓；不存在邮箱连错 5 次后第 6 次 423 ACCOUNT_LOCKED「请 15 分钟后再试」✓；弱密码类顺序（长度→字符类→黑名单）正确
+
+**聊天记录持久化（刷新不再丢失）**：
+
+- `store.ts`：messages 按会话身份（`guest:<deviceId>` / `user:<userId>`）存 localStorage（`daily-webos-chat:<key>`）；`hydrate` 在身份变化（登录/注册/登出/首启）时自动恢复该身份历史，身份不变（刷新 bootstrap）不覆盖当前时间线；`useShellStore.subscribe` 监听 messages 变化自动落盘（流式期间增量保存）；上限 120 条 / 1.5MB（超长从旧消息截断）；logout 清除当前身份缓存；**不同用户互不串档**
+
+**用户文件上传（AI 工作区 + 隔离 + 限制）**：
+
+- 新端点（`/webos/api/workspace/files*`，全部基于 principal 解析路径，per-user 隔离）：
+  - `GET /workspace/files?path=` 列出用户可见区（home/，含工作区总量）
+  - `POST /workspace/files` {fileName, contentBase64, dir?} 上传（默认 home/uploads/）
+  - `GET /workspace/files/raw?path=` 文件字节（图片预览/下载，按扩展名 MIME）
+  - `DELETE /workspace/files?path=` 删除文件/空目录
+- **限制**：单文件 ≤10MB、每用户工作区总量 ≤200MB（上传与 AI 写入共享）、类型白名单（图片/文档/音频/视频/压缩包，禁止脚本/可执行文件）；`agent_fs_write` 增加总量检查（新文件/覆盖变大时）；路径校验防越界（`resolveUserHomePath` 仅 home/ 内，越界返回 400 INVALID_PATH）
+- 前端 `FilesView`：上传按钮（多选）→ 列表（目录可进入、图片缩略图、下载、删除）→ 用量进度条；提示"上传后 AI 可直接读取使用"
+- AI 提示词新增：用户上传的文件在 `home/uploads/`，可用 agent_fs_* 读取并放进 App/壁纸
+- 回归（真实服务验证）：上传→列表→raw 读取→删除全链路 ✓；另一游客看不到（隔离 ✓）；`../agent/notes.md` 越权 400 ✓；`evil.sh` 400 FILE_TYPE_NOT_ALLOWED ✓；`GET /workspace/files`（空 path）原 500 已修（resolveUserHomePath 空路径=home 根）✓
+
+**Logo 可被 AI 替换（AI 即系统：连品牌都归 AI 管）**：
+
+- Logo = 工作区 `system/logo.svg`（优先）或 `system/logo.png`；AI 用 `agent_fs_write` 修改即可全局换标
+- `bootstrap.logo` 返回 `{mime, base64}`（`readLogoFile`，≤4MB）；`GET /webos/api/logo` 供前端按需刷新
+- 前端 `LogoMark` 组件：有 logo 显示 `<img data-url>`，无则回退文字「D」；已接入 BootScreen / AssistantHome wordmark / LoginPanel 三个入口
+- AI 提示词新增「系统 Logo（可替换）」条目（SVG 优先、先读后改、告知刷新生效）
+- 回归（真实服务验证）：写入 system/logo.svg → bootstrap 返回 image/svg+xml + base64 ✓；删除后回退 null ✓
+
+**客服联系方式调整（付费/提示词/设置）**：
+
+- 付费相关文案（套餐描述、TOKEN_INSUFFICIENT、支付不可用）**QQ → 微信 fangyan876**（webos.ts `SUPPORT_WECHAT` + `PLAN_SUPPORT_TEXT`，前端 ProfileView 同步）
+- AI 系统提示词新增「客服联系方式」条目：微信 fangyan876（额度/购买）+ QQ 2893334965（反馈/讨论）
+- 设置页（ProfileView）新增「联系站长 · 分享讨论」卡片：QQ 2893334965 + 微信 fangyan876，提醒加好友交流
+
+**后台控制台入口**：ProfileView 对 admin 角色显示「管理后台」链接（https://admin.shadowshub.xyz，ExternalLink 新窗口），管理员登录后可直接浏览用户/用量/额度管理。
+
+**其他**：AI 对话首页欢迎语由「晚上好。直接开始就可以。」改为「嗨，今天想做点什么？我可以帮你做 App、改桌面、管文件。」（引导用户让 AI 做应用/改桌面）；suggestions 与 context-card 文案微调。
+- 验证：server `tsc --noEmit`、shell-web `tsc -b --noEmit`、`vite build` 全部通过；新端点真实请求全链路回归通过（见上）
+
+### 多会话（2026-08-05，DeepSeek 式会话管理）
+
+**产品功能（用户需求）**：多会话并行工作 + 创建新会话 + 修改/回退重来某条消息 + 复制粘贴 + 每会话 token 统计。
+
+**后端**：
+
+- `POST /webos/api/chat/stream` 请求体新增 `conversationId`（缺省 `default`）与 `rebuild`（编辑/回退重来置 true）
+- **会话上下文隔离（关键根因修复）**：pi 的 `createAgentSession` 会通过 `sessionManager.buildSessionContext()` 恢复历史；原实现所有 webOS 会话共享同一个 `SessionManager.inMemory(cwd)` 单例 → 不同会话上下文互相串扰（实测会话 B 能答出会话 A 的名字）。修复：`createWebosSession` 改为每个会话独立 `SessionManager.inMemory(cwd)`（画布会话的 sharedSessionManager 不受影响）；session 缓存 key 升级为 `webos:${scope}:${conversationId}:${thinking}`
+- `disposeWebosSessions(scope, conversationId?)`：不传 conversationId 时释放全部（向后兼容），传了只释放指定会话——busy 重试/失败/超时清理都改为只清当前会话，**并行会话互不误杀**
+- **rebuild 语义**：先 dispose 该会话 pi 上下文，再把修改后的完整消息历史（`messages.slice(0,-1)`）格式化为背景文本（`formatHistoryContext`，≤24k 字符，头尾截断）拼进 userText → 新会话从空上下文 + 重放历史推理，等价 DeepSeek「编辑消息后重新生成」；日志 `[webos] chat rebuild conversation=...`
+- 扣费/用量落库逻辑不变（rebuild 按真实 usage 正常计费）
+
+**前端**（`client/shell-web`）：
+
+- `store.ts` 重构为多会话模型：`conversations: ChatConversation[]`（id/title/createdAt/updatedAt/messages/usedTokens/draft）+ `activeConversationId` + `streamingConvs: Record<convId, AbortController>`（**每个会话独立流式控制器，支持多会话并行生成**，切走后台照常累积，回来看到完整结果）；`messages` 字段保留为当前会话视图（旧组件兼容）
+- 新 actions：`createConversation / switchConversation / renameConversation / deleteConversation / copyMessageAt / editMessageAt / regenerateAt / stopStreaming`
+- **编辑消息**：用户消息就地 textarea（取消/发送修改）→ 截断该消息之后的内容 → 以修改后的消息 rebuild 重发
+- **回退重来**：用户消息=删除它及之后重发原内容；AI 消息=删除它及之后重发它前面最后一条用户消息（confirm 确认）→ rebuild
+- **复制**：`navigator.clipboard.writeText` 复制消息纯文本（user 全文 / assistant 拼接文字段）
+- **每会话 token 统计**：done 事件 `usage.totalTokens` 累加到会话 `usedTokens`；对话页 header 下方信息条（标题+本会话 tokens，点击打开会话列表）与会话列表项均显示；顶部余额 chip 仍显示全局剩余
+- **会话侧边栏**（ChatSidebar，左侧滑出抽屉）：新建/切换/重命名/删除，按 今天/昨天/更早 分组，流式会话显示「生成中」，底部显示全局余额；header 新增「会话」胶囊按钮
+- **持久化**：`daily-webos-conv:<scopeKey>`（按身份隔离，每会话 200 条上限/6MB 兜底截断）；**旧版单时间线缓存 `daily-webos-chat:*` 自动迁移为「历史对话」会话**；logout/身份切换中断全部流式并清理缓存
+- 会话标题自动取第一条用户消息前 20 字（可重命名）；每会话独立草稿（切换不丢输入）；称呼引导按「当前会话首条消息」触发
+
+**回归记录（真实 DeepSeek + SQLite + 本地服务 + 浏览器实测）**：
+
+- 会话 A「记住小明」→ 会话 B 问名字答「不知道」（**隔离生效**，修复前答「小明」）；A 问名字答「小明」（上下文累积正常）；并行双会话均正常流式 + done token 统计（117+151+... 全局 used 累加正确）
+- 编辑重来：把「小明」改「小红」rebuild 后回答「小红」（旧上下文被丢弃 ✓，日志 `chat rebuild`）
+- 浏览器端：新建会话 → 发消息 → AI 完整回复（思考折叠/markdown）→ 会话信息条 10,000 tokens → 侧边栏两会话分组显示 → 切换会话消息完整恢复 → 编辑消息（textarea 修改 → 发送修改 → 截断 + rebuild 请求发出）→ 复制按钮（clipboard 在 Playwright 环境受限，UI 反馈正常；生产 https 正常）
+- 两端类型检查与 shell-web `vite build` 通过
+
+### 加载页缓存 + 爱发电订阅页 + 对话 UI 打磨（2026-08-05 下午）
+
+**定制加载页缓存（修复"先默认后自定义"）**：
+
+- 现象：刷新后先显示默认加载动画，最后一刻才切换为自定义 boot.html（bootstrap 返回后 hydrate 才 set bootConfig）
+- 修复：hydrate 把 boot.html + durationMs 缓存到 localStorage（`daily-webos-boot-html` / `daily-webos-boot-duration`）；`boot()` 启动时先恢复缓存 → BootScreen 立即渲染自定义加载页，bootstrap 返回后用服务端最新值覆盖并刷新缓存（用户删除了自定义页则清缓存）
+- 注意：首次访问无缓存仍会先默认后切换（正常）；之后刷新直接显示自定义页
+
+**爱发电订阅页（全屏档位页）**：
+
+- ProfileView 套餐卡片改为「订阅支持（爱发电）」按钮 → 打开全屏页 `AfdianView`：上方「入驻爱发电」徽章 + 说明，下方两档卡片：
+  - ¥9.9「轻量支持」→ 1000 积分（相当于 10 元额度）
+  - ¥29.9「深度支持」→ 3000 积分（相当于 30 元额度）+「优先体验新功能」徽章
+- 真实支付接入前点击档位只 toast「即将开放」（不伪造扣款/到账）；底部说明支付通道接入中 + 客服微信
+- zpay 残留的 PayPanel 不再被触发（providerStatus 恒 unavailable），保留代码未删
+
+**对话 UI 打磨（本轮）**：
+
+- 用户气泡 max-width 82% → **72%**（窄屏下与 AI 消息视觉分区，AI 消息不再"居中偏右"）
+- AI 消息正文 max-width **80%**（右侧留白，不与用户消息"撞"）；头像 27→24px、消息间距 14→16px
+- 发消息后 AI 立即显示「●●● 正在思考…」（占位消息改空 segments 触发 typing 动画，修复"发送后无提示"）
+- 流式生成中的消息不显示「复制/回退重来」操作条（生成完成才出现）
+- AI 消息左边缘收敛到 ~40px（消息区 padding 10px + 头像 24px + gap 8px）
+
+### 2026-08-04：grep 系统源码 + 空闲超时 + 生图展示 + 工具折叠
+
+**追加（2026-08-04 下午）三个线上问题修复**：
+
+- **工具折叠可收起**：展开的工具组顶部新增「收起工具」按钮（ChevronDown，点击 `toolGroupOpen[gi]=false` 回到一行摘要），与展开/折叠状态独立记忆。
+- **180s 超时后上下文被清空（根因修复）**：原 catch 对所有异常**无条件 dispose pi 会话**（超时也算）→ 用户重试时 AI 不记得前面。修复：①空闲超时（message 含"已中断/无活动"）**不 dispose**，保留会话上下文，报错提示"请稍后重试；本会话上下文已保留"；②busy 重试从 dispose+重建改为**等待 2s×次数后重试同一会话**（最多 3 次，busyRetried 改计数器），超时中断后仍在后台跑的 prompt 完成后自然轮到本次请求；③**所有注入工具统一过 wrapTool 包装**（原只有 appTools 有 execution.log 记录），工具执行开始即 `markPiActivity()`——生图等长工具执行期间不会被 180s 空闲超时误杀（此前仅靠 pi 事件刷新活动计时）。
+- **刷新加载页 logo 显示默认「D」（根因修复）**：BootScreen 在 bootstrap 返回前渲染，此时 store.logo 恒为 null（bootstrap 返回后加载页通常已结束）→ 加载页全程显示「D」，主页 header 却显示用户 logo（月亮）。修复：新增 `daily-webos-logo` localStorage 缓存（readCachedLogo），store 创建时恢复缓存 → 首帧加载页即显示真实 logo；hydrate 用服务端最新值刷新缓存（用户换 logo 下次刷新首帧生效；游客/删除后清缓存回「D」）。服务端 bootstrap.logo 本身一直正常（实测返回 image/svg+xml 440 字符）。
+
+部署：server/src/routes/webos.ts + client/shell-web/dist（index-BgVholAn.js）。
+
+**① AI"grep 调用不了"根因与修复（看实际日志确认）**：用户执行日志显示 AI 用 `agent_fs_grep` 搜系统源码（`../server/src/routes/webos.ts`）→ 路径越界被拒；`path=apps` 搜 `assets`/`/webos/api` found 0 是**真实结果**（该用户 App 源码确实不含这些字符串，grep 无 bug）。真正缺口是**系统源码只能 list/read、不能按内容搜索**。新增 **`agent_src_grep`** 工具（只读搜索 server/src、client/shell-web/src、shared，返回 文件:行号:内容，path 可限定目录，排除 node_modules/.env/dist）；提示词明确「agent_fs_grep 只能搜工作区，搜系统源码用 agent_src_grep」。
+
+**② 180s"强制中断"根因与修复（空闲超时）**：`runPiPrompt` 原为整体 `Promise.race` 180s 超时——**工具执行期间计时器照跑**，生图/多轮工具累计超 180s 被误杀。改为**空闲超时**：`piLastActivityAt` + 5s 轮询，任何 pi 事件（LLM 增量/工具执行，subscribe 回调开头 `markPiActivity()`）刷新计时；仅"180s 内完全无活动"才中断。长任务不会再被误杀。
+
+**③ 生图结果展示**：`tool_execution_end` 对 `generate_image` 成功解析 `files[].url` → SSE `tool_end` 事件带 `images[]`（契约更新）；前端 tool segment 存 `images`，工具 chip 下方渲染**图片网格**（几张贴几张），点击缩略图 → 全屏大图查看（Lightbox）+「下载原图」按钮；每张图角落有「下载」快捷按钮。
+
+**④ 工具调用折叠**：连续 tool 段归组；组内全部完成且组后还有文字（text/html）时自动折叠为一行「使用了 N 个工具（grep、生图…）」，点击展开明细（chips + 图片）；正在执行/消息末尾的工具保持展开。与思考折叠独立按组记录状态。
+
+部署：server/src/routes/webos.ts、server/src/utils/webosWorkspace.ts、server/src/piBridge.ts、shared/webos-contracts/index.ts + 前端 dist（index-BGG7MNZ5.js）。
+
+### 应用商店 + 分享 + 导出 + 奖励 + App 互联 + 外部 API（2026-08-03 深夜）
+
+**产品形态**：商店 = **数据 API（`/webos/api/store/*`）+ 形态（`system.store` 版本化 HTML App，AI 可改，同 system.desktop 模式）**。分享链接 `?exp=<shareId>` 打开直接体验（sandbox 运行商店快照，可登录安装）。
+
+**数据表**（schema.ts / schema-sqlite.ts，两套）：
+- `webos_store_apps`：已发布条目（shareId、owner_key、name/icon/description/html 快照、downloads）
+- `webos_store_visits`：分享访问（shareId+visitor_key 唯一，visited→credited）
+- `webos_store_installs`：他人安装（shareId+installer_key 唯一，触发下载奖励）
+- 部署注意：SQLite 旧库需手动执行新表 DDL（`db.exec` 幂等建表，见验证脚本模式；服务端 SCHEMA_SQL 对新库自动生效）。
+
+**服务端 API**（webos.ts，全部 authMiddleware 继承）：
+- `GET /store/apps`（列表，含 installs 计数与 installed 标记）、`GET /store/apps/:shareId`（详情含 html）
+- `POST /store/apps`（发布：快照 active 版本；重复发布更新快照、shareId 不变）、`DELETE /store/apps/:shareId`（下架，仅 owner）
+- `POST /store/apps/:shareId/install`（复制为我的 App `store:<shareId>`，source='store'；他人首次安装 → 发布者 +100 积分）
+- `POST /store/apps/:shareId/visit`（分享访问上报；owner 自己不算；每访问者每应用一次）
+- `GET /store/apps/:shareId/export`（**zip 导出源码**：index.html + 发布者工作区 assets/，Node zlib 手写标准 zip：CRC32 + deflate + central directory）
+- `GET /store/my`（我的发布 + installs/visits 统计）
+- `POST /http`（**外部 API 代理**：App 接入 uapis.cn 等第三方/自建 API；SSRF 防护 dns.lookup 禁内网/回环、限频 30 次/分、15s 超时、≤2MB、禁 host/cookie/authorization 头）
+- 导出 `grantCredits(key, amount)`（+N 积分，写 credits.quota）与 `settleShareRewards(guestKey)`（分享奖励结算）
+
+**分享奖励**：访问者打开体验页 → 上报 visit（游客 key）→ 访问者登录/注册/重置密码时 `emailAuth.migrateGuestAssets` 末尾调用 `settleShareRewards(guestKey)`（无论是否发生资产迁移）→ 对应分享者各 +100 积分，visit 标记 credited。自己分享给自己不算。
+
+**AI 工具**：`publish_webos_app` / `unpublish_webos_app`（发布/下架）；提示词新增：商店形态可改（system.store）、外部 API（DailyWebOs.http）、App 互联（DailyWebOs.api）、导出说明。
+
+**前端**：
+- `runtime.ts`：App SDK 新增 `http.request/get/post`（经宿主代理）+ `api.register/call`（**App 间互联互通**：宿主维护 `appRuntimePorts`（每个打开过的 App 保留 MessagePort 后台保活），api.call 转发到目标 App 执行 handler 后回传；目标未打开返回明确错误）；新增 `createStoreRuntime`（商店桥：list/install/share/exportUrl/my/myApps/publish/unpublish + download 指令）
+- App 侧 bootstrap（App.tsx）：SDK 加 http/api；onPortMessage 处理宿主转发的 `api_call`（执行 `window.__dailyWebOsApiHandlers` 里的 handler 并回传 api_result）
+- `StoreView`（system.store iframe + StoreSDK）、`ExperienceView`（?exp= 体验页：运行快照 + 安装按钮 + visit 上报（localStorage 防重））、桌面点击 system.store → 商店、boot 后检测 exp 参数进入体验页
+- api.ts：store 系列函数 + proxyHttp
+
+**线上端到端验证**：发布 → 列表 → B 访问（visit）→ B 安装（"发布者获得 100 积分奖励"）→ B 重复安装不重复奖励 → 导出 zip（HTTP 200、PK 头 504b0304）→ C 积分 quota=200（100+100 下载奖励）→ 三张表数据正确。分享奖励结算逻辑已接入登录流程（服务进程内调用，脱离进程脚本无法初始化 DB 池属预期）。
+
+部署：schema 两文件、webos.ts、emailAuth.ts、piBridge.ts、webosStoreV1.ts（新文件，src/）+ 前端 dist。SQLite 旧库需手动建表（见上）。
+
+### 批量修复 + 对话内互动 HTML（2026-08-03 晚）
+
+**① 会话标题"没生效"根因（SW 缓存）**：AI 标题逻辑此前已上线且验证正常，但用户浏览器一直加载旧 bundle——sw.js 原为 stale-while-revalidate（先返回缓存旧 JS，后台更新），发版后用户要刷新两次才拿到新代码。**sw.js 改为 network-first**（fetch 失败才回退缓存）+ CACHE_NAME 升 v0.1.2；配合 store 的 boot.html localStorage 缓存，加载页与标题功能发版即生效。注意：旧会话（无 titleAuto 字段）不会触发 AI 标题，新会话才会。
+
+**② 生图后卡住 + 会话上下文丢失根因（DeepSeek 503）**：pm2 日志确认 `err=503 Service is too busy`（DeepSeek 侧繁忙）。原代码对 `agent_end stop=error` **一律 dispose 会话** → 503 后整个会话上下文被丢弃，用户"继续"时 AI 不记得前面。修复：**区分暂时性错误**（503/429/too busy/rate limit → 保留会话，用户重试即可续上记忆）与非暂时性错误（400 等 → 仍 dispose 自愈）；错误码 `WEBOS_AI_BUSY`，落审计 status=empty_response。
+
+**③ 报错显示在对话内（不弹窗）**：UiSegment 新增 `{type:'error'}`；`onEvent error`、HTTP/网络 catch、空回复兜底全部改为 `appendErrorToConversation`（替换"正在思考…"空占位或追加新消息，红色卡片 + 复制按钮），不再 set error 弹 toast。402 积分不足等 WebOsApiError 消息也进对话。
+
+**④ 称呼实时更新**：tool_end 事件里 `set_display_name && ok` → refreshBootstrap（对话页用户名/问候语即时更新；ProfileView 路径原本已有刷新）。
+
+**⑤ 加载页"先默认后自定义"**：根因同①（旧 bundle 无缓存逻辑）。SW 修复后，有缓存的用户刷新即首帧自定义页；首次访问仍会先默认后切换（正常）。
+
+**⑥ 输入框自适应 + 齿轮图标**：textarea 高度随输入增长（44-160px，超高内部滚动），发送后重置；composer 加号按钮改为 Settings 齿轮图标。
+
+**⑦ 对话内互动 HTML（新功能，全链路验证通过）**：
+- 服务端 `show_interactive_html` 工具（webos.ts）：参数 { html, heightPx 120-480 默认 280 }，校验复用 validateAppHtml + validateGeneratedHtml；描述明确尺寸约束（宽=100% 屏宽、高 120-480px 约大半屏、建议 220-320 约 4 倍输入框高）；tool_execution_end 转发 SSE `interactive_html` 事件。
+- shared 契约 WebOsChatEvent 新增 `{ type:'interactive_html'; html; heightPx? }`。
+- 前端 UiSegment 新增 `{type:'html'}`；MessageBubble 渲染 sandbox iframe（复用 APP_RUNTIME_BOOTSTRAP localStorage polyfill），圆角卡片样式。
+- piBridge 系统提示词新增「对话内互动内容」条目（含尺寸约束与 create_webos_app 区分）。
+- 线上端到端：真实对话"在对话里插入一个交互式计算器"→ SSE 事件流含 `interactive_html` ✓。
+
+**管理后台账号**：`2893334965@qq.com`（role=admin，称呼「芸」），密码为用户注册时自设；另有运维种子账号 ops-admin@daily.local（无登录入口）。忘记密码可在服务器直接改库（scrypt）。
+
+部署：server/src/routes/webos.ts + server/src/piBridge.ts + client/shell-web/dist 全部上传；sw.js 必须同步上传（缓存策略变更）。
+
+### AI 自动生成会话标题（2026-08-06）
+
+用户反馈"AI 自动创建会话标题没有启动"：此前实现只是**机械截取第一条用户消息前 20 字**（前端 store.ts，2026-08-05 多会话时加入），并非 AI 生成。运行时验证（真实 store.ts + stub api）确认截取逻辑正常，用户期望的是像 DeepSeek/ChatGPT 那样的 **AI 智能标题**。本轮实现：
+
+- **后端**：`piBridge.ts` 新增 `generateConversationTitle(texts)`——pi-ai `completeSimple` 一次性补全（**不创建 agent 会话、不进会话历史、不注入工具**），thinking=minimal（pi-ai SimpleStreamOptions 无 'off'，minimal 被 thinkingLevelMap clamp 到 low），maxTokens=64，超时/失败返回 null；复用 createWebosSession 的 ModelRegistry + registerDeepseekModels 构建逻辑（DEEPSEEK_API_KEY 注入一致）。
+- **后端路由**：`POST /webos/api/chat/title`（authMiddleware）——body `{ texts }`（≤10 条、每条 ≤500 字、总长 ≤4000），限频每用户每 10 分钟 5 次（防刷烧钱）；生成结果经 `recordAiUsage` 落审计（thinking='off' 已放宽类型为 string；**不扣用户积分**，成本极小）；失败返回 `{ title: null }` 由前端回退。
+- **前端**：`api.ts` 新增 `generateConversationTitle`；`store.ts` 在 `runConversationTurn` finally 中（会话首次 AI 回复完成后）：`ChatConversation` 新增 `titleAuto`（自动标题标记；用户重命名置 false 后 AI 不再覆盖）与 `titleAiDone`（每会话只尝试一次）字段；收集最近 ≤8 条消息纯文本（各 150 字、总 ≤1600 字）→ fire-and-forget 调用 → 成功且仍为自动标题时覆盖。截取标题保留为**即时反馈 + AI 失败回退**（双轨：发消息立即有标题，几秒后升级为 AI 概括标题）。
+- **顺带防御修复**：`sendMessage` 称呼引导的 `currentSession?.user.id` / `.displayNameSet` 改双重可选链（session.user 极端情况下为 null 时不再抛 TypeError，游客流程更健壮）。
+- **回归**：server `tsc --noEmit`、shell-web `tsc -b --noEmit`、`vite build` 全部通过；前端三场景运行时验证（真实 store.ts esbuild bundle + stub api）：①新建会话发消息 → 截取标题 → AI 标题覆盖（titleAuto=true、titleAiDone=true、仅请求一次）②同会话再发消息不再请求 ③手动重命名后 AI 不覆盖；**真实 DeepSeek 冒烟测试**：`generateConversationTitle(['用户：帮我做一个待办清单 App', ...])` → `"待办清单 App 开发"`（约 12s，含 pi 首次加载；线上会话缓存后更快）。
+- 部署注意：后端 `server/src/piBridge.ts`（src/）+ `server/src/routes/webos.ts`（routes/）**分别放对目录**；前端 dist 需重新构建上传。
+
+
+### 当前已知限制与后续
+
+- 当前浏览器自动化环境报告的 CSS viewport 约为 389px，即使外部窗口显示为 780px，也不会触发 `@media (min-width: 700px)`；因此桌面浮起圆角效果不能在该移动模拟环境中确认。CSS 规则仍保留，需用真实桌面 viewport 再确认。
+- PWA manifest 和图标访问已验证，但尚未完成操作系统级“安装 PWA”全流程。
+- 当前游客回归空间中保留了若干测试 App，便于继续检查版本和 Runtime；清理前应先确认用户是否希望删除。
+- 支付 Provider、邮箱验证码 Provider、公共商店、社区分发和托管服务 App 仍不在首版实现范围。
+
+### AI 即系统（2026-08-01 方向落地）
+
+> 用户决策：**AI 是系统本身**。除了 AI 对话页（assistant）的输入框和对话内容，系统是 AI 的家——
+> AI 可以自由修改系统桌面、管理文件、创建/修改 App、添加页面、定制视觉。保留的只有
+> 「版本化 + 回滚 + 校验」三件安全带（不限制 AI 能力，只保证系统可恢复）。
+
+**架构变化：**
+
+- **系统桌面 = `system.desktop` App（版本化 HTML）**：`loadState` 时幂等初始化
+  （`ensureSystemDesktop`），初始 HTML 是 `server/src/webosDesktopV1.ts` 的
+  `WEBOS_DESKTOP_V1_HTML`——完整复刻原 React 桌面功能（壁纸/时钟/图标网格/Dock/长按整理/
+  页面指示器）但**删掉所有碍眼标语**（MY SPACE/游客/NOW 卡片/“系统”/“刚刚创建”小字）。
+  v1 是「参考实现」：AI 改砸了可回滚，或参考 v1 复原。`DELETE /apps/system.desktop` 被
+  403 保护。
+- **前端桌面 iframe 化**：`DesktopView` 改为 sandbox iframe 渲染 `system.desktop` 的
+  active 版本 HTML + `createDesktopRuntime`（runtime.ts）MessageChannel 桥。桌面 HTML 通过
+  `DesktopSDK` 向宿主请求数据/服务：`apps.list / apps.open / apps.reorder / apps.remove /
+  system.navigate`。AI 修改桌面 → `update_webos_app` → `app_updated` SSE → 前端
+  refreshBootstrap → 桌面自动换新版本。
+- **Agent 工作区（文件系统）**：`server/src/utils/webosWorkspace.ts` 提供 per-user 磁盘
+  工作区 `<SANDBOX_DIR>/webos/<key>/`（`home/` 用户可见区、`system/` 系统素材、
+  `agent/` 草稿区），注入 7 个 `agent_fs_*` 工具（list/read/write/mkdir/delete/stat/
+  search），路径校验禁止越界。webOS 会话提示词升级为「AI 即系统」版，并新增禁区
+  （对话页输入框/对话内容、系统功能页 files/settings/billing）。
+- **webOS 专用 skills**：`.pi/skills-webos/`（只加载受控 skill，不加载 `.pi/skills/` 下
+  会操作服务器 cwd 的 fs-cli 等）。已内置 `design` 设计 skill（提炼 Huashu Design +
+  Open Design 精华：6 套 tokens、组件规范、动效技术、webOS 约束）。
+- 桌面 iframe 沙箱注意：无 `allow-modals`，`window.confirm` 静默失败 → 桌面 v1 用自绘
+  确认面板；桌面 JS 不用 `fetch`/真实 `localStorage`（宿主 polyfill + SDK）。
+
+**已回归（真实 DeepSeek 会话 + SQLite + 本地服务验证）：**
+
+- AI 对话中真实调用 `agent_fs_list → agent_fs_mkdir → agent_fs_write → agent_fs_read`，
+  工作区文件真实落盘（`guest:xxx/agent/notes/hello.md`）。
+- AI 修改系统桌面：`get_webos_app(system.desktop) → update_webos_app` → 新版本
+  v1.0.1（深蓝壁纸+时钟左下角）→ `app_updated` SSE 事件 → 前端自动刷新。
+- AI 加第二页：v1.0.2 桌面含 2 个 `.page`（scroll-snap 横向滑动）+ 待办卡片 + 双点
+  页面指示器；版本历史 v1.0.0（参考）→ v1.0.1 → v1.0.2 可回滚。
+- 两端类型检查（server `tsc --noEmit`、shell-web `tsc -b --noEmit`）与 shell-web
+  `vite build` 全部通过。
+
+**桌面 Dock 点击无反应 + 顶部留白修复（2026-08-01 线上回归）：**
+
+- 根因：桌面 SDK 桥原本用 MessageChannel 握手（load 事件 + `contentDocument` 兜底），
+  在 opaque origin sandbox 下握手经常失败 → SDK 未连接 → Dock 点击无响应、时钟/布局异常。
+- 修复：`runtime.ts createDesktopRuntime` 改为**纯 postMessage 双向直连**（iframe 内
+  `window.parent.postMessage({channel:'daily-webos-sdk',...})` 发请求，宿主 window
+  'message' 监听并按 `event.source !== iframe.contentWindow` 校验来源后回响应），100% 可靠。
+- 桌面 v1 重写为**简洁大方版**：紧凑时钟（28px 置顶）、图标 54px、Dock 44px、
+  页面 padding 64px，去除大片留白；沿用 design skill 的 tokens。
+- `ensureSystemDesktop` 增加**自动升级**：仅当桌面从未被 AI/用户改过（唯一版本、
+  `createdBy=system`、v1.0.0）且 active HTML ≠ 新模板时，创建 v1.0.1 新模板版本
+  （旧版保留 ready 可回滚）；AI 改过的桌面不自动覆盖。
+- 线上验证：用户真实身份 `guest:a7d202` 桌面 v1.0.0(ready) → v1.0.1(active)，
+  newBridge=true（`parent.postMessage`）、无 MessageChannel；新游客初始化即新模板；
+  AI 对话链路 `start → delta×8 → done` 正常。
+
+**桌面 JS 语法错误二次修复（2026-08-01 线上，根因在模板字符串转义）：**
+
+- 现象：Dock 修复部署后用户仍看到「淡蓝背景 + 底部三个按钮」——桌面 JS 全部没执行。
+  浏览器控制台 `Uncaught SyntaxError: Unexpected string (about:srcdoc:380)`。
+- 根因：`webosDesktopV1.ts` 用 **TS 模板字符串（反引号）内嵌桌面 HTML/JS**，内嵌 JS 里的
+  `\"`、`\u0022` 等转义序列在**模板字符串求值时被消费**（`\"`→`"`、`\u0022`→`"`），
+  生成的 HTML 里 JS 源码变成裸引号 → 语法错误 → 整个 `<script>` 不执行
+  （时钟不渲染、图标不加载、Dock 点击无反应、只剩静态背景）。
+  首次部署时本地只用 `readFileSync` 提取模板文本做 vm 检查（源码文本 OK），
+  **没做「求值后」验证**，导致坏模板上线。
+- 修复：内嵌 JS 字符串全部改用**单引号**（`'<img alt="" src=...'`），模板字符串里
+  单引号无需转义、求值安全；`\u0022` 改为字面 `'"'`。
+- 部署后**必须**在 tsx 运行时验证求值结果：`npx tsx` import 模板 → 提取 `<script>`
+  → `vm.Script` 检查（服务器与本地各一次）。
+- 存量数据修复：唯一版本坏模板（v1.0.0）游客由 `ensureSystemDesktop` 自动升级修复；
+  非唯一版本（用户 a7d202 的坏 v1.0.1）手动运维脚本创建 v1.0.2（新模板）切换 active，
+  旧版保留可回滚（脚本已执行，数据库有备份 `data/daily.db.bak-fixdesktop`）。
+- 教训：**模板字符串内嵌 JS 的转义序列会静默改变求值结果**；任何 HTML 模板改动
+  必须验证「运行时求值结果」而非源码文本；验证方法写入部署手册 §3 检查清单。
+
+**桌面被 AI 改成深色版 + 可观测性基建（2026-08-01 线上）：**
+
+- 现象：用户反馈桌面"先进新版、后变旧版"——查版本历史发现 AI 在对话中把桌面
+  改成了深色壁纸版（v1.0.3/v1.0.4，`bg1=#141c2c`，createdBy=guest），并非缓存问题。
+- 处置：回滚 a7d202 桌面 active 到 v1.0.2（淡蓝简洁修复版）；v1.0.3/v1.0.4 保留
+  ready 可回滚（数据库备份 `data/daily.db.bak-rollback`）。教训：AI 改桌面是
+  "AI 即系统"的正常行为，排查"桌面变了"应先查 App 版本历史，而非怀疑缓存/代码。
+- **`/webos/api/` 全部响应加 `Cache-Control: no-store`**（动态 API 含用户私有状态，
+  浏览器启发式缓存会导致看到过期桌面/App；此前无该头，bootstrap 曾出现 304 复用）。
+- **工作区编号 + AI 执行日志**（用户建议）：
+  - 每个用户工作区 `<SANDBOX_DIR>/webos/<key>/` 增加 `meta.json`
+    （`workspaceId: ws-<sha256(key)前8位>` 确定性编号、创建时间）与 `logs/execution.log`；
+  - `logs/` 与 `meta.json` 由系统写入，`agent_fs_write/mkdir/delete` 校验拒绝
+    （`assertMutable`），AI 只读不可改；日志 JSON Lines 记录每次
+    `agent_fs_*` 与 webOS App 工具（create/list/get/update）调用的时间、工具、
+    参数摘要（>200 字符截断）、成败与错误；20MB 自动轮转。
+  - 端到端验证：AI 真实调用 `agent_fs_list → agent_fs_read` 后
+    `meta.json`/`execution.log` 生成；AI 尝试写 `logs/test.txt` 被拒
+    （`ok:false, note:"路径受保护（仅系统可写）：logs"`）。
+
+**AI 下雨版桌面修复（2026-08-01，AI 生成代码的 div/canvas bug）：**
+
+- 背景：用户让 AI 给桌面加下雨效果，AI 用 `update_webos_app` 创建 v1.0.3/v1.0.4
+  （深色壁纸 + 完整雨滴代码：300 滴、斜风、落地涟漪、雨点避开图标、requestAnimationFrame）。
+  **这证明 AI 自由度是真实的**（createdBy=guest，系统不拦截）。
+- 现象：用户反馈"下雨没生效、桌面变深色空版"。
+- 根因：AI 写的 HTML 里 `<div id="rain">` 是 **div**，但 JS 调用
+  `getContext("2d")`（canvas 方法）→ `TypeError: canvas.getContext is not a function`
+  → 雨滴 IIFE 崩溃 → 同一 `<script>` 内**后续代码（时钟 tick、SDK.apps.list 图标加载）
+  全部中断** → 用户看到深色空桌面（无雨、无图标、时钟空白）。
+  上一轮曾误判为"AI 乱改桌面"并回滚（教训：先查版本历史与运行时错误，再决定回滚）。
+- 修复：创建 v1.0.5（把 `<div id="rain">` 改为 `<canvas id="rain">`，其余不动），
+  切换 active；v1.0.4 保留 ready 可回滚。实测：canvas 尺寸 778×1310、
+  雨滴像素采样 42 处非空（雨在下）、时钟/图标/Dock 均正常。
+- 教训：**AI 生成的桌面/App HTML 也要运行时验证**（console 无 TypeError、
+  关键元素类型正确）；排查"AI 改的东西没生效"先看浏览器 console 与版本历史，
+  不要急着回滚。运维脚本已执行（数据库备份 `data/daily.db.bak-rollback`）。
+
+**AI 对话体验改进（2026-08-01，用户反馈三项 UI 问题）：**
+
+- **工具调用进入消息流**：`WebOsChatMessage` 增加 `toolCalls[]`（原单数 `toolCall`
+  保留兼容），`tool_start/tool_end` 按顺序追加/更新，不再互相覆盖；每条工具调用
+  在对话气泡内独立展示（图标 + 中文名 + 进行中/完成/失败状态）。
+- **markdown 渲染**：自带轻量渲染器（`renderMarkdown`，无第三方依赖）：标题、
+  粗体/斜体、行内代码、代码块、无序/有序列表、引用、链接、分隔线；先 HTML 转义
+  再解析（防注入），流式半成品容错（未闭合代码块/列表自动收尾）。
+- **自动滚动**：`AssistantHome` 监听 messages/streaming 变化，`assistant-scroll`
+  自动 `scrollTop = scrollHeight`，跟随 AI 输出。
+- 验证：真实对话中 AI 连续调用 4 次 `agent_fs_list` + 1 次 `agent_fs_read`，
+  消息流中逐条显示"查看工作区 · 完成/进行中…"；markdown 列表正确渲染。
+
+**把源码给 AI + App 创建能力全面打通（2026-08-01，用户明确要求）：**
+
+- 用户诉求：AI 面对"粘贴 HTML → 桌面出现 App"这类需求不该说"做不到"；
+  要求把系统源码给 AI，让 AI 自己查源码确认能力、调用工具实现。
+- **源码只读工具**：`agent_src_list` / `agent_src_read`（webosWorkspace.ts），
+  AI 可读 `server/src`、`client/shell-web/src`、`shared` 全部源码（排除
+  node_modules/.env/dist/.git/docs）；系统提示词明确"有需求先读源码确认能力，
+  不要臆测、不要拒绝；运行中 Shell 源码只读不可改（安全带）"。
+- **AI 引导**：`create_webos_app` 描述明确"用户粘贴的 HTML 原样创建 App，
+  不得说做不到"；系统提示词加"用户提供的 HTML 直接创建"条目。
+- **用户直连**：assistant 首页「粘贴 HTML 创建 App」按钮 → 弹层粘贴 HTML →
+  `POST /apps`（local_import）→ 刷新后自动打开新 App（不依赖 AI）。
+- **App 内创建能力**：新增能力 `system.apps.create`，所有新 App 默认拥有
+  （`DEFAULT_APP_CAPABILITIES`）；运行时 SDK 增加 `DailyWebOs.apps.create(name, html)`，
+  宿主经 `runtimeAppsAdapter` 调后端创建——"App 工坊"类 App 真正可工作。
+- 端到端验证：AI 用 `agent_src_read` 读 webos.ts（6 次工具调用）；
+  用户粘贴倒计时器 HTML → AI 直接 `create_webos_app` → `app_created` 事件 →
+  桌面出现新 App（不再拒绝）。
+
+**Skill 系统修复 + AI 删除 App + myself 长期记忆 + 对话 UI 修复（2026-08-01 下午）：**
+
+- **Skill 修复（根因：read 工具缺失导致 skill 从未注入）**：pi 只在 `read` 工具
+  可用时把 `<available_skills>` 注入系统提示词，且要求模型用 read 读 SKILL.md；
+  webOS 会话 `noTools:'builtin'` + customTools 无 read → design skill 从未被 AI
+  感知（此前"你有设计 skill"是空话）。修复：webOS 会话注入受控 `read` 工具
+  （webos.ts `readTool`）——允许读 `.pi/skills-webos/` 下 skill 文件（兼容绝对
+  `<location>` 路径）+ 用户工作区（同 agent_fs_read），触发 skill 注入且不越权。
+- **目录路径修复**：`.pi/skills-webos` 在项目根，而服务 cwd=server/，原
+  `join(cwd,'.pi','skills-webos')` 指向不存在目录（线上同样 miss）。webos.ts 与
+  piBridge.ts 均改为「cwd 优先、项目根回退」。验证：`loadSkillsFromDir` 加载
+  design + myself 两个 skill，`formatSkillsForPrompt` 注入 count=2。
+- **AI 删除 App**：新增 `delete_webos_app` 工具（webos.ts），删除 App 同时清理
+  appStorage 与工作区 `apps/<appId>/` 目录；BUILTIN_APPS（system.desktop、
+  daily.ai、system.files、system.settings）受保护不可删；记入 execution.log。
+- **生成 skill + myself 长期记忆**：新增 `manage_skill` 工具——AI 可在
+  `.pi/skills-webos/<skill>/` 下创建/更新/删除 SKILL.md 与 references/* 文件，
+  写 SKILL.md 自动维护 frontmatter（name=目录名，description 取正文首行去
+  markdown 标记；skill 名仅小写字母/数字/连字符，与 pi 校验一致）。
+  预置 `.pi/skills-webos/myself/SKILL.md`（发现/经验/教训/用户画像四维度 +
+  references 索引）；系统提示词要求 AI 运营 myself：每次对话有发现/经验/教训/
+  偏好时当场用 manage_skill 更新，新会话先读它回忆自己。
+- **对话 UI 修复**：①用户消息改蓝色气泡（AI 消息保持平铺无气泡）；
+  ②三字消息被拆行修复——宽度约束从 `.user-row .chat-text{max-width:82%}`
+  移到 `.user-row .chat-body{max-width:82%}`（原写法 chat-text 百分比宽度对
+  flex column 的 chat-body 形成循环依赖，浏览器把气泡压到极窄）；
+  ③composer 区改为全宽渐变遮罩 + `backdrop-filter: blur(16px)`，滚动时
+  思考/模型 chips 与背景文字不再重叠；chips 背景提高到 0.94 不透明。
+- 验证：server `tsc --noEmit`、shell-web `tsc -b --noEmit`、`vite build`
+  全部通过；skill 加载/注入脚本验证通过（临时脚本已删）。
+- 部署注意：webOS 会话按 scope+thinking 缓存，pm2 restart 后新工具才生效；
+  首次对话即加载 myself/design（`<available_skills>` 注入）+ read/manage_skill/
+  delete_webos_app 工具。
+
+**工具记录不消失 + App 源码工作区化（2026-08-01 晚间）：**
+
+- **工具调用记录消失根因修复（前端 store.ts）**：`sendMessage` 原先用
+  `nextMessages`（只含纯文本的服务端消息）**整体替换本地 messages**，导致
+  用户发第二条消息时，上一条 AI 消息里的 tool 分段全部被丢弃。修复：本地
+  messages 原样保留（追加新消息），`nextMessages` 仅用于发送。
+- **tool_start/tool_end 匹配修复**：原实现只更新「最后一段」，连续/并行工具
+  调用时互相覆盖（第一个工具永远显示"执行中"）。现改为按「工具名+未完成」
+  从后往前匹配分段；tool_start 对末尾同名未完成段去重。
+- **App 源码工作区镜像（「AI 即系统」核心路径）**：每个 App 的源码 HTML 镜像
+  在工作区 `apps/<appId>/index.html`（创建/更新/回滚/切换版本时同步写回）。
+  **AI 可以直接用 agent_fs_write/agent_fs_edit/agent_fs_read 修改该文件**；
+  bootstrap 与 `GET /apps/:appId` 检测到文件与 DB active 版本不一致时，
+  自动创建新版本并切换（版本化保留可回滚；校验失败保留原版本 + 日志警告）。
+  系统提示词明确两种改 App 方式（① 直接改工作区文件 ② update_webos_app），
+  推荐 ①。线上验证：AI 创建 App（v1.0.0）→ `agent_fs_edit` 改 index.html →
+  bootstrap 自动发布 v1.0.1(active) 且 HTML 为新内容，v1.0.0 保留 ready。
+- 验证：server `tsc --noEmit`、shell-web `tsc -b --noEmit`、`vite build`
+  全部通过；线上端到端（创建→改文件→自动新版本）实测通过。
+
+**删除 get_webos_app + markdown 增强（2026-08-01 晚间）：**
+
+- **删除 `get_webos_app` 工具**：App 源码已工作区化后，该工具与
+  `agent_fs_read apps/<appId>/index.html` 重复。删除工具定义与全部引用
+  （系统提示词/update_webos_app、delete_webos_app 描述/README/前端标签），
+  AI 读 App 代码统一走工作区文件；REST `GET /apps/:appId` 保留（前端用 +
+  热更新检测点）。线上验证：AI 确认"没有 get_webos_app"，读 App 代码
+  用 `agent_fs_read` 读 `apps/<appId>/index.html`。
+- **markdown 渲染增强（client/shell-web，KaTeX）**：新增 LaTeX 渲染
+  （行内 `$...$` + 块级 `$$...$$`，KaTeX 0.16，`throwOnError:false` +
+  异常降级原文，流式半成品容错）与 GFM 表格（`| a | b |` 语法：
+  表头 + `:---:` 分隔行 + 数据行，单元格走 inlineMarkdown，窄屏横向滚动）。
+  新增 `katex` 依赖（JS 505KB / gzip 155KB，woff2 字体随构建产物上传）。
+- 部署注意：后端 3 文件（webos.ts/piBridge.ts/webosWorkspace.ts）上传时
+  **分别放对目录**（routes/、src/、utils/），勿一次 scp 到同目录。已线上验证。
+
+## AI 助手配置
+
+### pi Agent 配置（stepfun）
+
+- **Endpoint**: `https://api.stepfun.com/step_plan/v1/chat/completions`
+- **Model**: `step-3.7-flash`
+- **Provider**: pi custom provider（通过 `~/.pi/agent/models.json` 注册，服务端配置）
+- **API Key**: 通过环境变量 `VITE_STEPFUN_API_KEY` 提供，不持久化到浏览器
+
+### 架构说明
+
+- AI 能力由后端 pi agent 提供（`server/src/piBridge.ts`），前端不再自研 LLM 调用逻辑
+- 前端 `useAIStore` 是 WS 客户端，订阅 pi 事件流驱动 UI
+- 30+ 个工具中大多数通过 WS 转发前端执行，后端不直接读写存储；7 个文件系统工具在服务端 pi 沙箱内运行（spec §7）
+
+### AI 助手核心行为准则
+
+1. **不随便创建新面板**——除非用户明确说"创建新面板"，否则在当前面板操作
+2. **主动创建 HTML widget**——用户给待办/日程/笔记等信息时，用 `create_html_widget` 生成对应 HTML 组件
+3. **存储读写用 storage_read/write**——通过 `storage_read` / `storage_write` 工具读写 KV 数据
+4. **旧数据可读**——agent 可通过 `storage_read` 读旧 IndexedDB 表（前端 `adapter.ts` 的 `withFallback()` 自动协调）
+
+### 断连恢复 / 工具实时进度 / 商店修复（2026-08-07，线上排查 + 全部上线）
+
+> 起因：用户反馈四个问题——①"后台处理"卡片一直不消失 ②断联后不自动恢复反而报错
+> ③AI 工具调用实时输出只显示开头 ④应用商店"根本没做"。以下为线上实测根因与修复。
+
+**线上实测数据**：
+- pm2 重启 138 次；error.log 大量 `PathError [TypeError]: Unexpected ( at index 30: /store/apps/:shareId/raw/:file(*)`——旧版商店素材路由用了 Express5 不支持的 `:file(*)` 写法，**注册路由即抛异常导致启动崩溃循环**（商店上线窗口期）；当前代码已改用 `webosRouter.use('/store/apps/:shareId/raw', ...)`（query/前缀式，合法）。
+- `guest:a7d202` 的 system.store 有 20 个**内容完全相同**的版本（v1.0.1~v1.0.20，31483 bytes，`v1.0.12==v1.0.13`）——版本循环 bug 实证。
+- 商店表 webos_store_apps 只有 5 条测试条目（"游客 的整套系统"×2、"应用商店"、"app-xxx"、"store-verify-app"），无正式应用。
+- 当前 `WEBOS_STORE_V1_HTML` 模板 = 13098 字符（线上各账号 v1.0.0 即最新模板；31483 是 AI 改过的版本）。
+- 用户账号 `user:fb9f2d90`：apps = drink-shop/system.desktop(#17)/system.store(v1.0.0)/system.trash，日志显示大量 `chat prompt start`、`agent_end stop=aborted err=Request was aborted usage=0`、`chat queued request terminated (client disconnected while waiting)`、`background task finished (client disconnected)`。
+
+**修复（服务端 webos.ts）**：
+- **断连终止必须关闭 SSE**：`disconnected && (waitingForBackground || busyRetried>0)` 分支 `return` 前补 `res.end()`——此前 res 悬挂，前端 fetch 永远等不到结束（卡片不消失/网络报错）。
+- **版本循环修复**：`syncAppSourceFromWorkspace` 创建新版本后 `writeAppSourceMirror` 写回镜像文件——文件与 DB 存在字节级差异（BOM/换行）时每次 bootstrap 误判 changed → 无限建版本。线上验证：a7d202 循环停止（v1.0.21 后镜像==active、版本数稳定）。
+- **`tool_execution_update` 转发**：subscribe 新增分支，把 pi 工具 `onUpdate` 输出的 `partialResult.content` 转发为 SSE `tool_update`（契约 `WebOsChatEvent` 新增 `{type:'tool_update', tool, content}`）；`extractUserEvent` 同步支持（后台任务缓冲也记录工具过程）；`edit_image` 批量处理逐张 `onUpdate` 报告进度。
+- **ensureSystemStore 补「未改动自动升级」**（同 ensureSystemDesktop 模式）：早期账号唯一版本由系统创建时自动升级到当前模板（当前模板与线上一致不触发，未来模板更新时生效）。
+- 后台任务缓冲 `BgTaskEvent.kind` 增加 `tool_update`。
+
+**修复（前端 shell-web）**：
+- `UiSegment.tool` / `backgroundTask.tools` 增加 `progress` 字段；SSE `tool_update`、`background_progress(kind=tool_update)`、后台恢复渲染三处均追加进度文本（≤600 字符截断）；工具 chip 下方渲染 `.tool-progress` 实时进度，后台卡片工具项渲染 `.bg-task-tool-progress`。
+- **断流兜底清卡片**：网络错误且确认无后台任务时 `setState({backgroundTask: null})`——旧卡片无人清理问题修复。
+- **刷新自动恢复**：hydrate 身份不变分支也调用 `recoverBackgroundTask(activeConversationId)`——此前普通刷新不恢复，用户只看到"任务仍在后台"提示。
+
+**部署与验证（线上）**：server tsc、shell-web tsc/build 全过；scp webos.ts + 前端 dist（index-f99N4DgY.js）+ chmod 644；pm2 restart 单实例监听；curl SSE 对话流式正常、商店列表 API 正常、a7d202 bootstrap 后版本数稳定（22，镜像==active）。
+
+**遗留说明**：a7d202（测试游客）的 apps 里有畸形 id（`share:...:system.desktop`、`store:s-...` 等早期安装拼接残留）与 20 个重复版本，无害不清理（保留可回滚）；商店无正式应用属内容问题，非代码缺陷。
+
+### 应用商店「加载失败」根因修复（2026-08-07 晚，用户要求实际打开商店）
+
+> 用户反馈"打开我这里的应用商店看看"。用 Playwright 实际打开线上商店后看到：
+> `加载失败：Cannot read properties of undefined (reading 'items')`——商店列表完全不可用。
+
+**根因（字段名不匹配）**：商店模板 `webosStoreV1.ts` 的响应解析写的是
+`p.resolve(data.result)`，而宿主 StoreSDK（`runtime.ts createStoreRuntime`）响应字段是
+`data`（桌面模板正确读 `msg.data`，所以桌面正常）——商店拿到 `undefined` → `res.items` 崩溃。
+商店从 2026-08-03 上线起就是这个状态，等于"商店 UI 存在但永远加载失败"。
+
+**修复（webosStoreV1.ts）**：`p.resolve(data.result)` → `p.resolve(data.data)`（仅此一行）。
+部署后 Playwright 实测：商店列表正常渲染 5 条应用（含「饮屿 · 鲜饮商城」），安装/分享/源码按钮可用。
+
+**连锁修复（webos.ts）**：
+- `ensureSystemStore` 升级模板时**同步写回工作区镜像**——否则 `syncAppSourceFromWorkspace`
+  会把旧镜像当「AI 修改」建版本覆盖回旧模板（实测 store-test-a 升级 v1.0.1 后被
+  v1.0.2:guest 旧内容覆盖）；`ensureSystemDesktop` 升级同样补镜像（防御）。
+- `ensureSystemStore` 升级条件放宽：**所有版本都是系统模板（当前/旧模板）即升级**
+  （覆盖早期账号与被旧镜像覆盖的账号）；AI/用户改过形态的（a7d202 31483 定制版）不覆盖。
+- 线上验证：store-test-a 自愈 `1.0.0→1.0.1(新)→1.0.2(旧镜像覆盖)→1.0.3(新 active)`，
+  mirror==active；a7d202 版本数稳定 22、AI 定制版保留。
+- 存量旧账号（含用户 fb9f2d90）下次 bootstrap 自动升级到新模板（含修复）。
+
+**排查方式说明**：browser 包（MCP）的 goto 可用但 snapshot/evaluate/wait_for/run_code
+封装报 `Exactly one tool_name parameter is required`（封装层缺陷），改用项目自带
+Playwright（`npx playwright install chromium` + `install-deps`）完成真实浏览器验证。
+
+### 五项体验问题修复（2026-08-07 深夜，全部实测验证）
+
+> 用户反馈：①长按图片 icon 的应用弹浏览器菜单 ②工具调用时旁边数字不更新
+> ③生图预览只显示一张 ④AI 创建的 App 里图片不渲染 ⑤创建 App 后桌面不刷新看不到。
+
+**① 长按图片 icon 弹浏览器菜单（webosDesktopV1.ts）**：桌面图标若为图片（icon.png/raw），
+长按触发浏览器图片菜单打断系统长按菜单。修复：`.app .tile img { pointer-events: none;
+-webkit-touch-callout: none; user-select: none }`——图片不接收指针事件，长按落在 .app 上。
+实测：带 4px 位移的长按也能弹出菜单。
+
+**② 工具数字不更新（App.tsx + webos.ts）**：ToolRunningStatus 的「已输出 N 字」此前
+= 回复文字段长度（工具执行期间不变）。修复：有工具过程增量（progress，tool_update）时
+优先显示 progress 长度；`generate_image`/`edit_image` 逐张/逐文件 `onUpdate` 报告进度。
+实测：生成图片时「已输出 87→102→117 字」随进度实时跳动。
+
+**③ 生图预览只显示一张**：实测 prompts 数组多张图全部渲染（3 张 grid + 每张下载按钮），
+无代码问题；「只显示一张」是 AI 单 prompt 生成或旧缓存所致，无需修复。
+
+**④ AI 创建的 App 里图片不渲染（根因：sandbox iframe 无 cookie）**：
+- 根因链：App iframe `sandbox="allow-scripts"`（opaque origin）内 `<img src="/webos/api/...">`
+  按第三方上下文发请求，**SameSite cookie 不发送**（实测 REQ cookie=NONE）→ 鉴权端点 401
+  → Chrome **ORB（Opaque Response Blocking）** 拦截（ERR_BLOCKED_BY_ORB）→ 图片不显示。
+- 修复（webos.ts + index.ts）：图片/App 素材端点改为**免鉴权公开 GET**（挂在 authMiddleware
+  之前）：`GET /webos/api/imagegen/file/:name`（生图时双写到全局目录 server/data/webos-public-images/）
+  与 `GET /webos/api/apps/:appId/files/raw/*`（全局按 appId 查找 + 路径校验 + MIME 白名单）。
+  文件名/App id 均为不可枚举 UUID，公开访问与分享链接同级风险；防穿越（.. 拒绝）。
+- 实测：App iframe 内 img naturalWidth=512（真实加载）、HTTP 200 免鉴权。
+
+**⑤ 创建 App 后桌面不刷新（runtime.ts + App.tsx + webosDesktopV1.ts）**：桌面 iframe 只在
+初始化时拉一次 App 列表。修复：宿主 `notifyAppsChanged()`（postMessage apps_changed）+
+DesktopView 监听 apps 签名变化自动通知 + 桌面 JS 监听 apps_changed 重新 SDK.apps.list() 渲染。
+实测：AI 创建「待办清单」后桌面出现对应图标（含自动打开新 App 的既有行为）。
+
+**部署**：webos.ts（公开端点+生图进度）、index.ts（公开路由挂载）、webosDesktopV1.ts（img 拦截
++apps_changed 监听，73 账号桌面更新）、runtime.ts/App.tsx（notifyAppsChanged+数字进度）、
+前端 dist；全部 tsc 通过、服务单实例、浏览器实测通过。
+
+**遗留说明**：Playwright 测试的随机游客身份会残留测试 App（待办清单/图廊等），无害；
+reload 不会切换游客身份（cookie 已存在时 deviceId 不生效），验证时需直接注入 cookie。
+
+### 长按可靠触发 + 图标美化 + 整套系统分享入口（2026-08-08 凌晨，全部上线）
+
+> 用户反馈：①长按 App 图标"大概率触发不了"（只有概率）②要"分享链接"（非商店）——
+> 别人点开从加载页→桌面→全部 App（除系统自带），按钮放 AI 对话页 ➕ 菜单
+> ③App 图标带一圈白边要去掉 ④系统自带应用 icon 太简陋要美化。
+
+**① 长按大概率触发不了（根因：浏览器手势识别打断 pointer 事件流）**：
+- 真实移动端手指长按时，浏览器先判定"是滚动还是长按"——判定期间会发 `pointercancel`
+  打断 pointer 事件流；旧实现只监听 pointerdown + pointerup/move，**大概率收不到完整
+  事件流 → 菜单弹不出**（此前 Playwright 用合成 pointer 事件模拟都能弹，真机不行）。
+- 修复（webosDesktopV1.ts）：**touch 事件优先**（`touchstart` 在浏览器手势判定前必然执行）
+  + `pointercancel/touchcancel` 清理 + 位移阈值 12px + **桌面右键（contextmenu）兜底**
+  + 长按弹出后 `touchend.preventDefault()` 防 click 误打开 App（longPressOpened 标记）。
+- 实测（真实 TouchEvent）：无位移长按弹菜单 ✓、**带 4px 位移也弹 ✓**、右键弹菜单 ✓。
+
+**② 分享链接（整套系统，非商店）**：
+- **服务端早已实现**（2026-08-06）：`POST /webos/api/share` 打包 加载页+系统桌面+全部
+  用户 App（素材归档 share-assets/<shareId>/），分享页 `/daily/exp/sh-*`（index.ts 静态
+  落地页：全屏预览 加载页/桌面/应用列表切换 + 悬浮菜单 + 安装）；`?share=&install=` 走
+  批量安装到桌面。**缺的只是创建入口**。
+- 补入口（前端）：AI 对话页 ➕ 菜单新增「分享整套系统」→ `POST /share` → 复制
+  `/daily/exp/sh-*` 链接（`createSystemShare` API）。与「发布到商店」明确区分：
+  不进商店列表，纯链接体验/安装。
+- 实测：POST /share → `{shareId:"sh-...", url:"/daily/exp/sh-...", apps:3}` ✓、
+  `/daily/exp/sh-*` HTTP 200 ✓。
+
+**③ 图标白边**：`.app .tile` 去掉卡片背景（`background: transparent; border: none;
+box-shadow: none`），图标直接展示（img/svg 52px 自带圆角），不再有白色卡片圈。
+
+**④ 系统 icon 美化**：fallback SVG 从简笔线条换成**精致渐变版**（128 viewBox 圆角底 +
+白色图形）：daily.ai 蓝紫气泡、桌面 靛蓝显示器、文件 天蓝文件夹、商店 橙金购物袋、
+回收站 石板灰垃圾桶、设置 灰齿轮 + 通用渐变兜底。
+
+**部署**：webosDesktopV1.ts（touch 长按+图标，**89 账号桌面更新**）+ 前端 dist
+（index-D5EFNAxe.js：分享菜单入口）；模板 vm 校验 JS OK、全部 tsc 通过、服务单实例。
+
+### 分享给朋友（长按菜单 + 系统分享弹窗，2026-08-08 上线）
+
+> 用户反馈：长按 App 只有「分享到商店」，没有「分享给朋友」；希望像其他 App 一样
+> 调起**系统分享弹窗**（可直接分享给微信/QQ 好友）。
+
+**实现**：
+- **长按菜单加「分享给朋友」**（webosDesktopV1.ts，非系统应用显示）→ `SDK.apps.shareToFriend(id)`
+  → 宿主（runtime.ts `apps.shareToFriend` + App.tsx 适配器）调 `POST /webos/api/share/app`
+  → 弹出宿主 **ShareAppPanel**（分享面板：链接预览 +「系统分享（微信 / QQ…）」+「复制链接」）。
+- **系统分享弹窗**：ShareAppPanel 的「系统分享」按钮（宿主页面用户手势 ✓）调 `navigator.share`
+  （Web Share API）→ 手机出现系统分享面板（微信/QQ/邮件等「分享给」）；不支持时降级复制链接。
+  注意：桌面 iframe 是 sandbox opaque origin，iframe 内无法直接调 navigator.share（无手势激活
+  传播），所以统一走宿主面板按钮触发。
+- **单 App 轻量分享（不进商店）**：`POST /webos/api/share/app` → shareId `ap-` 前缀，
+  快照（html+icon+素材）归档 share-assets/；落地页 `/daily/exp/ap-*`（index.ts 新增 ap- 分支）
+  直接运行该 App 快照 +「安装到我的 Daily」。与「分享到商店」（s-*）互不影响。
+- **分享面板文案**：朋友打开链接可直接体验，无需登录。
+
+**实测（Playwright 真实浏览器 + 真实 TouchEvent）**：长按「待办清单」→ 菜单含「分享给朋友」
+✓ → 点击 → 宿主面板弹出（url=https://shadowshub.xyz/daily/exp/ap-... + 系统分享/复制按钮）✓；
+`/daily/exp/ap-*` HTTP 200 ✓（headless 无真实系统分享面板，代码路径 + 降级已覆盖）。
+
+**部署**：webos.ts（/share/app）、index.ts（ap- 落地页）、webosDesktopV1.ts（菜单项，91 账号
+ 桌面更新）、runtime.ts/App.tsx/api.ts（shareToFriend + ShareAppPanel + shareAppToFriend）、
+ 前端 dist（index-BXLbCPyS.js）；全部 tsc 通过、服务单实例。
+
+### 搜索增强 + 视频生成 + 商店重做 + 性能优化（2026-08-05，已上线）
+
+**① 搜索功能（秘塔 API 三接口全接入）**：
+- `web_search` 支持 scope（webpage 网页 / scholar 学术 / image 图片 / document 文库 / video / podcast）+ page 分页
+- 新增 `read_webpage`（秘塔 POST /api/v1/reader）：**打开指定网页读全文（markdown 含链接），可逐级继续打开网页里的链接**（回答"能不能打开指定网页看链接"）
+- 新增 `metaso_qa`（秘塔 POST /api/v1/chat/completions）：联网直接回答 + citations 引用来源
+- 学术搜索双通道：既有 ArXiv + 秘塔 scholar scope
+- 计费：search fixedPrice 0.02→0.03 元/次（对齐秘塔实际 3 credits/次）
+- 实现：`server/src/utils/searchApi.ts`（callMetasoReader/callMetasoChat）、`searchTools.ts`、`aiTools.ts`、`piBridge.ts` 提示词
+
+**② 视频生成（MiniMax H3，秘塔渠道，已真实端到端验证）**：
+- 新模块 `server/src/videogen/minimaxVideo.ts`：文生视频/图生视频（首尾帧）`POST /v2/video_generation` + 查询轮询 `GET /v2/query/video_generation/{task_id}` + 下载转存（工作区 agent/videos/ + 全局公开目录）
+- **H3-Context-IR 增强默认开启**（`POST /v2/h3_context_ir`），**渠道未充值/失败自动降级为原始提示词**（不阻断生成）
+- 计费双轨：用户按 **MiniMax 官方刊例价**（2K ¥0.80/秒、768P ¥0.50/秒）扣积分（pricing.ts `videoCostMinor`）；后台成本按**秘塔渠道价**（2K ¥0.15/秒、768P ¥0.09/秒，`videoMetasoCostMinor`）落库统计
+- 权限：**游客禁止**（403 GUEST_NOT_ALLOWED）；未充值（quota 未提升）用户**仅体验 1 次**（VIDEO_TRIAL_USED）；积分不足 402 拦截
+- 统计：新表 `webos_video_usage`（每任务一行：分辨率/时长/图片数/enhance/官方价/秘塔价/状态）+ `webos_video_recharges`（站长充值登记）；管理后台 `GET /api/admin/webos/video/stats`、`GET /video/usage`、`POST /video/recharge`
+- AI 工具 `generate_video`（对话内进度 tool_update 实时转发 + 结果 `<video>` 卡片）；公开端点 `GET /webos/api/videogen/file/:name`（免鉴权，**支持 Range 206 视频拖动**，index.ts 挂载）
+- 环境变量：`METASO_API_KEY`（服务端 .env，搜索/视频共用秘塔 key；已在线上配置）
+- **真实回归**：768P 4s 视频 98s 生成成功（task_id 2085027087088680960，用户扣 200 积分/成本 36 积分，ContextIR 因余额不足自动降级）；公开端点 200 + Range 206；App iframe 内 `<video>` 元素正常（文件 h264/aac/faststart 标准，ffmpeg 可解码；Playwright headless Chromium 缺 h264 解码器属测试环境限制，真实浏览器可播——对照验证 VP8 webm OK）
+
+**③ 应用商店重做（webosStoreV1.ts 重写，已真实浏览器验证）**：
+- **去掉顶部大标题栏**（旧 sticky header）→ 内容区轻量工具行（标题+发布/我的发布按钮+搜索框），与其他 App 沉浸式一致
+- **真实图标**：icon（data:/URL 直接、SVG 字符串→data URI），加载失败降级按名称哈希分配颜色的**渐变首字母 SVG data URI**（encodeURIComponent 安全内嵌 onerror）
+- **效果预览**：点击卡片主体（非按钮）→ 全屏 overlay 运行 html 快照（`StoreSDK.get()` 新增方法；sandbox iframe srcdoc + `<base>` 指向 store raw 端点加载相对素材 + 内存态 localStorage polyfill）+ 安装按钮
+- StoreSDK `get` 方法：runtime.ts StoreSdkAdapters + App.tsx buildStoreAdapters（storeGet API）
+- 模板 JS vm 校验通过（len=18779）；线上已有账号由 ensureSystemStore 自动升级（旧模板含 data.result 判定）
+
+**④ 性能优化（低带宽）**：
+- **图片缩放代理**：`/webos/api/imagegen/file/:name` 与 `/webos/api/apps/:appId/files/raw/*` 支持 `?w=`（白名单 96/128/192/256/320/512/640/768/1024/1280）→ ImageMagick 转 webp + 磁盘缓存（server/data/imgcache/<w>/，sha1 key），失败回退原图
+- **App 运行时懒加载**：bootstrap 注入 MutationObserver 给所有 `<img>` 加 loading="lazy" + decoding="async"（不改质量，只延迟视口外加载）
+- 聊天工具图片列表用 `?w=640` 缩略图（thumbUrl 仅对本站素材端点），Lightbox 看原图
+- **nginx：开启 gzip（含 gzip_proxied any，必须！否则代理响应不压缩）**：JS 595KB→传输 32KB（gzip 后解压验证完整）；**HTTP/2**（listen 443 ssl http2）多图并发复用单连接；备份文件移出 sites-enabled（避免被 nginx include 导致 duplicate listen）
+- 视频端点 Range + Cache-Control: public, max-age=86400
+
+**部署注意**：后端文件**分别放对目录**（webos.ts→routes/、searchApi.ts→utils/、pricing.ts→billing/、schema*.ts→db/、videogen/ 新目录要 mkdir）；.env 加 METASO_API_KEY；重启后新表自动创建；前端 dist 需重新构建上传；nginx 改动需 nginx -t + reload。
+
+### 视频半价 + 视频处理 + 积分明细 + 联系方式保密 + 全链路验证（2026-08-06 晚，已上线）
+
+**① 视频计费半价（用户决策）**：`pricing.ts` `VIDEO_USER_RATIO=0.5`——用户扣费 = MiniMax 官方刊例价 ×0.5（768P 25 积分/秒、2K 40 积分/秒；4s 768P=100 积分，原全价 200）。后台成本仍按秘塔渠道价（0.09/0.15 元/秒）统计。**全链路实测：图生视频 4s 768P 用户价 100 分 / 成本 36 分**。
+
+**② H3-Context-IR 计费与统计**：官方按量价 输入 ¥5.8/输出 ¥23 每百万 token（秘塔未公开独立价目，后台成本按官方价折算并标注）。`enhanceVideoPrompt` 返回真实 token 用量 → `generate_video` 成功后单独落 `task_type='h3_context_ir'` 记录（用户不单独扣费，含在视频售价）；管理后台 `/video/stats` 新增 `contextIR{count, costMinor}` 与 `videoEdit{count, okCount}`。
+
+**③ generate_video 工具增强（AI 提示词同步）**：**文生视频优先**；新增 `reference_images`（1-9 张参考图，效果最好，官方 r2va 参考模式，与首尾帧互斥）；**明确告知首尾帧效果差、不要滥用**；分辨率/时长/比例指引（768P 默认、2K 更贵、16:9/9:16）；返回 poster 首帧封面（App `<video poster>` 秒开预览）。**输入图片必须完整公网 URL**（`PUBLIC_BASE`，MiniMax 校验 image_url 为公开 http(s)，相对路径 400 error 2013）。
+
+**④ edit_video 视频处理工具（FFmpeg，参考 frameronin.com）**：`server/src/utils/videoEdit.ts`（新）——extract-frames 抽帧/序列帧、sprite-sheet 精灵图（tile 拼图，**必须 `-frames:v 1` 否则 image2 muxer 同名报错**）、to-gif、poster、trim、crop、scale、extract-audio、mute、speed、remove-bg（绿幕 chroma key → 透明 webm，仅纯色背景）、concat。产物落 `agent/media/` 并双写公开目录（mp4/webm→videogen 端点，png/gif/mp3→imagegen 端点）；游客禁止、免费、每次落库 `task_type='video_edit'`。
+
+**⑤ 个人中心积分说明 + 消耗明细**：新端点 `GET /webos/api/usage/credits-history`（合并 webos_ai_usage/imagegen/video 三类，含 contextIR/处理，SQLite/PG 兼容用 `||` 拼接，**勿用 printf**）；ProfileView 新增「积分是怎么算的」卡片（1 积分=¥0.01 + 各能力定价说明 + 最近消耗列表）。
+
+**⑥ 客服联系方式保密（用户要求）**：piBridge 系统提示词删除微信号/QQ（改为"联系方式是敏感信息，不要写进 App/任何生成物；引导用户去个人主页查看"）；generate_image/generate_video 工具返回消息里的微信提示全部移除（AI 可见面零泄露）；用户可见 UI（ProfileView/402 文案）保留。
+
+**⑦ 搜索工具注入 webOS 会话**：此前 web_search/read_webpage/metaso_qa 只在画布会话，webOS AI 根本搜不了网——`chat/stream` 的 customTools 改为 `[...webosAppTools(principal), ...searchTools]`；`getSearchKey('metaso')` 优先读环境变量 `METASO_API_KEY` 回退 DB。
+
+**⑧ 全链路打通（真实端到端）**：生图（小人，纯绿背景）→ 图生视频（768P 4s，98s，用户价 100/成本 36，ContextIR 降级）→ edit_video sprite-sheet（8 帧精灵图 512x96）→ 构建「像素跑酷」canvas App → 创建 App → `POST /webos/api/share/app` 生成 ap- 分享链接 → **Playwright 验证：游客无 cookie 打开链接，canvas 正常渲染游戏可玩**。**分享链接：https://shadowshub.xyz/daily/exp/ap-efed25b2h280ne**
+
+**⑨ ap- 轻量分享体验页修复（2026-08-08 上线时未覆盖的坑）**：① ExperienceView 加载 ap- 走新端点 `GET /webos/api/share/:shareId/meta`（读 share-assets meta.json），s- 仍走 storeGet；② `withRuntimeBootstrap` 对 ap- 的 base 指向 `/webos/api/share/<id>/raw/`（分享包素材）；③ `POST /store/apps/:shareId/install` 支持 ap-（从 share-assets 快照安装，素材复制到安装者工作区）；④ **分享页预览端点免鉴权**（`serveSharePreview` 导出，index.ts 挂载 authMiddleware 之前——游客第一次打开无 cookie，鉴权会 401 空白）；⑤ **分享页初始自动 showPreview('boot')**（ap- 分享 boot 直接返回 App 快照，朋友点开即玩，不用点菜单）。
+
+**部署注意**：本轮后端 webos.ts/routes、adminWebos.ts/routes、pricing.ts/billing、minimaxVideo.ts/videogen、videoEdit.ts/utils（新）、aiSettingsStore.ts/db、piBridge.ts、index.ts（公开端点+分享页自动加载）**分别放对目录**；前端 dist 重新构建上传；服务已重启、全链路已线上验证。
+### Playwright 线上验证手册（2026-08-07 沉淀，可复用）
+> 场景：需要「真实浏览器」验证线上 Daily webOS 行为时（长按菜单/图片加载/桌面刷新/SSE 流式/
+> 商店/App 运行），用项目自带 Playwright 替代不可用的 browser MCP 封装。以下为完整操作法。
+
+**1. 环境准备（Ubuntu/Android 沙箱终端）**
+```bash
+cd /data/user/0/com.ai.assistance.operit/files/workspace/daily/daily
+npx playwright install chromium          # 下载浏览器二进制（~150MB）
+npx playwright install-deps chromium     # 装系统库（libnspr4/libnss3/xvfb 等）
+```
+启动参数：`chromium.launch({ headless: true, args: ['--no-sandbox'] })`；
+移动端视口：`newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true })`。
+
+**2. 身份注入（关键）**：`localStorage.setItem('daily-webos-device-id', X)` + reload **不会切换游客**
+（cookie 已存在时前端不重新建游客，实测身份仍是随机 UUID）。必须**直接注入 cookie**：
+```js
+const { token } = await (await fetch('https://shadowshub.xyz/api/auth/guest', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId: 'my-test-id' }),
+})).json();
+await context.addCookies([{ name: 'access_token', value: token, domain: 'shadowshub.xyz', path: '/' }]);
+```
+
+**3. 页面操作模板**
+- 关公告：`[...document.querySelectorAll('button')].find(b => b.textContent.includes('不再显示'))?.click()`
+- 进桌面：`[...document.querySelectorAll('button')].find(b => b.textContent.includes('桌面'))?.click()`
+- 发消息：`textarea.fill(text)` + 点 `aria-label` 含「发送」的按钮（`press('Enter')` 不可靠）
+- 找桌面 iframe：遍历 `page.frames()` 找 `.app` 数量 > 0 的 frame（桌面是 about:srcdoc）
+- 模拟长按（pointer 事件）：iframe 内 `el.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, clientX, clientY}))`
+  → 等 700ms → `pointerup`；测位移用中间发一次 `pointermove(clientX+4)`（验证阈值修复时用）
+
+**4. 网络/资源诊断**
+- 捕获请求头与响应：`page.on('request'/'response'/'requestfailed')` 里按 URL 过滤，
+  检查 `r.headers()['cookie']`（沙箱 iframe 内 img 请求 cookie=NONE = SameSite 第三方上下文问题）
+- 图片是否真加载：iframe 内 `img.naturalWidth > 0`（0 = 404/401/ORB 失败）；配合 nginx access log
+  `/var/log/nginx/access.log` 看实际 HTTP 状态（含 referer/UA 区分来源）
+
+**5. 已验证的关键结论（复用）**
+- App sandbox iframe（opaque origin）的 img/素材请求**不带 cookie** → 鉴权图片端点必须免鉴权
+  （`/webos/api/imagegen/file/:name`、`/webos/api/apps/:appId/files/raw/*` 已公开，UUID 不可枚举）
+- 401 JSON 响应会被 Chrome **ORB** 拦截（ERR_BLOCKED_BY_ORB）→ 表现为 naturalWidth=0
+- 桌面 iframe 只在初始化拉一次 App 列表；宿主 apps 变化需 `notifyAppsChanged()`（apps_changed）通知
+- 长按菜单的 pointermove 必须带位移阈值（>10px），否则手机手抖 4px 就取消
+- 模板类改动（webosDesktopV1/webosStoreV1）部署后必须跑重置脚本（tmp/reset-desktops-v2.mts 模式：
+  停服务 → 直接改 entities 表建新版本 + 写回工作区镜像 → 起服务），并 vm 校验模板 JS 无 SyntaxError
+- **iframe 可见性验证**：headless 对 srcdoc iframe 的整页截图可能空白/报 not visible——
+  用 `frame.locator('body').screenshot()` 或先 `getBoundingClientRect().height > 0` 判断；
+  0 高 = 父容器定位被覆盖（如给 `.os-screen` 子元素加 position:relative 导致高度塌陷）
+- Playwright 测试会残留随机游客 App（待办清单/图廊等）与工作区，无害；服务器 retention 会定期清理
+
+### 系统桌面 + 应用商店重制（2026-08-09，已上线）
+
+**系统桌面（webosDesktopV1.ts 视觉重制）**：
+- 全部视觉走 `:root` CSS 变量（design skill「安静浅色」tokens：`--bg-1/--bg-2` 壁纸、
+  `--blob-a/b/c` 柔光斑、`--ink/--ink-soft` 文字、`--accent` 主色、`--surface/--shadow/--radius` 卡片）。
+  AI 改桌面优先只改变量（换壁纸/换主色/调深浅），保持结构节奏 → 改完与系统浑然一体。
+- 壁纸 = 渐变 + 三层 radial-gradient 柔光斑（无 filter，低端机流畅）；时钟 = 日期小字 + 56px 时间；
+  图标 56px 圆角 15px + fadeUp 入场 + 按压缩放；Dock = 毛玻璃胶囊；页面指示器胶囊化；
+  `prefers-reduced-motion` 关闭动画。JS 逻辑（长按菜单/拖拽整理/删除确认）保持不变。
+- 模板注释写明「AI 改桌面必读」（tokens 说明 + DesktopSDK 契约），design skill §五同步更新。
+
+**应用商店（webosStoreV1.ts 沉浸式重做 + 宿主 StoreView 去顶栏）**：
+- **宿主壳层顶栏删除**（用户反馈"顶栏 AI 改不到"——那是 React 壳，AI 无法改）：
+  StoreView 不再渲染 ScreenHeader，商店 iframe 全屏（同桌面模式）；返回桌面由商店 App 自己调
+  新增 `StoreSDK.system.back`（AI 可改），安装后「打开」用 `system.openApp(appId)`。
+- 商店核心三件事：**体验**（点卡片主体 → 全屏预览 overlay 运行快照）、**下载**（每卡大号
+  「获取」→安装中→已安装/打开 主色胶囊按钮）、**浏览**（搜索框 + 最新/最热 tab + 特色横滑
+  hero 卡 + 双列网格 + 发布/我的发布底部悬浮胶囊）。
+- **API 优化**：`GET /store/apps` 支持 `?q=`（name/description 服务端 LIKE 搜索）与
+  `?sort=latest|hot`（installs 排序）+ LIMIT 100；列表 icon 超 4KB 截断（详情接口返回完整 icon，
+  列表渐变首字母兜底——data URI 是列表 payload 大头）。StoreSDK.list 透传参数，搜索 300ms 防抖走服务端。
+
+**移动端性能优化**：
+- 聊天长对话：`.chat-row { content-visibility: auto; contain-intrinsic-size: auto 96px }`——
+  视口外消息跳过布局渲染（几十上百条 markdown/KaTeX 滚动不卡），接近视口自动恢复。
+- `prefers-reduced-motion` 全局关动画；商店列表 payload 瘦身（见上）。
+
+**部署与回归**：
+- 存量账号重置脚本 `tmp/reset-desktops-v2.mts`（桌面+商店都切新模板，旧版本保留可回滚，写回工作区镜像）。
+- **踩坑 1（重置脚本）**：正则提取模板源码会拿到未求值的 `\\'`（应求值后 `\'`）→ 商店 JS
+  `onerror` 内联属性语法错误 `Unexpected string`，商店列表空白（静态壳在、脚本没跑）。
+  必须 tsx 导入求值后的常量（v2.mts 已修复；线上 77 个账号曾短暂损坏已全部修复）。
+- **踩坑 2（宿主 CSS）**：给 `.store-screen` 加 `position:relative` 覆盖了 `.os-screen` 的
+  absolute inset:0 → 区块高度 0 → 商店视觉空白（DOM 在跑但用户看不到）。删除后恢复。
+- **踩坑 3（预览 polyfill）**：商店预览 iframe 的 localStorage polyfill 直接
+  `if(!window.localStorage)` 在 sandbox opaque origin 下**访问即抛 SecurityError**（不是返回
+  undefined）→ polyfill 装不上。改 try/catch 探测（`var _lsok=false;try{void window.localStorage...}`）。
+- 浏览器实测（Playwright 移动视口）：桌面 4 图标+时钟+Dock+光斑；商店 6 卡片+2 hero+9 获取按钮+
+  tab+搜索+返回+底部胶囊，**旧顶栏不存在**；预览 overlay 打开；零控制台报错；用户账号
+  fb9f2d90 桌面 v1.0.22 / 商店 v1.0.4 均为新模板；全库扫描 0 损坏。
+
+### 桌面图标美化（2026-08-09 第二波，已上线）
+
+> 用户反馈「桌面的那些 icon 才是最需要美化的」——痛点是 AI 创建的用户 App 无 icon 时
+> 全部显示同一个灰色默认方块，毫无辨识度。
+
+- **用户 App 兜底图标重做**（webosDesktopV1.ts `hashIcon()`）：按 App 名称哈希从 10 组
+  三色渐变中稳定取色（蓝紫/天蓝/翠绿/琥珀/红/紫/粉/橙/青/灰），128 圆角底 + 顶部高光椭圆
+  + 白色首字母（中文取第一个字，`escapeHtml` 转义）——每个 App 有自己的配色与首字母，
+  一眼可辨；SVG 渐变 id 用自增计数器 `gapp{N}` 保证唯一（同文档多图标不串色）。
+- **系统图标重绘**：6 个图标全部升级为三色渐变（3 stop）+ 顶部高光椭圆（rgba 白椭圆），
+  daily.ai 气泡加火花星点、文件夹加内页层次、购物袋/垃圾桶/齿轮细节微调、圆角底 6/116。
+- 回归（Playwright）：创建无 icon App「测试小工具」→ 桌面 tile 渲染 `hashIcon:测`（渐变
+  + 首字母）✓；系统 4 图标 systemSvg ✓；零控制台报错；134 账号全部升级（用户账号
+  fb9f2d90 桌面 v1.0.23 len31387 含 hashIcon）；重置脚本沿用 reset-desktops-v2.mts。
+
+### 桌面/商店色系统一到平台 tokens + design skill 修正 + 设计资源库（2026-08-09 第三波，已上线）
+
+> 用户反馈「桌面的背景、整个设计和平台风格有差异，他们甚至都不是一个色系的」——
+> 根因：此前桌面/商店模板与 design skill 用的是「蓝灰 + 亮蓝紫」色系（#eef1f6/#4f6ef7），
+> 而 Shell 实际是「纸张与墨」暖体系（--paper #f8f7f3 / --board #e8e4db / --ink #171918 /
+> --blue #315bd6 / --green #376b53 / 暖阴影 rgba(50,44,34,…)）。skill 教的色系就是错的。
+
+- **平台 tokens 统一（webosDesktopV1.ts / webosStoreV1.ts）**：两个模板的 :root 直接照搬
+  Shell styles.css 变量名与色值（--board/--paper/--paper-strong/--paper-muted/--ink/--ink-soft/
+  --muted/--blue/--blue-soft/--green/--line/--shadow-sm/--shadow-md），壁纸 = paper→board
+  暖纸渐变 + 奶油白/靛蓝 rgba(49,91,214,.09)/墨绿 rgba(55,107,83,.07) 柔光斑；Dock 与对话页
+  composer 同质感（暖白毛玻璃 rgba(255,254,250,.72) + 暖阴影）；系统图标/用户 App 渐变池全部
+  换平台色板衍生色（靛蓝 #315bd6、墨绿 #376b53、陶土红 #a54b49、暖金/暖灰等，去高饱和冷色）。
+- **design skill 修正（.pi/skills-webos/design/SKILL.md）**：把错误的「安静浅色」tokens 替换为
+  「平台默认『纸张与墨』（唯一推荐）」，注明平台只有两个核心页面（AI 对话 + 桌面）共用一套；
+  深色方案同步给出平台对应值。**AI 生成物与系统脱节的根源被修掉**。
+- **设计资源库（.pi/skills-webos/design-resources/，92 文件 / 1.4MB 已部署）**：Huashu Design
+  （SKILL + 32 份 references 方法论）+ Open Design 精选 19 套设计系统（apple/linear-app/stripe/
+  notion/material/glassmorphism/neumorphism/minimal/brutalism/claude/airbnb/spotify/shopify/
+  bento/arc/cafe/colorful/clean/clay，每套 DESIGN.md + tokens.css + components.html）。入口
+  SKILL.md 铁律：**资源库只参考结构/组件/动效手法，配色必须映射回平台 tokens**（禁止照抄第三方
+  品牌色，否则又脱节）。read 工具路径校验已确认支持任意子目录。
+- 回归：Playwright 实测桌面 tokens = Shell 完全一致（--paper #f8f7f3 / --blue #315bd6 ✓）；
+  桌面/商店渲染正常、零报错；134 桌面 + 81 商店全部切新色系（历史版本可回滚）。
+- 部署注意：design-resources 体积小但文件多，scp -r 逐个传易超时——**先 tar czf 再传单个包**。
+
+### 设计 skill 定稿：原封采用花叔 Design + 追加 Open Design（2026-08-09 第四波，已上线）
+
+> 用户决策：**不要给 AI 加设计限制**（此前平台色系"唯一推荐"、禁止照抄第三方配色等约束全部删除——
+> 那是系统模板的色系错误，不是 AI 设计不好）。直接**原封不动采用 huashu-design 的 SKILL.md**，
+> 只在其末尾追加 Open Design 设计系统库，不破坏原结构。
+
+- **`.pi/skills-webos/design/` = huashu-design 完整原样**（247 文件 / 33M）：SKILL.md（frontmatter
+  name 改为 `design` 以匹配目录，正文一字未改）+ references/（32 份方法论）+ assets/（动画引擎/
+  组件/音频）+ scripts/ + demos/ + README/LICENSE 等。
+- **追加（不改原文）**：文件末尾新增「Open Design 设计系统库」一节 + 新目录 `design-systems/`
+  （Open Design 精选 19 套：apple/linear-app/stripe/notion/material/glassmorphism/neumorphism/
+  minimal/brutalism/clay/claude/airbnb/spotify/shopify/bento/arc/cafe/colorful/clean，每套
+  DESIGN.md + tokens.css + components.html + README 全量索引）。原 `design-resources/` 目录已删除
+  （内容并入 design/design-systems/）。
+- **核心哲学（继承花叔）**：从用户需求长出来、任何新设计先出三方向给用户选（指定风格也不豁免）、
+  反 AI slop（紫渐变/emoji/烂大街套路）、资产>规范。**设计上无任何平台限制**；仅保留技术底线
+  （自包含单文件 HTML——sandbox 跑不了外部依赖）与沙箱安全约束。
+- 系统提示词同步软化：`system/design.md` 由"改难看按它逐项改回"改为"可选参考，用户指定风格
+  或自由发挥时按用户要求设计"。
+- 验证：pi `loadSkillsFromDir` 扫描 `.pi/skills-webos/` → design + myself 加载成功，
+  `<available_skills>` 注入 design（description 含花叔全文 + Open Design）；服务重启、home 200。
+
+### 三方向选择 = 对话内互动 HTML（2026-08-09 第五波，已上线）
+
+> 用户决策：huashu 的「三方向初稿给用户选」正好用平台的 `show_interactive_html`（对话内
+> 插入可交互 HTML）+ `interactive_answer`（按钮点击回传答案）闭环——用户点选方向，AI 直接
+> 收到答案继续，**全程不用打字**。
+
+- **design/SKILL.md 追加节（不改 huashu 原文）**：「webOS 对话环境适配：三方向选择 = 对话内
+  互动 HTML」——说明 show_interactive_html + interactive_answer 机制、落地步骤（出三方向 →
+  插入方向选择器 → 收到 interactive_answer → 继续）、选择器示例结构（三张风格卡：方向名 +
+  一句话气质 + 色板条，整卡可点，高度 240-320px）；其他「用户即时拍板」场合（选方案/配色/
+  布局/A-B 对比）也一律优先用。
+- **系统提示词（piBridge.ts）**：show_interactive_html 条目补充「设计方向选择」用途。
+- **真实端到端验证**：对话「帮我设计一个待办清单 App 的界面，先给我三个风格方向选」→ 事件流
+  含 `tool_start×4`（读 skill）+ `interactive_html×1` + `done`——AI 确实用互动 HTML 出方向选择器。
+- 部署：piBridge.ts + design/SKILL.md；服务器 tsc 通过、服务重启、home 200、skill 加载正常。
+
+### 旧内核浏览器整站塌陷修复（2026-08-10，dvh/inset 兼容）
+
+**用户现象**：部分浏览器（老版微信内置 XWeb / 旧版 UC·QQ / 旧 Android WebView）输入网址后：① 加载页只渲染在屏幕上方三分之一、其余是 body 米黄渐变背景（用户感知"橙色"）；②「我们入驻了爱发电」公告小得像一条通知（遮罩塌陷）；③ 关闭公告后只剩渐变背景，主界面（对话/桌面）完全不可见。
+
+**根因**：`client/shell-web/src/styles.css` 把整站高度链绑定在 `100dvh`（Chrome108+/Safari15.4+/FF101+ 才支持）且**无任何 fallback**：
+- `.shell-stage{height:100dvh}` 在旧内核中声明失效 → 高度回退 auto≈0 → 内部 `position:absolute` 的 `.os-screen` 全部塌陷 → 主界面不可见，只剩 body 渐变背景；
+- `.boot-screen{min-height:100dvh}` 失效 → 加载页只有内容高度（屏幕上方 ~1/3）；
+- `.login-overlay` 等 fixed 遮罩用 `inset:0`（Chrome87+），更旧内核（<87）连遮罩都塌成内容大小 → 公告"小得和输入框一样"。
+
+**修复（styles.css，全部改为兼容写法）**：
+- **dvh → 默认 `100vh` + 文件末尾 `@supports (height:1dvh)` 块覆盖 dvh**（含 .shell-root/.shell-stage/.boot-screen/.login-panel/media700）。⚠️ **教训：同一规则块内直接双写 `height:100vh;height:100dvh` 会被 rolldown/lightningcss minifier 合并去重吃掉 fallback**（构建后只剩 dvh，等于没修）——必须用 @supports 单独声明。
+- **inset:0 → 全部改为 `top:0;left:0;width:100%;height:100%`**（CSS1 语法，等效全铺满；minifier 无法合并成 inset）。⚠️ 教训：minifier 会把四边 `top/right/bottom/left:0` 自动重写为 `inset:0`（包括 @supports not 块内！），旧内核又不认识 inset，等于白写——所以从源头不用 inset 简写。
+- **`min()` 宽度 → `width+max-width` 双属性**（.shell-stage `width:100%;max-width:440px`、.conv-sidebar `width:72vw;max-width:280px`、.loading-line `width:220px;max-width:72vw`、.login-panel `width:100%;max-width:400px`）；media700 高度 `height:calc(100vh -32px);max-height:900px`（@supports 内 `calc(100dvh -32px)`）。
+- 涉及元素：.os-screen/.desktop-frame/.store-frame/.boot-frame/.launcher-wallpaper/.conv-sidebar-layer/.conv-sidebar-backdrop/.modal-overlay/.login-overlay/.composer-menu-backdrop/.image-lightbox。
+
+**验证**：
+- `vite build` 产物检查：`inset:0` 0 处、`100vh` 6 处（基础）、`100dvh` 5 处（全在 @supports 内）、`.os-screen`/`.shell-stage` 基础规则均为兼容写法；`tsc -b --noEmit` exit 0。
+- headless Chromium 布局实测（390×844 视口）：现代浏览器（dvh:true）`.shell-stage`=844 全屏 ✓；删除 @supports 块模拟旧内核（走 100vh fallback）同样 844 全屏 ✓；`.os-screen` 均铺满 844 ✓。
+- 部署：仅前端 dist（重建 shell-web 后上传 assets + index.html）。
+
+### 长按菜单补全 + touch 拖拽 + App 数据保存根修（2026-08-12）
+
+> 用户反馈：①长按应用图标无法拖动、删除、分享、下载、上传到应用商店；②AI 生成的应用退出重进数据全丢。
+
+**① 桌面（webosDesktopV1.ts，AI 可改）**：
+- **移动端 touch 拖拽排序（根因修复）**：原整理模式用 HTML5 `draggable` + DnD 事件——**touch 设备根本不触发**（iOS/Android 均不支持 touch 拖放），手机用户拖不动。改为 pointer/touch 事件自绘拖拽：拖动中的图标 transform 跟随手指，实时与落点图标交换 DOM（CSS grid 按 DOM 序排列），松手调 `SDK.apps.reorder` 持久化。编辑模式锁定页面滚动（`#pages.locked` + touch-action:none）。
+- **长按直接拖动（iOS 风格）**：长按 450ms 后图标"待命抬起"（.armed），**继续移动 → 直接进入整理模式拖动**；**静止抬手 → 弹操作菜单**。修复一个位移基准 bug（beginDrag 的 dragLast 用按下原点，否则单次 touchmove 后 dragStarted 恒 false、松手不存序）。
+- **菜单补全**：非系统应用 = 分享给朋友 / **上传到应用商店**（原"分享到商店"更名）/ **下载源码 ZIP** / 删除（移入回收站）/ 整理桌面 / 取消；系统应用提示不可操作。Dock 的 settings 按钮（设置页已删除）改为回收站（system.trash）。
+- **存量账号模板升级（ensureSystemDesktop 放宽）**：原条件只允许 v1.0.0 唯一版本升级一次（versions.length===1 && createdBy==='system' && version==='1.0.0'），此后模板改动永远推不到存量账号。放宽为「所有版本 createdBy==='system' 即升级到当前模板（写回工作区镜像）」，用户/AI 改过的桌面（存在非 system 版本）保留不覆盖。
+
+**② App 数据保存（架构根修，三层）**：
+- **根因 1（图片必丢）**：服务端 `app.storage.private` 单项限 **64KB**——AI 生成 App 把图片 base64 存 localStorage → 超限 → 413 静默失败（polyfill `.catch(()=>{})`）→ 刷新必丢。修复：单项 64KB→**512KB**、总量 1MB→**2MB**；提示词强制引导 AI：**图片/大对象（≥100KB）用 `window.DailyWebOs.fs.write('assets/xxx.png', base64)` 写入 App 文件夹**（8MB/文件、落磁盘、AI 可读、raw 端点免鉴权可显示），**禁止 IndexedDB**（sandbox opaque origin 不持久）。
+- **根因 2（首屏"数据没了"）**：hydrate（服务端数据回灌）异步晚于 App 初始化 → App 首帧读到空存储 → 用户看到空白（数据其实在服务端）。修复：**AppRuntime 打开 App 前预取 `getAppStorage` 快照 → withRuntimeBootstrap 同步注入 `__DAILY_WEBOS_INITIAL_STORAGE__` → polyfill 初始化内存即含历史数据**（1.5s 超时兜底，失败走 hydrate）；hydrate 改直写 `_seed`（不再重复推送）。
+- **根因 3（初始化写入丢失）**：SDK connect 前 setItem 只写内存不推送。修复：**pendingWrites 队列，connect 后统一 flush**。
+- **运行中刷新通知**：polyfill setItem/removeItem/clear 与 hydrate 完成后派发 `storage` 事件 + `daily-webos-storage-ready` 事件（已监听 storage 的 App 自动刷新 UI）；同步失败 console.warn 不再静默。
+- **提示词（piBridge WEBOS_SYSTEM_PROMPT 新增「App 数据保存」条目）**：文本/小数据用 localStorage（自动持久化）、图片/大文件用 fs、禁 IndexedDB、首帧没读到监听 storage/ready 事件、大对象失败要提示用户；实现"保存/记住"需求后自测"添加 → 关掉重开 → 数据还在"。
+
+**验证**（server/shell-web tsc、vite build 全过；模板求值后 vm.Script 语法检查；Playwright 真实浏览器主页面模拟 + Node mock 环境）：
+- 长按 450ms 抬手 → 菜单弹出（6 项齐全）✓；长按后移动 → 进入整理模式拖动（顺序 app-1→app-2→app-3 变为 app-2→app-1→app-3）✓；松手 → reorder 持久化 ✓
+- bootstrap（Node 环境执行真实源码 + mock localStorage 抛错 + 原生 MessageChannel）：预载数据 App 同步可读 ✓；connect 前写入 flush 到宿主 ✓；hydrate 后 saved 可读 + ready 事件 ✓；storage 事件派发 ✓
+- 部署：后端 `server/src/webosDesktopV1.ts`（src/）+ `server/src/routes/webos.ts`（routes/）+ `server/src/piBridge.ts`（src/）分别放对目录；前端重建 shell-web dist 上传；pm2 restart 后存量账号（桌面未 AI 改过的）bootstrap 自动升级新模板。回归脚本保留在 `tmp/check-desktop.cjs`、`tmp/check-bootstrap.cjs`、`tmp/verify-bootstrap-node.cjs`、`tmp/e2e-verify.cjs`。
+
+### 取消单项大小限制 + 商店标注占内存与剩余空间（2026-08-12 下午）
+
+> 用户决策：取消所有人为的单项文件大小限制；工作区空间（游客 200MB / 登录 10GB）是**唯一闸门**——
+> 满了自然无法上传/写入。商店下载的应用占用用户工作区空间，商店要标注应用占内存大小 + 用户剩余空间。
+
+**① 取消单项限制（唯一闸门 = 工作区配额）**：
+- 上传端点：单文件 10MB 限制删除（原 `MAX_UPLOAD_BYTES`，常量已删）；保留类型白名单与总量检查
+- App 文件夹（app.fs）：单文件 8MB 删除（`MAX_APP_FILE_LENGTH` 删除，raw/读取/写入全部不再限大小）；写入改总量检查（新增/覆盖变大时 `assertWorkspaceRoom`）
+- App 私有数据（app.storage.private）：单项 512KB/固定 2MB 删除 → **App 数据计入工作区配额**（磁盘 + appStorage JSON 字节 ≤ 配额，满了 413 WORKSPACE_FULL）
+- App HTML：2MB → 50MB（DB 安全阀）；创建/更新 App 时 `assertAppHtmlRoom`（HTML 镜像占工作区，按净增量检查）
+- agent_fs_write：单次 2MB 删除（`MAX_WRITE_BYTES`），只受工作区总量检查
+- 统一助手：`assertWorkspaceRoom(principal, extraBytes, appStorageBytes)` / `workspaceFreeBytes` / `assertAppHtmlRoom`
+- 前端文案：FilesView「单个 ≤10MB」→「无单文件大小限制，工作区共 ≤10GB」；AI 提示词更新（fs 无单文件限制，只受工作区总空间约束）
+
+**② 商店标注占内存 + 剩余空间**：
+- `webos_store_apps` 新列 `size_bytes`（PG schema + SQLite schema + `ensureStoreSizeBytesColumn` 幂等迁移，index.ts 启动调用）
+- 发布时计算 sizeBytes = HTML 快照字节 + store-assets 归档素材总字节（`dirTotalBytes`），更新/新建都写入
+- `GET /store/apps` 返回每项 `sizeBytes` + 顶层 `userFreeBytes`（工作区配额 - 磁盘已用 - App 数据字节）
+- 安装（s- 与 ap- 分支）：安装前检查 `sizeBytes ≤ userFreeBytes`，不足 413 WORKSPACE_FULL「工作区空间不足，无法安装该应用」
+- 商店模板（webosStoreV1.ts，AI 可改）：搜索框下新增空间条「工作区剩余 X（<10MB 红色警告）」；卡片/特色卡/预览栏 meta 显示「· 占用 X MB」；StoreSDK.list 透传 userFreeBytes
+- 存量账号：ensureSystemStore 升级条件放宽为「所有版本 createdBy==='system' 即升级」→ 空间标注新模板自动推送
+
+**验证**：server/shell-web tsc、vite build 全过；商店/桌面模板求值后 vm.Script 语法检查 + 新功能存在性检查；bootstrap Node 全链路回归通过。
+**部署**：后端 `server/src/webosStoreV1.ts`（src/）+ `server/src/routes/webos.ts`（routes/）+ `server/src/utils/webosWorkspace.ts`（utils/）+ `server/src/piBridge.ts`（src/）+ `server/src/db/schema*.ts`（db/）+ `server/src/db/migrations.ts`（db/）+ `server/src/index.ts`（src/）；前端重建 shell-web dist 上传；重启后旧库自动补 size_bytes 列、存量商店自动升级新模板。
+
+### 存储配额分层 + 定价评估 + 虚拟主机结论（2026-08-12 晚）
+
+> 用户决策：登录用户基础空间 512MB（原 10GB 过松），付费月卡带存储档位——轻量 10GB / 中量 30GB / 重量 100GB；尝鲜用量包不含空间；存储/付费相关位置补充「大量存储需求可联系站长单独扩容」引导。
+
+**服务端**（配额唯一来源 = `StoredState.workspaceBytes`）：
+- `webosWorkspace.ts`：`MEMBER_WORKSPACE_BYTES` 10GB→512MB；新增 `WORKSPACE_TIER_BYTES`（轻量 db929ac0...=10GB / 中量 f77af912...=30GB / 重量 0f7ca114...=100GB）；`workspaceLimitForState(state)` 优先读显式存储值，否则基础值；`workspaceLimitResolved(key)` 异步查 entities 表（agent_fs_write 无 state 上下文时用）。
+- `webos.ts`：`StoredState` 新增 `workspaceBytes?`；`defaultState` 写入基础值（游客200MB/登录512MB）；`normalizeState` 解析旧库（缺失时 workspaceLimitFor 兜底）+ **月卡到期回落基础值**（与 credits 惰性结算同步）；`assertWorkspaceRoom/workspaceFreeBytes/assertAppHtmlRoom` 全部接受 state 签名；上传端点/App 创建更新/app.fs PUT/storage PUT/商店安装（s- 与 ap-）均传 state 校验；bootstrap/列表返回 `workspaceLimitBytes`（按 state 解析）。
+- `afdian.ts`：月卡发货时按 planId 写 `state.workspaceBytes`（档位升级，日志 `[afdian] 月卡工作区配额升级 ✓`）；StoredStateLike 补 `workspaceBytes?`；尝鲜包不改空间。
+- `paymentState().tiers` 增加 `workspaceBytes`（前端 AfdianView 渲染存储行）。
+- 提示词/403 文案/注释同步：旧「登录 10GB」全部改为「512MB / 月卡 10-100GB」，满额提示带「联系站长单独扩容」。
+- **定价与架构结论（正式答复用户）**：月卡定价重心在 AI 积分（≈¥10/1000积分），10GB 存储成本仅约 ¥1——档位不亏本、给得慷慨；风险在流量（对象存储流量约 ¥0.5/G，App 素材/视频走本地带宽需评估峰值）；**不采用「每用户一个虚拟主机」**——共享单机 + sandbox iframe 隔离已足够，每用户独立进程内存开销不可行（每实例 150-300MB）；更优路径 = 共享多租户 + 对象存储冷热分层。
+
+**前端**（shell-web）：
+- shared 契约 `WebOsPaymentState.tiers?: WebOsPayTier[]`（planId/name/priceYuan/kind/monthlyCredits/packCredits/workspaceBytes）。
+- `AfdianView`：档位数据优先取 `payment.tiers`（服务端真实档位，含 `workspaceBytes` 渲染「工作区空间 NGB」胶囊行），未配置回退硬编码（含 workspaceGB）；底部新增存储说明 note（档位空间 + 登录 512MB/游客 200MB + 联系站长单独扩容微信 fangyan876）。
+- `ProfileView` 套餐卡：文案加「+ 10/30/100GB 空间」「尝鲜包不含空间」「大量存储需求可联系站长单独扩容（微信 fangyan876）」。
+- `FilesView`：硬编码「≤10GB」改为动态 `formatBytes(limit)`（游客200MB/登录512MB/月卡档位实时显示）；进度条下新增「已用 X / 共 Y + 订阅月卡/联系站长扩容」引导行。
+- styles.css 新增 `.afdian-tier-storage` 胶囊样式。
+
+**验证**：server tsc、shell-web tsc、vite build 全部通过；旧库存量账号由 normalizeState 兜底自动获得基础配额（无需迁移脚本）；月卡到期回落路径已确认。
+**部署**：后端 `server/src/routes/webos.ts`（routes/）+ `server/src/payment/afdian.ts`（payment/）+ `server/src/utils/webosWorkspace.ts`（utils/）+ `server/src/piBridge.ts`（src/）+ `shared/webos-contracts/index.ts`；前端重建 shell-web dist 上传；pm2 restart。文本替换脚本保留 `tmp/fix-workspace-texts.mjs`。
+
+### 兑换码权益实时性核查 + 旧档存储映射补漏（2026-08-13，已上线）
+
+> 用户疑问：套餐权益是否没随兑换码兑换实时生效（账号仍限 512MB）。**线上数据核查结论**：
+> ① 兑换链路本身是**实时**的——`deliverRedeemTier` 兑换成功即写 `state.workspaceBytes` → `saveState`
+> 落库+更新内存缓存 → bootstrap / `GET /workspace/files` 实时读 state 返回（无定时任务/无延迟），
+> 前端兑换成功后 `refreshBootstrap` 刷新；② 站长账号此前 512MB 是**数据正确**：`credits.monthly=null`
+> （无生效月卡）、`webos_redeem_codes` 20 个轻量月卡码全部 unused（无人兑换过）、8-06 两单为
+> 「轻量支持」旧档（¥9.9，manual 补发）与「尝鲜用量包」（¥5，设计上不含存储）。
+> **发现并修复真实缺口**：旧档「轻量支持」`1646bd9a8ea111f1ac995254001e7c00`（¥9.9 月卡语义）不在
+> `WORKSPACE_TIER_BYTES` 映射表（该表 8-12 才引入，只覆盖新兑换码商品与部分旧档）→ 该档位发货
+> 后存储**永远不会**升级。修复：映射表补 `1646bd9a… →10GB`；站长账号按其 8-06 购买记录补发
+> `workspaceBytes=10GB`（UPDATE entities，脚本已执行）。线上验证：站长 bootstrap 与文件列表
+> 均返回 `workspaceLimitBytes=10737418240`。部署：仅 `server/src/utils/webosWorkspace.ts`（gzip
+> 压缩管道传输，md5 校验一致）+ pm2 restart。
+
+
+### 卡加载页根因 + bootstrap 瘦身 + 加载优化结论（2026-08-07 深夜，已上线）
+
+> 用户现象：打开网页一直卡在加载页进不去。实测：Playwright 游客访问正常（18s 进主页），但用户账号（魅族 Lucky08 WebView）bootstrap 响应 **320KB gzip**（未压缩 1.6MB），低端 WebView 每次刷新全量下载+解析+hydrate 大 JSON → 长时间卡加载页。
+
+**根因**：`buildBootstrap` 把 `state.apps` 全量 clone——**每个 App 的所有版本完整 HTML 随 bootstrap 下发**。用户账号 13 个 App（含大 HTML）→ 1.6MB。App 的 HTML 本来就有按需接口 `GET /apps/:appId`，bootstrap 里重复全量下发纯属浪费。
+
+**修复（bootstrap 瘦身，1.6MB → ~80KB）**：
+- `buildBootstrap`：用户 App（非 `system.` 前缀）的 versions html 置空，仅保留元信息（id/version/createdAt/createdBy/note/capabilities）；`system.desktop/store/trash` 保留 html（桌面/商店 iframe 直接渲染，模板仅 13-19KB）。
+- 前端 `AppRuntime`：activeVersion.html 为空时按需 `GET /webos/api/apps/:appId`（返回 `{app}` 包装！）拉取 html，期间显示 loading 占位；失败显示错误。**坑：详情返回 `{ app }` 包装，直接 `detail.versions` 会 `Cannot read properties of undefined (reading 'find')`**（e2e 截图实测确认），必须 `detail.app ?? detail` 解包。
+- `getBootstrap` 加 `AbortSignal.timeout(20s)`：服务端慢/挂起时不再无限卡加载页，boot() 重试 3 次后显示错误页（ErrorScreen）。
+- 验证：API 级 PASS（bootstrap 中 App html=0、详情 html=97 完整）；浏览器 e2e：主页/桌面正常（5 图标）、按需请求 200；线上 bootstrap 30ms 返回 79KB。
+
+**部署事故记录（教训）**：① 上轮（存储分层）只改了代码从未部署，本次只传 webos.ts → 服务器 webosWorkspace.ts 缺 `WORKSPACE_TIER_BYTES` 导出 → 启动即崩、pm2 疯狂重启（restarts 238），**补传 webosWorkspace.ts/afdian.ts/piBridge.ts/shared 契约后恢复**；② scp 大文件（611KB JS）在沙箱→服务器链路反复 stall/0 字节文件 → index.html 已引用未传完 JS（白屏风险），**先 sed 回滚 index.html 到旧资源 → 本地 gzip（177KB）上传 → 服务器 gunzip → sed 切回新版**。教训：大文件部署用 gzip 压缩传输 + 先回滚 HTML 引用再切新版，避免半成品资源上线。
+
+**加载速度优化结论（回答用户）**：
+- **瓶颈不在 CDN**：卡加载页的根因是 bootstrap 1.6MB（动态接口，CDN 不可缓存），已瘦身解决；静态 JS/CSS 已 gzip+HTTP/2+304，CDN 对国内单机场景收益有限。
+- **已做**：bootstrap 瘦身（最大头）、fetch 超时兜底、PWA 离线壳、图片缩放代理、懒加载。
+- **可做（按优先级）**：① App html 本地缓存（最近打开 App 的 html 存 localStorage/IndexedDB，打开秒开不闪 loading）；② bootstrap 拆分（session/payment/boot 首屏最小集先行，apps/appStorage 异步补齐）；③ 用户大 App 提示（>1MB html 警告或建议素材走 fs）；④ CDN 只建议在海外用户多时上（静态资源边缘缓存），动态 API 走源站；⑤ 可后续评估 HTTP/3（QUIC，弱网移动端有收益）。
+- 验证脚本保留：`tmp/verify-boot-slim.mjs`（API 级）、`tmp/e2e-slim.mjs`（浏览器级）、`tmp/boot-check.mjs`（加载页复现）。
+
+### 瘦身后遗症修复（2026-08-07 深夜第二波，已上线）
+
+> 用户反馈瘦身后反而更卡：打开 App 十几秒、App 内图片几分钟、使用 App 时弹 "The user aborted a request."、AI 创建 App 后桌面不刷新、长按无菜单、锚点导航 App 点击页面白屏 `{"error":"NOT_FOUND"}`。逐一根因与修复：
+
+**① "The user aborted a request." + 桌面不刷新（getBootstrap 20s 超时误伤）**：上轮给 `getBootstrap` 全局加 `AbortSignal.timeout(20s)`——**refreshBootstrap（AI 创建 App 后触发）也走它**，弱网下 20s 超时 → AbortError 弹错 + 桌面不更新。修复：`getBootstrap(timeoutMs?)` 拆分——**仅 boot() 首屏传 20s**（防卡加载页），refreshBootstrap/logout 不传（无超时）。
+
+**② 打开 App 十几秒（按需拉取 + 无缓存）**：瘦身后 App HTML 每次打开都重新网络拉取（弱网 62KB 也慢），且显示 loading。修复：**AppRuntime HTML 本地缓存**（`localStorage daily-webos-app-html:<appId>` 存 html+versionId）——再次打开先渲染缓存秒开，后台拉最新覆盖（App 更新后自动刷新）。图片首次加载弱网慢不可避免，raw 端点已有 `Cache-Control: public, max-age=86400`（二次打开走浏览器缓存秒开）。
+
+**③ 锚点导航 App 白屏 `{"error":"NOT_FOUND"}`（base 注入陷阱）**：App（如「我的世界·方块世界」）用 `<a href="#about">` 锚点导航，宿主注入 `<base href=".../files/raw/">` 后**纯锚点链接被解析为对 base 的真实导航** → 请求 raw 端点 → 404 JSON 白屏。修复：`APP_RUNTIME_BOOTSTRAP` 注入全局 click 拦截器——`href` 以 `#` 开头的链接 preventDefault + `scrollIntoView` 平滑滚动（文档内导航，不触发请求）。**这是既有缺陷，被锚点导航 App 首次触发。**
+
+**④ 长按无菜单（桌面模板从未部署）**：服务器 `webosDesktopV1.ts` 停在 **8-6 版**（35181B，无 8-12 的 touch 拖拽/菜单补全）——之前记录的"部署"实际未发生（本地日期超前服务器 5 天，AGENT.md 里的 8-12 记录未落地）。修复：上传最新模板（40256B，touchstart×2 + 菜单全）到服务器；用户桌面因历史含 guest 版本（AI 改过）不触发 ensureSystemDesktop 自动升级 → **手动运维脚本升级**：创建 v1.0.25（system，新模板 36037B）切换 active + 写回工作区镜像，历史版本保留可回滚。**坑：脚本版本号 `Number('1.0.1')` 是 NaN 导致 maxVer=0 → 新版本号算出 1.0.1 与历史重名**，已二次修正为 1.0.25。**教训：语义化版本号不能用 Number() 解析，要按点号 split 取末段。**
+
+**⑤ AI 创建 App 后桌面不显示**：同①（refreshBootstrap 被 abort）——修复后自动恢复；桌面还有 apps_changed 通知（8-7 既有）双保险。
+
+**验证**：server/shell-web tsc、vite build 全过；模板 vm 校验（check-desktop.cjs：拖拽/菜单函数齐全、无残留 HTML5 DnD）；线上 page/js/bootstrap 200，bootstrap 86KB；用户桌面 active=v1.0.25(36037B=本地模板)；pm2 稳定（restarts 239 不再涨）。
+**部署**：后端 `server/src/webosDesktopV1.ts`（src/）+ `server/src/webosStoreV1.ts`（src/）；前端重建 shell-web dist 上传（index-D5rHFJ0b.js，gzip 181KB 上传后 gunzip）；pm2 restart；用户桌面手动升级脚本模式保留（版本号修正版见 `tmp/fix-desktop-upgrade.mts` 说明）。
+**遗留**：沙箱→服务器 scp 链路极不稳定（stall/0 字节），大文件一律 gzip 后传输 + 传完校验大小 + 先回滚 index.html 引用再切新版（防半成品上线）。
+
+### 网络/CDN 诊断结论（2026-08-08 凌晨，待用户接入 CDN）
+
+> 用户现象：手机能流畅刷 1080p 视频（国内 CDN），但访问本站：进站 5s、打开 App 5s、图片几分钟。用户质疑服务器带宽，要求评估"带宽无限的亚太 CDN"。
+
+**诊断（已实测）**：
+- 服务器在**香港**（154.64.249.172，AS979 NetLab Global），用户在国内 → 每次请求走**跨境链路**（RTT 300ms+，晚高峰丢包放大）。这是核心瓶颈，与带宽无关。
+- 实测：TLS 握手 1.2-1.9s、TTFB 1-2s（服务器自身 30ms 出数据，时间全耗在跨境路上）。
+- 服务器→国内骨干 ping 223.5.5.5：32ms 0% 丢包（线路本身尚可；用户最后一公里国际出口不可控）。
+- DNS NS = ns5/ns6.myhostadmin.net（新网互联，国内服务商，用户解析应正常；此前沙箱 DNS 13s 是沙箱环境问题，非域名问题）。
+- nginx 原无 ssl_session_cache（每次全握手）。
+
+**已做免费优化（已生效）**：
+- ✅ 开启 BBR（`net.ipv4.tcp_congestion_control=bbr` + `fq` qdisc，写 /etc/sysctl.d/99-bbr.conf）——跨境高丢包下传输效率显著提升。
+- ✅ nginx http 块加 `ssl_session_cache shared:SSL:20m` / `ssl_session_timeout 1d` / `ssl_session_tickets on` / `ssl_early_data on`——重复访问 TLS 1.8s → 0.35s（实测）。
+
+**CDN 结论（待用户执行）**：需要上，但**不是"带宽无限"**——CDN 按流量计费，本站月流量 <1GB，成本几毛-几元。真正价值是**国内边缘节点就近接入**（静态秒开、动态回源加速）。推荐**腾讯云 CDN（或 EdgeOne）**：
+- **强烈建议子域方案**：`cdn.shadowshub.xyz` 子域走 CDN（静态资源），主域直连源站（动态 API + SSE 聊天 + cookie 鉴权不受影响）——避免整站 CNAME 的"动态请求被缓存/SSE 被缓冲"坑。
+- 缓存规则：`/daily/assets/*` 30天；`icon-*.svg`/`manifest`/`sw.js` 1天；`/webos/api/apps/*/files/raw/*`、`imagegen/file/*`、`videogen/file/*` 1天（免鉴权公开素材，UUID 不可变）；`/daily/exp/*` 10分钟；`/webos/api/bootstrap`、`/api/*`、`/webos/api/chat/*`、`/webos/api/workspace/*` **不缓存**；`chat/stream`（SSE）**不缓存+关缓冲**。
+- 用户接入后：前端静态资源前缀切到 CDN 子域，nginx 无需大改（子域可以 CNAME 到 CDN，同源 API 不动）。
+- 待办：用户开通腾讯云 CDN → 给 CNAME → 我完成前端资源前缀切换 + 逐项验证缓存/SSE。
+
+### 横屏全屏 + 长按验证 + 商店布局/清空（2026-08-08，已上线）
+
+**① 横屏 App 不全屏（根因：Shell 440px 卡片误判）**：`.shell-stage{max-width:440px}` + `@media(min-width:700px)` 桌面卡片样式——**手机横屏时宽 844px 触发"桌面模式"，整个 Shell 被压成 440px 居中卡片**（两侧平台背景），竖屏 App 全屏但横屏 App 只占中间一块。修复（styles.css）：
+- 桌面卡片样式加 `and (hover:hover) and (pointer:fine)`（仅桌面鼠标设备）
+- 新增 `@media(orientation:landscape) and (hover:none) and (pointer:coarse){ .shell-stage{width:100%;max-width:100%;margin:0;border-radius:0} }`（触屏横屏全屏铺满），@supports 块同步。
+- 验证（Playwright 844x390 横屏触屏视口）：`.shell-stage` =844x390（maxWidth100%、radius0px）PASS；桌面视图同样全屏。**不改 AI 提示词**（用户决策：App 自己写 width:100% 即全屏，根因在平台层）。
+
+**② 长按没反应（实为模板未部署/用户未刷新）**：Playwright 真机级 touch 长按线上桌面验证：`touchstart→650ms→touchend` 菜单正常弹出（"系统应用不可操作/整理桌面/取消"）✓——**功能正常**。用户端需强刷（bootstrap 是 no-store 动态接口，刷新即新模板 v1.0.25）。若用户仍无反应，检查其 WebView 是否缓存了旧桌面 html。
+
+**③ 应用商店顶部布局优化（webosStoreV1.ts）**：原"标题→搜索→空间条→tab"四层堆叠间距 2-4px 拥挤。修复：store-head 只包标题（提前闭合）；**空间条移到 tabs 下方**改轻量胶囊（margin 2px 18px 10px、padding 7px 13px、圆角 12px）；间距拉开。验证：HTML 标签配对 OK、JS vm 语法 OK、顺序 head→search→tabs→space ✓。存量账号由 ensureSystemStore（所有版本 system）自动升级。
+
+**④ 应用商店清空**：`DELETE FROM webos_store_apps`（6 条测试条目全删；visits/installs 本就 0）。线上 `GET /store/apps` 返回 `{userFreeBytes, items:[]}` ✓。
+
+**部署**：后端 `server/src/webosStoreV1.ts`（src/）；前端重建 dist（index-0z0nlOcI.js / index-D0PjZ4kn.css，gzip 传输后 gunzip）；sed 切 index.html 引用；pm2 restart；page/js/css 200、商店空列表、横屏 PASS。
+**验证脚本**：`tmp/e2e-longpress.mjs`（长按）、`tmp/e2e-landscape.mjs`（横屏）、`tmp/check-store-structure.cjs`（模板结构）。
+
+### App 图标全丢根因修复 + 长按排查结论（2026-08-08，已上线）
+
+> 用户反馈：部署后最新 App 的 icon（AI 画的）变默认首字母，还有好几个 App 也这样；长按 App 依然没反应（游客实测正常）。
+
+**① icon 全丢根因（normalizeApp 漏字段）**：`normalizeState → row.apps.map(normalizeApp)`——**normalizeApp 返回对象漏掉 `icon` 字段**！loadState 后内存里 app.icon=undefined，**任何一次 saveState（AI 创建新 App、扣费、上传等）把整个 state 写回 DB → 所有 App 的 DB icon 被洗成 undefined**。部署后第一次 saveState（如创建 app-d3a1178e）即触发全量清洗。修复：normalizeApp 补 `icon: typeof row.icon === 'string' && row.icon ? row.icon.slice(0, 8*1024) : null`。
+- **已丢失的 icon 无法从 DB 恢复**（数据已洗掉）：有工作区 `icon.svg/icon.png` 文件的 App（7 个）由 readAppIconFile 正常显示；无文件的（我的世界、最新 App 等）需让 AI 重新画（AI 用 create_webos_app 工具更新 icon → 存 DB → 不再被洗）。
+- 注意：REST `POST /webos/api/apps` 本就不支持 icon 参数（用户粘贴 HTML 路径无图标，预期）；AI 工具路径 `create_webos_app` 存 icon。
+- 验证：normalizeApp 逻辑单测 PASS（icon 保留）；服务已重启部署。
+
+**② 长按排查结论（功能正常，用户端缓存问题）**：Playwright **16 个 App（12 用户 App 含 icon + 系统）数据量级**逐个真机 touch 长按：**全部弹出菜单**（系统 App 3 项 / 用户 App 6 项）✓——模板、数据量、icon 均不影响长按。用户真机无反应 = WebView 缓存旧桌面 html（bootstrap 是 no-store，强刷即得 v1.0.25）。**行动：用户强刷（清缓存）后再测；仍无反应需查其 WebView 是否缓存旧 bootstrap/桌面**。
+
+**部署**：后端 `server/src/routes/webos.ts`（normalizeApp icon 修复）；pm2 restart；tsc 通过。
+
+### 用户账号速查（2026-08-08 起，排查必须直接用真实账号，禁止游客/模拟数据代替）
+
+- **站长账号：`2893334965@qq.com`**（role=admin，称呼「芸」），user key = `user:fb9f2d90-a79c-4ab4-af3e-c3b13fb668d6`，工作区 `/root/daily/server/data/workspace/webos/user:fb9f2d90-.../`
+- **排查规则（用户明确要求）**：凡是用户反馈"我的账号有问题"（长按/图标/数据/权限等），**必须用站长账号实测**（生成 JWT 注入 Playwright，或用服务器脚本查该账号 state/工作区），**禁止用游客身份或模拟数据代替实测**——不同账号数据差异（App 数量/异常数据/桌面版本）会导致游客正常、真实账号异常。
+- 站长账号 JWT 生成（服务器）：`node -e "const jwt=require('jsonwebtoken');const fs=require('fs');const s=JSON.parse(fs.readFileSync('/root/daily/server/.env','utf8').split('\\n').filter(l=>l.startsWith('JWT_SECRET='))[0]?.slice(11));console.log(jwt.sign({authenticated:true,sub:'user:fb9f2d90-a79c-4ab4-af3e-c3b13fb668d6',userId:'fb9f2d90-a79c-4ab4-af3e-c3b13fb668d6',role:'admin'},s,{expiresIn:'2h'}))"`（以实际 auth.ts 签名为准，见 `signTokenForUser`）
+
+### 长按真机失效根因（touchstart passive:true）+ 真实账号实测（2026-08-08，v1.0.26 已上线）
+
+> 用户反馈：两个浏览器真机实测长按仍无反应（此前一直用游客/模拟数据验证，被用户批评——**必须用站长账号实测**）。
+
+**① 用站长账号真实实测**（JWT 注入 Playwright，2893334965@qq.com）：登录 ✓、桌面 16 App 渲染 ✓、JS 零错误 ✓、**逐个长按全部弹出菜单** ✓——功能本身正常，Playwright 派发 touch 事件**绕过浏览器原生手势**，所以模拟永远测不出真机问题。
+
+**② 真机失效根因（确定）**：桌面模板 `touchstart` 监听是 **`{ passive: true }`**（其余事件全 passive:false，唯独它漏了）——桌面是可横滑容器（#pages），浏览器对 passive touchstart 做"滚动 vs 点击"手势判定，**真机长按被判定为潜在滚动 → 发 touchcancel → 菜单取消**。修复（v1.0.26）：touchstart 改 `{ passive: false }` + 立即 `preventDefault()`（阻止滚动手势判定，长按不再被取消）+ editing 拖拽同样 preventDefault + body 加 `-webkit-touch-callout: none`（防 iOS/部分安卓浏览器长按系统菜单）。
+**③ 部署**：webosDesktopV1.ts 上传 + 用户桌面手动升级 v1.0.26（36488B，历史版本可回滚；升级脚本 `tmp/fix-desktop-upgrade2.mts`，版本号用 `split('.').pop()` 修正）+ pm2 restart；站长账号实测 PASS。
+**④ 教训**：真机手势类问题（长按/拖拽/滚动拦截）**必须用真实账号 + 真机或注入真实 JWT 的浏览器实测**；Playwright dispatchEvent 模拟不能替代原生手势路径（passive 差异、系统文本选择、touch-callout 均无法模拟）。
+
+### 长按/短按交互最终方案（2026-08-08 v1.0.29，用户真机逐版验证结论）
+
+> 用户真机逐版反馈：v1.0.26 长按进整理模式（非菜单）；v1.0.27 长按无反应（延迟 preventDefault）；v1.0.28 短按打不开 + 长按只变大不弹菜单（touchend 不派发）。最终定位：
+
+- **用户诉求**：长按图标 = 弹出菜单（分享给朋友 / 上传到应用商店 / 下载源码 ZIP / 删除移入回收站，固定 4 项）；短按 = 打开 App；拖动排序不再是长按行为（改为空白处长按 450ms 进入整理模式，整理模式内拖动排序）。
+- **真机关键差异（逐版实证）**：
+  1. `passive:true`（v1.0.25）：浏览器对可滚动容器做"滚动 vs 点击"手势判定 → 真机长按被 touchcancel 取消 → 无反应。
+  2. `passive:false + touchstart 立即 preventDefault`（v1.0.26）：长按可靠触发（armed 达成），**但部分 WebView（魅族等）preventDefault 后 touchend 不再派发** → 短按打不开、长按只变大（armed 样式）不弹菜单。
+  3. **最终方案（v1.0.29）**：`.app { touch-action: none }`（CSS 标准：图标不做滚动手势判定，touch 事件流完整）+ touchstart preventDefault 双保险 + **短按在 touchend 手动 `SDK.apps.open`（不依赖 click）**、长按 touchend 弹菜单、空白长按（pages，passive）进整理模式。
+- **菜单 4 项**（非系统 App）：分享给朋友 / 上传到应用商店 / 下载源码 ZIP / 删除（移入回收站）；点遮罩关闭（无取消按钮）；系统 App 显示"不可操作"提示。
+- **桌面版本演进**：v1.0.25(36037B) → v1.0.26(36488B passive 修复) → v1.0.27(36973B 交互重做) → v1.0.28(36965B 立即 preventDefault+手动打开) → v1.0.29(37235B touch-action:none)。用户桌面由 `tmp/fix-desktop-upgrade2.mts` 手动升级（版本号 split('.') 取末段），历史版本保留可回滚。
+- **待真机确认**：v1.0.29 若仍有 touchend 不派发问题，则上 pointer 事件双轨（pointerdown/pointerup 处理 touch 类型 + 去重标志）。
+
+### 长按失效根因终定位（pointerleave 清状态）+ CDP 复现法（2026-08-08 v1.0.30，已上线）
+
+> 用户要求"先复现再解决"。用 **CDP Input.dispatchTouchEvent（浏览器真实手势路径）** 成功复现"短按打不开、长按只变大不弹菜单"，事件流日志逐层定位到确切根因。
+
+**CDP 复现法（关键突破，AGENT.md 8-12 教训的终极解法）**：Playwright `dispatchEvent` 派发事件**绕过浏览器原生手势**（永远测不出真机问题）；**CDP `Input.dispatchTouchEvent`（+ `Emulation.setTouchEmulationEnabled`）走真实输入管线**，能复现 touchcancel/pointerleave 等原生行为。坐标 = iframe 偏移 + iframe 内 rect。**注意**：新游客首次进入有**公告弹窗遮挡**（.login-panel announcement-panel 拦截所有触摸）——必须先点"不再显示"。
+
+**根因（事件流铁证）**：触摸抬起时浏览器事件序列 = `pointerdown → touchstart → pointerup → pointerout → pointerleave（SVG→tile→app→grid→page…）→ touchend`——**pointerup 后、touchend 前浏览器派发一串 pointerleave**（CDP 与部分 WebView 实测），而模板 `pointerleave` **无条件 clearPress()** → **长按 armed 状态被清掉** → touchend 时 `armed=false` → 菜单不弹、短按分支也不走（pressTimer 已清）→ 表现"长按只变大（armed 样式出现过）但无菜单、短按无反应"。
+
+**修复（v1.0.30）**：`pointerleave` 跳过 touch 指针（`if (e.pointerType === 'touch') return;`）——触摸抬手由 touchend 处理，pointerleave 只对鼠标（移开取消长按）有意义。
+
+**验证（CDP 触摸，同路径）**：短按打开 App ✓；长按菜单弹出且 4 项齐全（分享给朋友/上传到应用商店/下载源码 ZIP/删除移入回收站）✓。部署 v1.0.30（37534B）+ 用户桌面升级 + 服务重启完成。
+**桌面版本演进**：…v1.0.29(37235B touch-action:none) → **v1.0.30(37534B pointerleave touch 跳过)**。复现脚本 `tmp/e2e-cdp-touch.mjs`。
+
+### v1.0.31 pointerup 双轨（真机 touchend 不派发的最终解法，已上线）
+
+> 用户真机 v1.0.30 仍"长按只变大不弹菜单"（armed 样式残留 = touchend/touchcancel 都没派发）。CDP 实测事件序列：`pointerdown→touchstart→pointerup→pointerleave×N→touchend`——**pointerup 在 touchend 之前独立派发**（PointerEvents 标准，Chrome87+ 全支持）。
+
+**修复（v1.0.31，37938B）**：**pointerup（含 touch 类型）优先处理抬手**（armed → openMenu；未 armed → SDK.apps.open），`touchHandled` 标志去重，touchend 兜底（pointerup 已处理则跳过）。pointerdown（touch）与 touchstart 去重启动长按。即使 WebView 吞掉 touchend，pointerup 仍能可靠完成"抬手"逻辑。
+**验证（CDP 同路径）**：短按打开 ✓、长按菜单 4 项 ✓。用户桌面升级 v1.0.31，历史版本可回滚。
+
+### v1.0.32 长按达成即弹菜单 + click 时间差兜底（不依赖抬手事件，已上线）
+
+> 用户 v1.0.31 后反馈"任何账号都一样：长按无反应，只有图标放大"——armed 样式残留说明 touchstart+timer 正常，但 **touchend/pointerup 抬手事件在用户 WebView 上都不派发**，而 v1.0.31 仍把"弹菜单"放在抬手处理里 → 永远等不到。结论：**弹菜单不能依赖抬手事件**。
+
+**修复（v1.0.32，38544B，四处）**：
+1. **长按 450ms 达成瞬间即弹菜单**（startPress timer 回调里直接 `longPressOpened=true; openMenu(app)`，不等抬手）——即使 WebView 完全吞掉 touchend/pointerup，菜单也已弹出；
+2. **handleRelease 的 armed 分支只清理状态**（菜单已弹，抬手不再重复弹）；
+3. **click 处理器实现真正的时间差兜底**（此前注释声称有但代码没有）：touchHandled 去重（避免正常浏览器 click 重复打开）→ longPressOpened/dragJustEnded 抑制 → `downAt && Date.now()-downAt>=450` 判定长按弹菜单，否则 `SDK.apps.open`——任何浏览器 click 必触发，作为 touchend/pointerup 全缺失时的终极兜底；
+4. **鼠标 pointerup 也设置 touchHandled**（防鼠标路径 click 重复打开）。
+
+**验证（CDP 真实触摸，同用户路径）**：短按 150ms → 打开 App ✓；长按 700ms **600ms 时（手指未抬）`menuShownBeforeRelease:true`**（菜单在抬手前已弹出）+ 抬手后菜单保持、4 项齐全 ✓。用户桌面升级 v1.0.32（升级脚本 note 更新，历史版本可回滚）。
+**桌面版本演进**：…v1.0.31(37938B pointerup 双轨) → **v1.0.32(38544B 达成即弹 + click 兜底)**。
+
+### ⚠️ 重大根因：CSS 解析中断——菜单"做了但从未显示"（v1.0.33，2026-08-08 深夜定位）
+
+> 用户质疑"你根本没有做长按菜单"。逐层证据链排查后定位到**真正根因**：模板 CSS 中 `#dots {` 声明块**缺少闭合 `}`**（`gap:5px;` 后直接写 `#dots i {`）→ 浏览器 CSS 解析进入错误恢复模式，**从 `#dots` 到文件末尾的全部规则被整体丢弃**（`.dock`/`#appmenu.show`/`#toast`/`#confirm`/`#dots i.active`/`button.m-item` 全丢）→ 长按菜单 JS 逻辑一直正常（class 都加了），但 `#appmenu.show { display:flex }` 从未被浏览器解析 → 菜单**从未视觉显示过**（元素在文档流底部、视口外）。**这解释了用户从 v1.0.25 起所有"长按无反应/只变大"反馈**（此前 CDP 验证只检查 classList 没检查 CSS 生效，被误导多轮）。
+
+**排查方法（关键教训）**：发现 computed style 异常（`#appmenu` display:block 而非 none、z-index:auto、rect 高 64px 塌陷）→ 打印 styleSheets[0].cssRules 只有 34 条（完整应有 64 条）→ 定位最后一条成功解析的规则 `#dots` → 对照模板源码发现缺 `}`。
+
+**修复（v1.0.33，38548B）**：补上 `#dots` 块的 `}`。验证方式升级：**新增 `tmp/check-desktop-css.mjs`（浏览器级 CSS 完整性校验）**——tsx 求值模板 → 提取 `<style>` → Playwright setContent 真实解析 → 断言 ruleCount≥60 + `#appmenu.show`/`.dock`/`#toast`/`#confirm`/`#dots i.active`/`button.m-item` 全部存在 + `#appmenu.show` computed display=flex。**此后任何模板改动必须过 CSS 校验 + JS 校验双关**（此前只有 JS vm 校验，CSS 是盲区）。
+
+**v1.0.34→v1.0.35（遮罩误关修复）**：菜单弹出后全屏遮罩覆盖，抬手时浏览器合成的 click（target 落在新遮罩上）会触发"点遮罩关闭"→ 用户来不及操作。v1.0.34 用"距菜单弹出 500ms 时间窗"有缺陷（长按按住 >950ms 再抬手仍会误关）。**v1.0.35 最终方案（39042B）**：document 捕获 touchend 记录 `window.__lastTouchEndAt`，遮罩 click 时距上次 touchend <300ms 一律忽略（合成 click 必然紧跟 touchend），之后真实点遮罩才关闭——**任何按住时长都稳**。
+
+**最终验证（v1.0.35 全绿）**：CSS 初始 none ✓；长按 700ms 不抬手：show + display:flex + visibility:visible + opacity:1 + z-index:11 + 全屏遮罩 390×844 + 4 项齐全（分享给朋友/上传到应用商店/下载源码 ZIP/删除移入回收站）+ 标题/副标题正确 ✓；抬手后（含截图延迟场景）菜单保持 flex ✓；事件时间线：489ms show → 760ms pointerup → 768ms 合成 click(target=appmenu) 被 300ms 判定忽略。
+ **桌面版本演进**：…v1.0.32(38544B) → **v1.0.33(38548B CSS 中断修复)** → v1.0.34(38824B 时间窗方案，被 35 替代) → **v1.0.35(39042B 距 touchend 判定)**。
+
+### 文件上传全部失败修复（2026-08-13，nginx 1MB 限制，已部署验证）
+
+> 现象：用户反馈"无法上传文件，只要上传文件就是失败"。**已修复、已部署、已线上验证。**详见 `docs/bug-upload-413.md`。
+
+**根因**：nginx 未配置 `client_max_body_size`（默认 `1m`）——前端把文件转 base64（膨胀 ~4/3）放进 JSON body 后，任何原文件 >约 **750KB** 的上传请求在 nginx 反代层即被 413（HTML 错误页）拦截，根本到不了后端。手机相册照片（2-5MB）、文档、视频、压缩包全部命中。2026-08-12「取消单文件大小限制」只改了业务代码，漏改两处传输层限制：① nginx（默认 1m）② Express `express.json({limit:'20mb'})`（2026-08-03 残留）。
+
+**排查方式（无 SSH 也可定位）**：对免鉴权端点 `POST /api/auth/guest` 做 body 大小阈值探测（500KB→200、900KB→200、1.1MB→413 HTML 错误页）即可确定是 nginx 层。
+
+**修复（已部署）**：
+1. `server/src/index.ts`：`express.json({ limit: '600mb' })`（tsc 通过，已 scp + pm2 restart）
+2. nginx：新建 **`/etc/nginx/conf.d/upload-size.conf`**（`client_max_body_size 600m;`，http 级全站生效）+ `nginx -t` 通过 + `systemctl reload nginx`
+
+**线上验证**：公网 2MB body → 200（此前 413）；真实登录用户公网上传 1.1MB jpg → `{"ok":true}`（验证后已删除测试文件、清理测试工作区）；pm2 online。
+
+**部署教训（2026-08-13）**：
+- **教训 1**：不要往 sites-enabled 的 server 文件顶部直接加指令——多个站点文件（default/admin-daily 软链接）会被 include 进同一 http 上下文造成 `client_max_body_size duplicate`；
+- **教训 2**：备份文件勿留在 sites-enabled 内（`*.bak` 会被 `include /etc/nginx/sites-enabled/*;` 一起加载；软链接备份会重复加载同一文件 → 指令/listen 重复）；备份应放 `/root/daily/backups/`；
+- **教训 3**：nginx 配置改动应先 `nginx -t` 再 reload，改坏时 `nginx -t` 会拦截，运行中的 nginx 不受影响（内存配置不变）。
+
+**SSH 连接经验（2026-08-13）**：沙箱→服务器 22 端口出现 KEXINIT 后无响应（TCP 通、banner 通、KEX 大包丢）→ 连续多次重试会触发服务器 sshd 惩罚（PerSourcePenalties），表现为 `Connection closed by ... port 22`/paramiko `EOF in transport thread`（服务器主动断连）。**对策：停止高频重试，等 10-30 分钟惩罚窗口衰减后再单次尝试**（本次等待约 10 分钟后即恢复连接）。可用 `ssh -v`/paramiko 日志区分：卡 KEXINIT = 链路丢包或服务器惩罚；收到 EOF = 服务器主动断连（惩罚/限流）；banner 正常 = sshd 活着。
+
+### 大文件分片上传（2026-08-13，10GB 级文件可传，已部署验证）
+
+> 用户诉求：会员存储空间 10GB，要能一次上传 10GB 级文件（视频/ISO/大数据）。**已实现分片上传并上线。**
+> 背景：单请求 body 上限 600MB（base64 后 ≈450MB 原文件）；直接调大 limit 不可行——10GB 文件 base64 ~13.3GB，
+> 服务器仅 3.7GB 内存，`express.json` 全量解析必然 OOM；且单请求跨境传输必超 nginx 转发超时。
+
+**方案：顺序分片 + 断点续传（append 模式）**
+- 前端（`api.ts uploadWorkspaceFileLarge`）：文件 >20MB 走分片，**8MB/片**（base64 ~10.7MB，远低于 600MB 上限）；
+  每片独立请求（不超时、内存恒定），片失败重试 3 次（1s/2s/4s 退避）；App.tsx 两处上传（composer ➕ / FilesView）已接入。
+- 服务端（`webos.ts POST /webos/api/workspace/files/upload`，action=init/part/complete/abort）：
+  - init：类型白名单 + 配额预检（size ≤ 剩余空间）+ **续传复用**（同 key+同名+同大小未完成会话自动复用，返回已收片数）；
+  - part：顺序校验（index 必须等于已收片数，乱序 400 PART_SEQUENCE）+ 累计不超 total + appendFileSync；
+  - complete：字节数精确校验（PART_INCOMPLETE）+ 最终配额复核（防 init 后被占满）+ **同盘 rename 原子落盘**；
+  - 临时文件放 `<sandbox>/webos/_uploads/<key>/`（工作区外，不计配额、列表不可见）；session TTL 24h，惰性清理 + 每小时定时器（含服务重启后残留临时文件兜底）；
+  - 路径越界统一 400 INVALID_PATH（workspacePathError，与 GET/DELETE 一致）。
+- **类型白名单扩展**（`webosWorkspace.ts`）：+html/htm/css/js/xml/yaml/yml/log/ini/conf/cfg、wmv/flv/3gp/mpeg/mpg、
+  bz2/xz/iso/img/dmg/pkg/apk/msi/deb/rpm、bin/dat/psd/ai/xmind/kml/kmz/dwg/dxf/cbr/cbz（仅存储不执行，App 运行时另有 sandbox）。
+- **验证**：本地 7 项端到端全过（24MB 3 片、续传 resumed、乱序/不完整/越界/非法类型 400、游客 403）；
+  线上公网 25MB 非整片（26215177B）4 片上传 → size 精确 ✓（验证后已清理）。
+- 部署：`webos.ts`（routes/）+ `webosWorkspace.ts`（utils/）+ 前端 dist（index-BOTyyi0r.js，gzip 传输）+ pm2 restart。
+ - 已知边界：单会话 24h 未活动过期；服务重启后未完成上传需重新 init（前端 abort 后自动续传新会话）；单文件上限 = 工作区配额（10GB 档可传 10GB 文件）。
+
+### 统一对话 log（reasoning 落库）+ 自动整合 trace + 文件夹即 App 即时化 + app-dev skill（2026-08-13，已部署验证）
+
+> 用户决策：①**reasoning 思考过程也要保存**——只有它能反映 AI 怎么想的（此前 webos_chat_logs 只存思考档位，DeepSeek 思考全文只在 SSE 流式展示、服务端不落库）；②**一个对话里面的全部东西统一保存为一个 log**；③把 App 相关提示词全部放进 skill，保证原提示词简洁；④让 AI 自行创建文件夹（系统帮初始化）——「创建 App」不该是黑盒工具。
+
+**① 统一对话 log（新表 `webos_chat_sessions`，一次请求 = 一行完整记录）**：
+- events JSON 保存完整事件序列：user 消息（首条必有）+ **thinking 段（thinking_delta 合并，即 AI 思考全文）** + delta 段（输出）+ tool_start/tool_update/tool_end + html + app_created/app_updated + 状态与用量。
+- 收集器：`appendTaskEvent` 内同步累积（与任务缓冲解耦，新任务重建时重置）；**所有结束分支**（ok/failed/empty_response/insufficient/断连后台）统一调 `recordChatSessionLog` 落库（失败静默不阻断主流程）。
+- 与 webos_chat_logs（按消息粒度、纯文本快速浏览）互补：**reasoning 内容只在此表**。
+- schema（schema.ts/schema-sqlite.ts 两套）+ migrations.ts `ensureChatSessionsTable`（幂等，index.ts 启动调用）+ 索引（user/conv/created）。
+
+**② 自动整合诊断（管理端新接口）**：
+- `GET /api/admin/webos/trace?userKey=&conversationId=&appId=&hours=`：把①统一对话 log（含 reasoning，平铺进时间线）②工作区 `logs/execution.log`（AI 工具调用轨迹：工具名/参数摘要/成败/note）③App 版本历史（versions 的 createdAt/createdBy/source）合并排序为一条时间线——排查「AI 干了什么/为什么没生效/来回折腾了几次」一条命令看全，不再手动拼多表（本次排查飞机大战就是手动拼 chat_logs+execution.log+版本历史，多轮往返）。
+- `GET /api/admin/webos/sessions?userKey=&conversationId=&limit=`：完整 events 查询（含 reasoning 原文）。
+
+**③ 文件夹即 App 即时化（AI 自行创建文件夹，系统帮初始化——用户建议落地）**：
+- `webosWorkspace.ts`：`workspaceFsTools(key, hooks?)` 新增可选钩子 `WorkspaceFsHooks`：
+  - **mkdir 命中 `apps/<name>/`**（apps 下一级）：自动写最小 index.html 骨架（「新 App 已就绪」占位页，AI 之后覆盖）+ 触发 `onAppFolderCreated`；
+  - **write/edit/copy/delete 命中 `apps/<appId>/index.html`**：触发 `onAppSourceChanged`；
+- `webos.ts` 注入 hooks：onAppFolderCreated → loadState → `syncAppsFromWorkspaceFolders`（注册/骨架校验）→ saveState → `notifyAppEvent('app_created')`；onAppSourceChanged → loadState → `syncAppSourceFromWorkspace`（校验通过立即建新版本并切换）→ saveState → `notifyAppEvent('app_updated')`。**AI 改文件立即生效，不再等 bootstrap 懒同步**（此前 AI 第一轮修复只改工作区文件、运行时加载版本库旧快照 → 用户永远看不到修复，AI 读源码才发现 sync 机制——本次根治）。
+- SSE 转发：钩子登记的 app_created/app_updated 经 `pendingAppEvents`（模块级 Map，key=tKey 前缀兜底）在 tool_execution_end 分支消费推送前端（appendTaskEvent + sseWrite）——桌面/商店自动刷新。
+
+**④ AI 自测工具 `inspect_webos_app`**：返回 active 版本号/版本数、工作区镜像一致性（clean=镜像==active / changed=文件被改未发布 / missing）、素材文件清单、index.html JS 语法校验（vm.Script）——AI 改完自查「我的修改是否已生效/会被加载」，不再盲等用户反馈。
+
+**⑤ app-dev skill（.pi/skills-webos/app-dev/SKILL.md，81 行）**：App 开发规范全集——创建（文件夹即 App 主路径 + create_webos_app 仅用于用户粘贴 HTML）、修改（html 与素材两个世界：html 走版本库即时建版本、素材走磁盘即真源）、素材生成放置流程、数据保存（localStorage 小数据 / fs 大文件 / 禁 IndexedDB）、SDK 能力、8 条血泪坑（canvas 污染/__APP_ID__/缓存版本/polyfill/外链/版本不可变等）、自测清单。**系统提示词（piBridge.ts）同步精简**：原两大段 App 规范压缩为一行「涉及 App 一律先 read app-dev skill」。
+
+**⑥ 前端 App HTML 缓存版本校验（App.tsx AppRuntime）**：`daily-webos-app-html:<appId>` 缓存读取时校验 `versionId === activeVersionId`，不一致**不渲染缓存**（等拉取最新）——杜绝「AI 已发布新版本但用户打开先看到旧缓存、误以为没修复」。
+
+**验证**：server/shell-web tsc exit 0、vite build 成功；真实 SSE 对话（"你好，请回答一个字：好"）→ `webos_chat_sessions` 出现 1 行，events = `[user, thinking("The user asks me..."), thinking("...answer with one character: 好."), delta("好")]`（**reasoning 落库确认**）；`/trace` 站长账号 2h 返回 156 条 / 12h 199 条时间线（对话+工具+版本合并）；迁移日志 `[db] webos_chat_sessions ensured`；服务单实例、网站 200。
+**部署**：后端 8 文件（schema×2/migrations/index/webos/webosWorkspace/adminWebos/piBridge）+ 新 skill + 前端 dist；沙箱→服务器用 `cat tgz | ssh 'cat > ...'` 管道传输 + md5 校验一致（scp 不可用）；数据库已备份 `backups/daily.db.bak-chatlog-20260810-230026`。
+**遗留**：存量用户从下次对话起才有完整 log（历史不回溯）；管理后台 UI 尚未接 trace/sessions（接口已就绪，可后续加页面）。
+
+### 视频生成失败详情落库 + 防超时 + App 内视频秒播（2026-08-08 晚，已上线）
+
+> 用户反馈：①AI 用 9 张参考图生成视频，第一次工具"超时"（后台实测第一次任务创建失败 TASK_CREATE_FAILED，131.5s，AI 自动重试后成功）；②对话页预览视频秒开，但 App 内视频要等几十秒。
+
+**排查结论（站长账号实测）**：
+- 请求 13:11:57Z → 第一次 generate_video 失败 13:15:26Z（131.5s，task_id 空、未扣费）→ AI 会话内自动重试 → 13:19:30Z 成功（task_id 2086079187927654400，`agent/videos/video-6608f1c9-mskehhpy.mp4` 3.3MB 768P）→ 13:20:13Z 会话正常 done。
+- "超时"构成：H3-Context-IR 增强轮询（最多 180s，**期间无进度回调 → 不刷新 pi 活动计时，逼近 180s 空闲超时被误杀风险**）+ 创建任务瞬时失败（渠道错误详情未落库，只能靠猜）。
+- App 视频卡顿根因：`servePublicAppRawFile` **不支持 Range**（`createReadStream` 全量直出）——App 里 `<video src="assets/xxx.mp4">` 必须整文件下载完才能播（3.3MB 跨境全量）；对话页走 `servePublicVideoFile`（支持 Range）所以秒开。moov 已验证 faststart（偏移 36B）。
+
+**修复（6 文件，已部署）**：
+- `webos_video_usage` 表加 `error_message` 列（schema.ts/schema-sqlite.ts + migrations.ts `ensureVideoUsageErrorMessageColumn` 幂等迁移 + index.ts 挂载）；`recordVideoUsage` INSERT 落 errorMessage（≤500 字符）；主落库从 `result.errorMessage` 取。
+- **防超时**（minimaxVideo.ts）：① H3-IR 轮询上限 180s→**60s**，超时降级（增强只是优化提示词，不值得干等 3 分钟）；② 增强轮询每 10s 走 `onProgress`（透传 webos.ts 的 onProgress → markPiActivity + tool_update，**彻底消除长轮询期 pi 空闲超时误杀**）；③ `createVideoTask` **瞬时错误自动重试 3 次**（429/5xx/网络异常，退避 1s/3s；402/4xx 不重试），每次尝试 onProgress——避免"创建失败→AI 重试→重新跑一遍 H3-IR（1-2 分钟）"的浪费；④ `generateVideoAndSave` fail() 打 `[videogen] FAIL status=... code=... durationMs=... msg=...` 日志（此前失败只返回给 AI，pm2 查不到）。
+- **App 视频秒播**（webos.ts `servePublicAppRawFile`）：mp4/webm 素材加 `Accept-Ranges` + Range 206 分段响应（复用 servePublicVideoFile 逻辑；图片/?w= 缩放路径不受影响）。
+- 部署：schema 两文件（db/）+ migrations.ts（db/）+ index.ts（src/）+ minimaxVideo.ts（videogen/）+ webos.ts（routes/）**分别放对目录**；tar.gz 打包单包传输（沙箱→服务器 scp 报 `hostname contains invalid characters`，改用 `cat tgz | ssh 'cat > ...'` 管道传输，md5 校验一致）；服务器 tsc 通过；pm2 restart 单实例。
+- **线上验证**：迁移日志 `[db] webos_video_usage.error_message added` + PRAGMA 列存在；`/webos/api/apps/<appId>/files/raw/assets/travel-video.mp4`：无 Range 200 全量 3294947B、`Range: bytes=0-1023` → **206 1024B**、`Range: bytes=3000000-` → **206**；videogen 端点 206 ✓；/daily/ 200、SSE 对话 done 正常。
+- 备注：scp 在本机环境不可用（hostname 校验失败），一律用 ssh 管道传文件；本次误删 /root/daily/backups/vidfix-20260808（部署已成功验证，无影响）。

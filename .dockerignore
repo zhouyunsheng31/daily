@@ -1,0 +1,44 @@
+# Node
+**/node_modules
+**/dist
+**/build
+**/.tsbuildinfo
+
+# Web 端构建产物（Docker 内重新构建）
+client/web/dist
+client/web/node_modules
+
+# 桌面端
+client/desktop/dist
+client/desktop/node_modules
+
+# 服务器构建产物
+server/dist
+server/node_modules
+
+# 数据 + 日志
+data/
+*.log
+logs/
+
+# Git + IDE
+.git
+.gitignore
+.vscode
+.idea
+
+# 临时文件
+*.tmp
+tmp-*
+e2e/.tmp/
+
+# 文档（镜像不需要）
+docs/
+
+# 测试（镜像不需要）
+**/__tests__
+**/*.test.ts
+**/*.spec.ts
+server/test
+server/vitest.config.ts
+server/tsconfig.spec.json

@@ -1,0 +1,18 @@
+{
+  "name": "daily-mcp",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "MCP server for creating and managing Daily widgets",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}

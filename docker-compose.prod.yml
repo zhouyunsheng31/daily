@@ -1,0 +1,91 @@
+# ============================================================================
+# Phase S15: 生产环境 docker-compose
+# 部署：docker compose -f docker-compose.prod.yml up -d --build
+# ============================================================================
+# 与 dev docker-compose.yml 的区别：
+# 1. 端口绑定 127.0.0.1:3456（不暴露公网，仅 Nginx 反代访问）
+# 2. 使用独立网络 daily-prod-net（与 dev 隔离）
+# 3. 环境变量从 .env.prod 读取（不读 .env）
+# 4. 资源限制更严格（mem 1g / cpus 1.0）
+# 5. 日志轮转 max-size 10m / max-file 3
+# ============================================================================
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: daily-postgres-prod
+    restart: unless-stopped
+    mem_limit: 512m
+    mem_reservation: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-daily}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-daily}
+    # S15: PG 端口不暴露公网（仅 server 容器通过内部网络访问）
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - ${PGDATA_HOST_PATH:-/root/daily/data/pgdata}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-daily} -d ${POSTGRES_DB:-daily}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - daily-prod-net
+
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: event-server:v0.7.0-webos
+    container_name: daily-server-prod
+    restart: unless-stopped
+    mem_limit: 1g
+    mem_reservation: 512m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3456
+      DATABASE_URL: postgresql://${POSTGRES_USER:-daily}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-daily}
+      SERVER_TOKEN: ${SERVER_TOKEN}
+      PI_MODEL: ${PI_MODEL:-stepfun/step-3.7-flash}
+      PI_API_KEY: ${PI_API_KEY}
+      PI_API_ENDPOINT: ${PI_API_ENDPOINT:-https://api.stepfun.com/step_plan/v1}
+      VITE_STEPFUN_API_KEY: ${STEPFUN_API_KEY}
+      SQLITE_PATH: ${SQLITE_PATH:-/host-data/daily.db}
+      # Phase S11: Web 端认证 + CORS + 静态托管
+      WEB_ACCESS_PASSWORD: ${WEB_ACCESS_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      WEB_PUBLIC_DIR: ${WEB_PUBLIC_DIR:-./public}
+      # webOS P0: DeepSeek Provider（仅服务端读取，禁止进入前端 bundle）
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-}
+    # S15: 端口绑定 127.0.0.1，仅 Nginx 反代可访问（不暴露公网）
+    ports:
+      - "127.0.0.1:3456:3456"
+    volumes:
+      # 挂载宿主机 data 目录（只读）用于 SQLite→PG 迁移
+      - ${DATA_HOST_PATH:-/root/daily/data}:/host-data:ro
+      # Phase 14 修复：挂载 .pi/skills 到容器内 /app/.pi/skills（只读）
+      - ./.pi/skills:/app/.pi/skills:ro
+    networks:
+      - daily-prod-net
+
+networks:
+  daily-prod-net:
+    driver: bridge

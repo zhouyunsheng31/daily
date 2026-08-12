@@ -1,0 +1,15 @@
+# AI 部署的服务 overlay（不与主 compose 冲突）
+# 用法：docker compose -f docker-compose.yml -f docker-compose.ai.yml up -d <service>
+# 注：不重复定义顶层 networks（沿用主 compose 的 daily-net bridge 网络）
+#
+# AI 部署的服务在 services 下追加，每个服务必须：
+# 1. networks: [daily-net]（引用主 compose 已定义的网络）
+# 2. 数据卷挂载到 F:\allmylife\event\data\<service-name>\
+# 3. 资源限制（mem/cpus）
+# 示例：
+#   knowledge-base:
+#     image: ...
+#     networks: [daily-net]
+#     volumes:
+#       - ./data/knowledge-base:/data
+services: {}

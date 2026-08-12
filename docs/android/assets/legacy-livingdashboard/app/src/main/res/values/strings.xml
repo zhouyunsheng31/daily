@@ -1,0 +1,118 @@
+<resources>
+    <string name="app_name">Living Dashboard</string>
+
+    <!-- ===== M1 UI 文案（Spec 2.2 节） ===== -->
+
+    <!-- 主页 -->
+    <string name="search_hint">搜索或输入网址</string>
+    <string name="home_shortcuts">常用网站</string>
+
+    <!-- 底部栏 -->
+    <string name="bottom_bar_back">后退</string>
+    <string name="bottom_bar_forward">前进</string>
+    <string name="bottom_bar_home">主页</string>
+    <string name="bottom_bar_tabs">标签页</string>
+    <string name="bottom_bar_more">更多</string>
+
+    <!-- 更多菜单 -->
+    <string name="menu_add_bookmark">添加书签</string>
+    <string name="menu_view_bookmarks">查看书签</string>
+    <string name="menu_history">历史</string>
+    <string name="menu_download">下载</string>
+    <string name="menu_share">分享</string>
+    <string name="menu_copy_link">复制链接</string>
+    <string name="menu_settings">设置</string>
+    <string name="menu_set_default_browser">设为默认浏览器</string>
+    <string name="menu_clear_cookies">清除 Cookie</string>
+    <string name="menu_exit">退出</string>
+
+    <!-- 标签页管理 -->
+    <string name="tabs_title">标签页</string>
+    <string name="tabs_new">新建标签</string>
+    <string name="tabs_close">关闭</string>
+    <string name="tabs_blank_page">新标签页</string>
+    <string name="tabs_empty_url">空白页</string>
+
+    <!-- 书签管理 -->
+    <string name="bookmarks_title">书签</string>
+    <string name="bookmarks_add">添加书签</string>
+    <string name="bookmarks_edit">编辑书签</string>
+    <string name="bookmarks_title_label">标题</string>
+    <string name="bookmarks_url_label">URL</string>
+    <string name="bookmarks_show_on_home">显示在主页</string>
+    <string name="bookmarks_remove_from_home">从主页移除</string>
+    <string name="bookmarks_delete">删除</string>
+    <string name="bookmarks_confirm">确定</string>
+    <string name="bookmarks_cancel">取消</string>
+
+    <!-- 历史记录 -->
+    <string name="history_title">历史</string>
+    <string name="history_search_hint">搜索历史</string>
+    <string name="history_clear_all">清空历史</string>
+    <string name="history_clear_confirm">确定要清空所有历史记录吗？此操作不可撤销。</string>
+    <string name="history_today">今天</string>
+    <string name="history_yesterday">昨天</string>
+    <string name="history_earlier">更早</string>
+
+    <!-- 设置 -->
+    <string name="settings_title">设置</string>
+    <string name="settings_close">关闭</string>
+
+    <!-- 设置 - 主页定制 -->
+    <string name="settings_group_home_customization">主页定制</string>
+    <string name="settings_theme_color">主题色</string>
+    <string name="settings_theme_color_follow_system">跟随系统</string>
+    <string name="settings_background_image">主页背景图</string>
+    <string name="settings_background_not_set">未设置</string>
+    <string name="settings_background_set">已设置</string>
+    <string name="settings_background_pick">选择</string>
+    <string name="settings_background_clear">清除</string>
+    <string name="settings_logo">主页 Logo</string>
+    <string name="settings_logo_default">默认</string>
+    <string name="settings_logo_custom">已自定义</string>
+    <string name="settings_logo_reset">恢复默认</string>
+    <string name="settings_show_shortcuts">显示常用网站</string>
+
+    <!-- 设置 - 浏览器设置 -->
+    <string name="settings_group_browser">浏览器设置</string>
+    <string name="settings_search_engine">搜索引擎</string>
+    <string name="settings_ua_mode">UA 模式</string>
+    <string name="settings_ua_mobile">移动端</string>
+    <string name="settings_ua_desktop">桌面端</string>
+    <string name="settings_js_enabled">启用 JavaScript</string>
+
+    <!-- 设置 - 默认浏览器 -->
+    <string name="settings_group_default_browser">默认浏览器</string>
+    <string name="settings_set_default_browser">设为默认浏览器</string>
+    <string name="settings_is_default_browser">已是默认浏览器</string>
+    <string name="settings_not_default_browser">未设为默认浏览器</string>
+    <string name="settings_default_browser_set_toast">已设为默认浏览器</string>
+    <string name="settings_default_browser_not_set_toast">未设为默认浏览器</string>
+
+    <!-- 设置 - 数据管理 -->
+    <string name="settings_group_data_management">数据管理</string>
+    <string name="settings_clear_cookies">清除 Cookie</string>
+    <string name="settings_clear_history">清除历史</string>
+    <string name="settings_clear_bookmarks">清除书签</string>
+    <string name="settings_clear_cookies_confirm">确定要清除所有 Cookie 吗？此操作不可撤销。</string>
+    <string name="settings_clear_history_confirm">确定要清空所有历史记录吗？此操作不可撤销。</string>
+    <string name="settings_clear_bookmarks_confirm">确定要清空所有书签吗？此操作不可撤销。</string>
+
+    <!-- 设置 - 调试信息 -->
+    <string name="settings_group_debug">调试信息</string>
+    <string name="settings_ws_state">WS 状态</string>
+    <string name="settings_ws_connected">已连接</string>
+    <string name="settings_ws_disconnected">断开</string>
+    <string name="settings_ws_connecting">连接中</string>
+    <string name="settings_ws_reconnecting">重连中</string>
+    <string name="settings_device_id">设备 ID</string>
+    <string name="settings_server_url">服务器</string>
+    <string name="settings_recent_messages">最近消息</string>
+    <string name="settings_no_messages">（暂无消息）</string>
+    <string name="settings_reconnect_ws">重新连接 WS</string>
+
+    <!-- 通用 -->
+    <string name="confirm">确定</string>
+    <string name="cancel">取消</string>
+    <string name="download_not_implemented">下载功能暂未实现（M7）</string>
+</resources>

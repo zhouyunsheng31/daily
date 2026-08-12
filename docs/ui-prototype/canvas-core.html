@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Daily · 画布核心</title>
+
+<!-- Pinned React 18.3.1 -->
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- Google Fonts: Newsreader (serif display) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg-warm: #FAF8F5;
+    --bg-card: #FFFFFF;
+    --accent: #2D5F4E;
+    --accent-light: #E8F0EC;
+    --accent-hover: #244D3E;
+    --text-primary: #1A1A1A;
+    --text-secondary: #666666;
+    --text-light: #999999;
+    --border: #E5E0D8;
+    --shadow-base: rgba(0,0,0,0.08);
+    --shadow-hover: rgba(0,0,0,0.14);
+  }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg-warm);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .font-display { font-family: 'Newsreader', Georgia, serif; }
+  .font-mono { font-family: 'SF Mono', Menlo, monospace; }
+
+  /* 雨滴动画 */
+  @keyframes rainDrop {
+    0% { transform: translateY(-120%); opacity: 0; }
+    10% { opacity: 0.5; }
+    100% { transform: translateY(120%); opacity: 0; }
+  }
+  .rain-line {
+    position: absolute;
+    width: 1px;
+    background: linear-gradient(to bottom, transparent, rgba(180,200,210,0.6), transparent);
+    animation: rainDrop linear infinite;
+  }
+
+  /* 浮动装饰 */
+  @keyframes floatY {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-14px); }
+  }
+  @keyframes pulseRing {
+    0% { transform: scale(1); opacity: 0.35; }
+    100% { transform: scale(1.6); opacity: 0; }
+  }
+  .float-deco { animation: floatY 6s ease-in-out infinite; }
+
+  /* 浮球呼吸 */
+  @keyframes ballBreathe {
+    0%, 100% { box-shadow: 0 6px 18px rgba(45,95,78,0.28); }
+    50% { box-shadow: 0 6px 26px rgba(45,95,78,0.45); }
+  }
+  .ai-ball { animation: ballBreathe 3.5s ease-in-out infinite; }
+
+  /* 气泡入场 */
+  @keyframes bubbleIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .bubble-in { animation: bubbleIn 0.28s ease-out; }
+
+  /* 滚动条 */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.18); border-radius: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  /* 选中态 */
+  .tab-active {
+    color: var(--accent) !important;
+    border-bottom-color: var(--accent) !important;
+  }
+
+  /* 拖拽中 */
+  .dragging { cursor: grabbing !important; user-select: none; }
+  .widget-card { transition: box-shadow 200ms ease, transform 200ms ease; }
+  .widget-card:hover { box-shadow: 0 10px 28px var(--shadow-hover); }
+
+  /* 缩放档位动画 */
+  .zoom-card { transition: transform 320ms cubic-bezier(0.22,1,0.36,1), opacity 320ms ease; }
+
+  /* 输入聚焦 */
+  input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+
+  /* 通用按钮 hover */
+  .btn-primary { transition: background 200ms ease, transform 200ms ease; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-ghost { transition: background 200ms ease, color 200ms ease; }
+  .btn-ghost:hover { background: var(--accent-light); color: var(--accent); }
+
+  /* 适配手机 */
+  @media (max-width: 768px) {
+    .responsive-row { flex-direction: column !important; }
+    .responsive-col-3 { grid-template-columns: 1fr !important; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+/* ========= 通用样式常量（唯一命名，避免冲突） ========= */
+const canvasStyles = {
+  pageWrap: { minHeight: '100vh', background: 'var(--bg-warm)' },
+  headerBar: {
+    position: 'sticky', top: 0, zIndex: 100,
+    background: 'rgba(250,248,245,0.92)',
+    backdropFilter: 'blur(12px)',
+    borderBottom: '1px solid var(--border)',
+  },
+  tabBtn: {
+    padding: '14px 18px', fontSize: 14, fontWeight: 500,
+    color: 'var(--text-secondary)', cursor: 'pointer',
+    borderBottom: '2px solid transparent',
+    transition: 'color 200ms ease, border-color 200ms ease',
+    background: 'transparent', border: 'none',
+    borderBottomWidth: 2, borderBottomStyle: 'solid', borderBottomColor: 'transparent',
+  },
+  brandTitle: {
+    fontFamily: "'Newsreader', Georgia, serif",
+    fontSize: 22, fontWeight: 500, color: 'var(--text-primary)',
+    letterSpacing: '-0.01em',
+  },
+  brandSub: { fontSize: 11, color: 'var(--text-light)', letterSpacing: '0.12em', textTransform: 'uppercase' },
+};
+
+const widgetStyles = {
+  cardBase: {
+    background: 'var(--bg-card)', borderRadius: 8,
+    border: '1px solid var(--border)',
+    boxShadow: '0 2px 8px var(--shadow-base)',
+    overflow: 'hidden',
+  },
+  cardHeader: {
+    padding: '8px 12px', borderBottom: '1px solid var(--border)',
+    background: 'rgba(250,248,245,0.6)',
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    cursor: 'grab', fontSize: 12, color: 'var(--text-secondary)',
+  },
+  cardBody: { padding: 12, fontSize: 13, color: 'var(--text-primary)' },
+};
+
+const btnStyles = {
+  primary: {
+    background: 'var(--accent)', color: '#fff', border: 'none',
+    borderRadius: 6, padding: '8px 16px', fontSize: 13, fontWeight: 500,
+    cursor: 'pointer',
+  },
+  ghost: {
+    background: 'transparent', color: 'var(--text-secondary)',
+    border: '1px solid var(--border)', borderRadius: 6,
+    padding: '8px 14px', fontSize: 13, cursor: 'pointer',
+  },
+  icon: {
+    width: 32, height: 32, borderRadius: 6, display: 'inline-flex',
+    alignItems: 'center', justifyContent: 'center',
+    background: 'transparent', border: '1px solid var(--border)',
+    cursor: 'pointer', color: 'var(--text-secondary)',
+  },
+};
+
+/* ========= 工具：图标（用 SVG 几何，不画人画物，不用 emoji） ========= */
+const Icon = ({ name, size = 16, color = 'currentColor' }) => {
+  const paths = {
+    plus: <path d="M12 5v14M5 12h14" stroke={color} strokeWidth="1.6" strokeLinecap="round" />,
+    close: <path d="M6 6l12 12M18 6L6 18" stroke={color} strokeWidth="1.6" strokeLinecap="round" />,
+    zoomIn: <g><circle cx="11" cy="11" r="7" stroke={color} strokeWidth="1.6" fill="none"/><path d="M11 8v6M8 11h6M20 20l-3.5-3.5" stroke={color} strokeWidth="1.6" strokeLinecap="round"/></g>,
+    zoomOut: <g><circle cx="11" cy="11" r="7" stroke={color} strokeWidth="1.6" fill="none"/><path d="M8 11h6M20 20l-3.5-3.5" stroke={color} strokeWidth="1.6" strokeLinecap="round"/></g>,
+    zoomMax: <g><rect x="3" y="3" width="18" height="18" rx="2" stroke={color} strokeWidth="1.6" fill="none"/><path d="M3 9h18M9 3v18" stroke={color} strokeWidth="1.4"/></g>,
+    grid: <g><rect x="3" y="3" width="7" height="7" rx="1" stroke={color} strokeWidth="1.5" fill="none"/><rect x="14" y="3" width="7" height="7" rx="1" stroke={color} strokeWidth="1.5" fill="none"/><rect x="3" y="14" width="7" height="7" rx="1" stroke={color} strokeWidth="1.5" fill="none"/><rect x="14" y="14" width="7" height="7" rx="1" stroke={color} strokeWidth="1.5" fill="none"/></g>,
+    upload: <g><path d="M12 16V4M12 4l-5 5M12 4l5 5M4 20h16" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" fill="none"/></g>,
+    panel: <g><rect x="3" y="4" width="18" height="16" rx="2" stroke={color} strokeWidth="1.6" fill="none"/><path d="M3 9h18" stroke={color} strokeWidth="1.6"/></g>,
+    send: <path d="M4 12l16-8-6 16-3-7-7-1z" stroke={color} strokeWidth="1.5" strokeLinejoin="round" fill="none" />,
+    chat: <g><path d="M4 5h16v11H8l-4 4V5z" stroke={color} strokeWidth="1.5" strokeLinejoin="round" fill="none"/></g>,
+    lock: <g><rect x="5" y="11" width="14" height="9" rx="1.5" stroke={color} strokeWidth="1.5" fill="none"/><path d="M8 11V8a4 4 0 0 1 8 0v3" stroke={color} strokeWidth="1.5" fill="none"/></g>,
+    user: <g><circle cx="12" cy="8" r="3.5" stroke={color} strokeWidth="1.5" fill="none"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6" stroke={color} strokeWidth="1.5" fill="none"/></g>,
+    info: <g><circle cx="12" cy="12" r="9" stroke={color} strokeWidth="1.5" fill="none"/><path d="M12 11v5M12 8h0.01" stroke={color} strokeWidth="1.8" strokeLinecap="round"/></g>,
+    cloud: <path d="M7 18a4 4 0 0 1 0-8 5 5 0 0 1 9.5-1A4 4 0 0 1 17 18H7z" stroke={color} strokeWidth="1.5" fill="none" strokeLinejoin="round" />,
+    note: <g><rect x="4" y="3" width="16" height="18" rx="1.5" stroke={color} strokeWidth="1.5" fill="none"/><path d="M8 8h8M8 12h8M8 16h5" stroke={color} strokeWidth="1.4" strokeLinecap="round"/></g>,
+    calc: <g><rect x="5" y="3" width="14" height="18" rx="1.5" stroke={color} strokeWidth="1.5" fill="none"/><path d="M8 7h8M8 11h0.01M12 11h0.01M16 11h0.01M8 15h0.01M12 15h0.01M16 15v3M8 18h4" stroke={color} strokeWidth="1.4" strokeLinecap="round"/></g>,
+    arrow: <path d="M5 12h14M13 6l6 6-6 6" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" fill="none" />,
+    sparkle: <path d="M12 3l1.8 6.2L20 11l-6.2 1.8L12 19l-1.8-6.2L4 11l6.2-1.8L12 3z" stroke={color} strokeWidth="1.4" strokeLinejoin="round" fill="none" />,
+  };
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle' }}>
+      {paths[name] || null}
+    </svg>
+  );
+};
+
+/* ========= 顶部 Header + Tab ========= */
+const Header = ({ activeTab, onTabChange }) => {
+  const tabs = [
+    { id: 'canvas', label: '画布主页' },
+    { id: 'zoom', label: '相册缩放' },
+    { id: 'ai', label: 'AI 对话' },
+    { id: 'background', label: '背景层' },
+    { id: 'popup', label: '弹出层' },
+  ];
+  return (
+    <header style={canvasStyles.headerBar}>
+      <div style={{ maxWidth: 1440, margin: '0 auto', padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+          <span style={canvasStyles.brandTitle}>Daily</span>
+          <span style={canvasStyles.brandSub}>画布 · 三层模型</span>
+        </div>
+        <nav style={{ display: 'flex', gap: 4 }} className="responsive-hide-sm">
+          {tabs.map(t => (
+            <button
+              key={t.id}
+              onClick={() => onTabChange(t.id)}
+              className={`btn-ghost ${activeTab === t.id ? 'tab-active' : ''}`}
+              style={{ ...canvasStyles.tabBtn, color: activeTab === t.id ? 'var(--accent)' : 'var(--text-secondary)', borderBottomColor: activeTab === t.id ? 'var(--accent)' : 'transparent' }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+    </header>
+  );
+};
+
+/* ========= 时钟组件 ========= */
+const Clock = ({ size = 'normal' }) => {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  const ss = String(now.getSeconds()).padStart(2, '0');
+  const dateStr = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`;
+  const weekday = ['日', '一', '二', '三', '四', '五', '六'][now.getDay()];
+  if (size === 'large') {
+    return (
+      <div style={{ textAlign: 'center', color: '#fff' }}>
+        <div className="font-display" style={{ fontSize: 72, fontWeight: 500, lineHeight: 1, letterSpacing: '-0.02em', textShadow: '0 2px 12px rgba(0,0,0,0.3)' }}>
+          {hh}<span style={{ opacity: 0.7 }}>:</span>{mm}
+        </div>
+        <div style={{ marginTop: 8, fontSize: 14, opacity: 0.85, letterSpacing: '0.05em' }}>
+          {dateStr} · 星期{weekday}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ fontFamily: "'SF Mono', Menlo, monospace", fontSize: 13, color: 'var(--text-secondary)' }}>
+      <span style={{ fontSize: 16, color: 'var(--text-primary)', fontWeight: 500 }}>{hh}:{mm}</span>
+      <span style={{ marginLeft: 6, opacity: 0.6 }}>:{ss}</span>
+    </div>
+  );
+};
+
+/* ========= 拖拽 Widget ========= */
+const DraggableWidget = ({ id, initial, title, icon, children, width = 240, height = 180 }) => {
+  const [pos, setPos] = useState({ x: initial.x, y: initial.y });
+  const [dragging, setDragging] = useState(false);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const dragRef = useRef(null);
+
+  const onMouseDown = (e) => {
+    setDragging(true);
+    const rect = dragRef.current.getBoundingClientRect();
+    setOffset({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+  };
+
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e) => {
+      const parent = dragRef.current.parentElement.getBoundingClientRect();
+      const nx = Math.max(0, Math.min(parent.width - width, e.clientX - parent.left - offset.x));
+      const ny = Math.max(0, Math.min(parent.height - height, e.clientY - parent.top - offset.y));
+      setPos({ x: nx, y: ny });
+    };
+    const onUp = () => setDragging(false);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [dragging, offset, width, height]);
+
+  return (
+    <div
+      ref={dragRef}
+      className={`widget-card ${dragging ? 'dragging' : ''}`}
+      style={{
+        position: 'absolute', left: pos.x, top: pos.y, width, height,
+        ...widgetStyles.cardBase, display: 'flex', flexDirection: 'column',
+        zIndex: dragging ? 30 : 20,
+      }}
+    >
+      <div style={widgetStyles.cardHeader} onMouseDown={onMouseDown}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Icon name={icon} size={13} color="var(--accent)" />
+          <span style={{ fontFamily: "'Newsreader', Georgia, serif", fontStyle: 'italic' }}>{title}</span>
+        </span>
+        <span style={{ fontSize: 10, color: 'var(--text-light)', letterSpacing: '0.08em' }}>iframe</span>
+      </div>
+      <div style={{ ...widgetStyles.cardBody, flex: 1, overflow: 'auto' }}>
+        {children}
+      </div>
+    </div>
+  );
+};
+
+/* ========= 计算器内容 ========= */
+const CalculatorContent = () => {
+  const [display, setDisplay] = useState('0');
+  const [expr, setExpr] = useState('');
+  const press = (k) => {
+    if (k === 'C') { setDisplay('0'); setExpr(''); return; }
+    if (k === '=') {
+      try {
+        const r = Function('"use strict";return (' + (expr || display).replace(/×/g,'*').replace(/÷/g,'/') + ')')();
+        setDisplay(String(r)); setExpr('');
+      } catch { setDisplay('错误'); }
+      return;
+    }
+    const next = (expr === '' && display !== '0' ? display : expr) + k;
+    setExpr(next); setDisplay(next);
+  };
+  const keys = ['7','8','9','÷','4','5','6','×','1','2','3','-','0','.','=','+'];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ background: 'var(--accent-light)', padding: '8px 10px', borderRadius: 4, marginBottom: 8, textAlign: 'right' }}>
+        <div className="font-mono" style={{ fontSize: 11, color: 'var(--text-light)', minHeight: 14 }}>{expr || '\u00A0'}</div>
+        <div className="font-mono" style={{ fontSize: 18, fontWeight: 600, color: 'var(--accent)' }}>{display}</div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 4, flex: 1 }}>
+        {keys.map(k => (
+          <button key={k} onClick={() => press(k)} className="btn-ghost"
+            style={{ padding: '6px 0', fontSize: 13, border: '1px solid var(--border)', borderRadius: 4, background: k === '=' ? 'var(--accent)' : '#fff', color: k === '=' ? '#fff' : 'var(--text-primary)', fontWeight: 500 }}>
+            {k}
+          </button>
+        ))}
+        <button onClick={() => press('C')} className="btn-ghost" style={{ gridColumn: 'span 4', padding: '4px 0', fontSize: 12, color: 'var(--text-secondary)' }}>清除 C</button>
+      </div>
+    </div>
+  );
+};
+
+/* ========= 记事本内容 ========= */
+const NotepadContent = () => {
+  const [text, setText] = useState('今天的待办：\n· 完成 Daily 画布原型\n· 复习三层模型\n· 整理组件类型');
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <textarea
+        value={text}
+        onChange={e => setText(e.target.value)}
+        style={{ flex: 1, width: '100%', border: 'none', resize: 'none', fontFamily: 'inherit', fontSize: 13, color: 'var(--text-primary)', background: 'transparent', padding: 0 }}
+        placeholder="写点什么..."
+      />
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 6, marginTop: 6, fontSize: 11, color: 'var(--text-light)', display: 'flex', justifyContent: 'space-between' }}>
+        <span>{text.length} 字</span>
+        <span>自动保存</span>
+      </div>
+    </div>
+  );
+};
+
+/* ========= 天气卡片内容 ========= */
+const WeatherContent = () => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%' }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div>
+        <div className="font-display" style={{ fontSize: 32, fontWeight: 500, color: 'var(--accent)', lineHeight: 1 }}>23°</div>
+        <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>多云转晴</div>
+      </div>
+      <Icon name="cloud" size={36} color="var(--accent)" />
+    </div>
+    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-light)', borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+      <span>湿度 62%</span>
+      <span>风 2级</span>
+      <span>PM2.5 38</span>
+    </div>
+  </div>
+);
+
+/* ========= AI 浮球 ========= */
+const AIFloatingBall = ({ onToggle, expanded }) => (
+  <div style={{ position: 'fixed', right: 28, bottom: 28, zIndex: 200, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
+    {expanded && (
+      <div className="bubble-in" style={{
+        background: 'var(--bg-card)', borderRadius: 12, padding: 14,
+        width: 280, boxShadow: '0 12px 32px var(--shadow-hover)',
+        border: '1px solid var(--border)',
+      }}>
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>AI 助手 · Daily</div>
+        <div className="font-display" style={{ fontSize: 14, fontStyle: 'italic', color: 'var(--text-primary)', lineHeight: 1.5 }}>
+          「需要我帮你创建一个组件吗？」
+        </div>
+        <div style={{ marginTop: 10, display: 'flex', gap: 6 }}>
+          <input placeholder="说点什么..." style={{ flex: 1, border: '1px solid var(--border)', borderRadius: 4, padding: '6px 8px', fontSize: 12 }} />
+          <button className="btn-primary" style={{ padding: '6px 10px' }}><Icon name="send" size={12} color="#fff" /></button>
+        </div>
+      </div>
+    )}
+    <button
+      onClick={onToggle}
+      className="ai-ball"
+      style={{
+        width: 56, height: 56, borderRadius: '50%',
+        background: 'var(--accent)', border: 'none', cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        position: 'relative',
+      }}
+      aria-label="AI 助手"
+    >
+      <Icon name="sparkle" size={24} color="#fff" />
+      <span style={{
+        position: 'absolute', top: -4, right: -4, width: 10, height: 10,
+        borderRadius: '50%', background: '#E8F0EC', border: '2px solid var(--accent)',
+      }} />
+    </button>
+  </div>
+);
+
+/* ========= 雨滴背景特效 ========= */
+const RainEffect = ({ count = 40, opacity = 0.5 }) => {
+  const drops = useMemo(() => Array.from({ length: count }).map((_, i) => ({
+    id: i,
+    left: Math.random() * 100,
+    height: 40 + Math.random() * 60,
+    duration: 0.6 + Math.random() * 0.8,
+    delay: Math.random() * 2,
+  })), [count]);
+  return (
+    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', opacity }}>
+      {drops.map(d => (
+        <div key={d.id} className="rain-line" style={{
+          left: `${d.left}%`, height: d.height,
+          animationDuration: `${d.duration}s`, animationDelay: `${d.delay}s`,
+        }} />
+      ))}
+    </div>
+  );
+};
+
+/* ========= 浮动装饰（自由 HTML 组件示例） ========= */
+const FloatingDeco = () => (
+  <div className="float-deco" style={{
+    position: 'absolute', right: '18%', top: '20%',
+    width: 60, height: 60, borderRadius: '50%',
+    background: 'radial-gradient(circle at 30% 30%, rgba(232,240,236,0.9), rgba(45,95,78,0.15))',
+    border: '1px solid rgba(45,95,78,0.2)',
+    pointerEvents: 'none',
+  }} />
+);
+
+/* ========= 视图1：画布主页 ========= */
+const CanvasView = () => {
+  const [showLogin, setShowLogin] = useState(true);
+  const [ballOpen, setBallOpen] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState('mid');
+  const canvasRef = useRef(null);
+  const bgImg = 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=serene%20mountain%20landscape%20soft%20light&image_size=landscape_16_9';
+
+  const zoomScale = zoomLevel === 'max' ? 1.15 : zoomLevel === 'min' ? 0.7 : 1;
+
+  return (
+    <div style={{ position: 'relative', minHeight: 'calc(100vh - 57px)' }}>
+      {/* 顶部工具栏 */}
+      <div style={{
+        position: 'absolute', top: 16, left: 16, zIndex: 60,
+        display: 'flex', gap: 8, alignItems: 'center',
+        background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(10px)',
+        borderRadius: 8, padding: '6px 8px', border: '1px solid var(--border)',
+        boxShadow: '0 2px 8px var(--shadow-base)',
+      }}>
+        <span style={{ fontSize: 11, color: 'var(--text-light)', padding: '0 6px', letterSpacing: '0.08em' }}>缩放</span>
+        <button className="btn-ghost" style={{ ...btnStyles.icon, background: zoomLevel === 'max' ? 'var(--accent-light)' : '#fff', color: zoomLevel === 'max' ? 'var(--accent)' : 'var(--text-secondary)' }} onClick={() => setZoomLevel('max')} title="最大档"><Icon name="zoomMax" size={15} /></button>
+        <button className="btn-ghost" style={{ ...btnStyles.icon, background: zoomLevel === 'mid' ? 'var(--accent-light)' : '#fff', color: zoomLevel === 'mid' ? 'var(--accent)' : 'var(--text-secondary)' }} onClick={() => setZoomLevel('mid')} title="中档"><Icon name="grid" size={15} /></button>
+        <button className="btn-ghost" style={{ ...btnStyles.icon, background: zoomLevel === 'min' ? 'var(--accent-light)' : '#fff', color: zoomLevel === 'min' ? 'var(--accent)' : 'var(--text-secondary)' }} onClick={() => setZoomLevel('min')} title="最小档"><Icon name="zoomOut" size={15} /></button>
+        <span style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 4px' }} />
+        <button className="btn-ghost" style={btnStyles.icon} title="上传组件"><Icon name="upload" size={15} /></button>
+        <button className="btn-ghost" style={btnStyles.icon} title="面板切换"><Icon name="panel" size={15} /></button>
+      </div>
+
+      {/* 三层标识 */}
+      <div style={{ position: 'absolute', top: 16, right: 16, zIndex: 60, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 10, color: 'var(--text-light)', background: 'rgba(255,255,255,0.85)', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)' }}>
+        <div style={{ fontWeight: 600, color: 'var(--text-secondary)', letterSpacing: '0.1em' }}>三层模型</div>
+        <div>① 背景层 · 始终存在</div>
+        <div>② 组件层 · 参与缩放</div>
+        <div>③ 弹出层 · 临时</div>
+      </div>
+
+      {/* 背景层 */}
+      <div style={{ position: 'absolute', inset: 0, zIndex: 0, overflow: 'hidden' }}>
+        <img src={bgImg} alt="背景" style={{ width: '100%', height: '100%', objectFit: 'cover', filter: 'brightness(0.85)' }} onError={(e) => { e.target.style.display = 'none'; }} />
+        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.35) 100%)' }} />
+        {/* 时钟（背景层基础组件） */}
+        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 1 }}>
+          <Clock size="large" />
+        </div>
+      </div>
+
+      {/* 组件层 */}
+      <div ref={canvasRef} style={{ position: 'absolute', inset: 0, zIndex: 10, transform: `scale(${zoomScale})`, transformOrigin: 'center center', transition: 'transform 320ms cubic-bezier(0.22,1,0.36,1)' }}>
+        <DraggableWidget id="calc" initial={{ x: 80, y: 120 }} title="计算器" icon="calc" width={220} height={240}>
+          <CalculatorContent />
+        </DraggableWidget>
+        <DraggableWidget id="note" initial={{ x: 330, y: 140 }} title="记事本" icon="note" width={240} height={200}>
+          <NotepadContent />
+        </DraggableWidget>
+        <DraggableWidget id="weather" initial={{ x: 620, y: 100 }} title="天气" icon="cloud" width={200} height={150}>
+          <WeatherContent />
+        </DraggableWidget>
+        <DraggableWidget id="note2" initial={{ x: 870, y: 180 }} title="便签" icon="note" width={200} height={140}>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            <div className="font-display" style={{ fontStyle: 'italic', marginBottom: 6, color: 'var(--accent)' }}>「日积月累」</div>
+            每天前进一小步，比一次迈一大步更稳。
+          </div>
+        </DraggableWidget>
+
+        {/* 自由 HTML 组件：下雨特效 */}
+        <RainEffect count={30} opacity={0.4} />
+        {/* 自由 HTML 组件：浮动装饰 */}
+        <FloatingDeco />
+      </div>
+
+      {/* 弹出层：登录弹窗 */}
+      {showLogin && (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 150, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowLogin(false)}>
+          <div onClick={e => e.stopPropagation()} className="bubble-in" style={{ background: 'var(--bg-card)', borderRadius: 12, width: 360, padding: 28, boxShadow: '0 24px 60px rgba(0,0,0,0.25)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
+              <div>
+                <div className="font-display" style={{ fontSize: 22, fontWeight: 500, color: 'var(--text-primary)' }}>登录到 Daily</div>
+                <div style={{ fontSize: 12, color: 'var(--text-light)', marginTop: 4 }}>登录后可同步你的画布</div>
+              </div>
+              <button className="btn-ghost" style={btnStyles.icon} onClick={() => setShowLogin(false)}><Icon name="close" size={14} /></button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>用户名</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--border)', borderRadius: 4, padding: '0 10px' }}>
+                  <Icon name="user" size={14} color="var(--text-light)" />
+                  <input style={{ flex: 1, border: 'none', padding: '8px 0', fontSize: 13, background: 'transparent' }} placeholder="输入用户名" defaultValue="daily_user" />
+                </div>
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>密码</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--border)', borderRadius: 4, padding: '0 10px' }}>
+                  <Icon name="lock" size={14} color="var(--text-light)" />
+                  <input type="password" style={{ flex: 1, border: 'none', padding: '8px 0', fontSize: 13, background: 'transparent' }} placeholder="输入密码" defaultValue="••••••••" />
+                </div>
+              </div>
+              <button className="btn-primary" style={{ ...btnStyles.primary, marginTop: 6, padding: '10px' }} onClick={() => setShowLogin(false)}>登录</button>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-light)' }}>
+                <span style={{ cursor: 'pointer' }}>忘记密码</span>
+                <span style={{ cursor: 'pointer', color: 'var(--accent)' }}>注册新账号</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 重新打开弹窗按钮 */}
+      {!showLogin && (
+        <button className="btn-ghost" onClick={() => setShowLogin(true)} style={{ position: 'absolute', bottom: 24, left: 24, zIndex: 60, ...btnStyles.ghost, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Icon name="lock" size={13} /> 显示登录弹窗
+        </button>
+      )}
+
+      {/* AI 浮球 */}
+      <AIFloatingBall expanded={ballOpen} onToggle={() => setBallOpen(!ballOpen)} />
+    </div>
+  );
+};
+
+/* ========= 视图2：相册缩放三档 ========= */
+const ZoomView = () => {
+  const [activeLevel, setActiveLevel] = useState('mid');
+  const widgetIcons = [
+    { name: 'calc', label: '计算器', color: 'var(--accent)' },
+    { name: 'note', label: '记事本', color: '#8B6F47' },
+    { name: 'cloud', label: '天气', color: '#5B7C99' },
+    { name: 'sparkle', label: 'AI', color: '#A07BAA' },
+    { name: 'panel', label: '面板', color: '#6B8E5A' },
+    { name: 'user', label: '个人', color: '#B8763E' },
+  ];
+
+  const Column = ({ level, title, desc, isActive, onClick }) => {
+    const cards = widgetIcons.map((w, i) => ({ ...w, i }));
+    return (
+      <div onClick={onClick} style={{
+        flex: 1, minWidth: 260, cursor: 'pointer',
+        border: isActive ? '2px solid var(--accent)' : '2px solid transparent',
+        borderRadius: 10, padding: 16, background: 'var(--bg-card)',
+        transition: 'border-color 200ms ease, box-shadow 200ms ease',
+        boxShadow: isActive ? '0 8px 24px var(--shadow-hover)' : '0 2px 8px var(--shadow-base)',
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <div>
+            <div className="font-display" style={{ fontSize: 18, fontWeight: 500 }}>{title}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-light)', marginTop: 2 }}>{desc}</div>
+          </div>
+          {isActive && <span style={{ fontSize: 10, color: 'var(--accent)', background: 'var(--accent-light)', padding: '2px 8px', borderRadius: 10, letterSpacing: '0.08em' }}>当前</span>}
+        </div>
+        <div style={{ flex: 1, minHeight: 320, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12, background: 'var(--bg-warm)', borderRadius: 6, border: '1px dashed var(--border)' }}>
+          {level === 'max' && (
+            <div className="zoom-card" style={{ width: '100%', height: 280, background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', boxShadow: '0 6px 18px var(--shadow-base)' }}>
+              <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Icon name={widgetIcons[0].name} size={14} color={widgetIcons[0].color} />
+                <span style={{ fontSize: 12, fontFamily: "'Newsreader', serif", fontStyle: 'italic' }}>{widgetIcons[0].label}</span>
+              </div>
+              <div style={{ flex: 1, padding: 16, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: 12 }}>
+                <Icon name={widgetIcons[0].name} size={48} color={widgetIcons[0].color} />
+                <div className="font-display" style={{ fontSize: 16, fontStyle: 'italic', color: 'var(--text-secondary)' }}>单个组件占满全屏</div>
+              </div>
+            </div>
+          )}
+          {level === 'mid' && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, width: '100%' }}>
+              {cards.map(c => (
+                <div key={c.i} className="zoom-card" style={{ background: 'var(--bg-card)', borderRadius: 6, border: '1px solid var(--border)', padding: 10, height: 100, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                  <Icon name={c.name} size={22} color={c.color} />
+                  <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{c.label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {level === 'min' && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8, width: '100%' }}>
+              {cards.map(c => (
+                <div key={c.i} className="zoom-card" style={{ background: 'var(--bg-card)', borderRadius: 6, border: '1px solid var(--border)', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name={c.name} size={16} color={c.color} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ maxWidth: 1440, margin: '0 auto', padding: '32px 24px' }}>
+      <div style={{ marginBottom: 24 }}>
+        <h1 className="font-display" style={{ fontSize: 32, fontWeight: 500, color: 'var(--text-primary)', margin: 0 }}>相册缩放 · 三档</h1>
+        <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginTop: 8, maxWidth: 680 }}>
+          滚轮吸附 + 工具栏按钮切换。缩放时<span style={{ color: 'var(--accent)' }}>大的先缩小</span>，保证整体协调。最小档卸载 iframe 只显图标，节省性能。
+        </p>
+      </div>
+      <div style={{ display: 'flex', gap: 16, marginBottom: 24 }} className="responsive-row">
+        <Column level="max" title="最大档" desc="单个组件占满全屏" isActive={activeLevel === 'max'} onClick={() => setActiveLevel('max')} />
+        <Column level="mid" title="中档" desc="组件并列网格布局" isActive={activeLevel === 'mid'} onClick={() => setActiveLevel('mid')} />
+        <Column level="min" title="最小档" desc="只显示图标" isActive={activeLevel === 'min'} onClick={() => setActiveLevel('min')} />
+      </div>
+      <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: 16, border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+        <div className="font-display" style={{ fontSize: 14, fontStyle: 'italic', color: 'var(--accent)', marginBottom: 6 }}>设计要点</div>
+        · 档位触发值用户可调（如 zoom &gt; 2.0 为最大档，zoom &lt; 0.4 为最小档）<br/>
+        · 无论自由组件还是 iframe widget，都按大小决定怎么缩放<br/>
+        · 背景层不参与相册缩放，始终保持原样
+      </div>
+    </div>
+  );
+};
+
+/* ========= 视图3：AI 对话两种形态 ========= */
+const AIChatView = () => {
+  const [mode, setMode] = useState('ball'); // ball | taskbar
+  const [ballOpen, setBallOpen] = useState(false);
+
+  const conversation = [
+    { role: 'user', text: '帮我做一个计算器' },
+    { role: 'ai', text: '好的，我帮你创建一个计算器组件，放在画布右上角。它支持加减乘除、小数运算和清除操作。你需要哪些额外功能？' },
+    { role: 'user', text: '加个历史记录' },
+    { role: 'ai', text: '已添加。历史记录会显示在计算器底部，可展开查看。组件已就绪，你可以拖动调整位置。' },
+  ];
+
+  return (
+    <div style={{ maxWidth: 1440, margin: '0 auto', padding: '32px 24px' }}>
+      <div style={{ marginBottom: 24 }}>
+        <h1 className="font-display" style={{ fontSize: 32, fontWeight: 500, color: 'var(--text-primary)', margin: 0 }}>AI 对话 · 两种形态</h1>
+        <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginTop: 8, maxWidth: 680 }}>
+          浮球始终置顶，不挡内容；底部任务栏适合长对话。两者可一键切换。
+        </p>
+      </div>
+
+      {/* 切换按钮 */}
+      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
+        <div style={{ display: 'inline-flex', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: 4 }}>
+          <button onClick={() => setMode('ball')} className="btn-ghost" style={{ padding: '8px 16px', fontSize: 13, borderRadius: 6, background: mode === 'ball' ? 'var(--accent)' : 'transparent', color: mode === 'ball' ? '#fff' : 'var(--text-secondary)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Icon name="sparkle" size={14} color={mode === 'ball' ? '#fff' : 'var(--text-secondary)'} /> 浮球形态
+          </button>
+          <button onClick={() => setMode('taskbar')} className="btn-ghost" style={{ padding: '8px 16px', fontSize: 13, borderRadius: 6, background: mode === 'taskbar' ? 'var(--accent)' : 'transparent', color: mode === 'taskbar' ? '#fff' : 'var(--text-secondary)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Icon name="chat" size={14} color={mode === 'taskbar' ? '#fff' : 'var(--text-secondary)'} /> 底部任务栏
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }} className="responsive-col-3">
+        {/* 左：浮球形态展示 */}
+        <div style={{ background: 'var(--bg-card)', borderRadius: 12, border: '1px solid var(--border)', overflow: 'hidden', minHeight: 480, position: 'relative' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <div className="font-display" style={{ fontSize: 16, fontWeight: 500 }}>浮球形态</div>
+              <div style={{ fontSize: 11, color: 'var(--text-light)' }}>小圆形 · 始终置顶 · 点击展开</div>
+            </div>
+            <span style={{ fontSize: 10, color: mode === 'ball' ? 'var(--accent)' : 'var(--text-light)', letterSpacing: '0.08em' }}>{mode === 'ball' ? '● 当前' : '参考'}</span>
+          </div>
+          <div style={{ position: 'relative', height: 420, background: 'var(--bg-warm)', overflow: 'hidden' }}>
+            {/* 模拟画布内容 */}
+            <div style={{ padding: 24 }}>
+              <div className="font-display" style={{ fontSize: 14, fontStyle: 'italic', color: 'var(--text-light)' }}>画布区域 · 内容不被遮挡</div>
+              <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {[1,2,3,4].map(i => <div key={i} style={{ height: 60, background: 'var(--bg-card)', borderRadius: 6, border: '1px solid var(--border)' }} />)}
+              </div>
+            </div>
+            {/* 浮球 */}
+            <div style={{ position: 'absolute', right: 20, bottom: 20, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
+              {ballOpen && (
+                <div className="bubble-in" style={{ background: '#fff', borderRadius: 10, padding: 12, width: 240, boxShadow: '0 12px 32px var(--shadow-hover)', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-light)', marginBottom: 6 }}>AI 助手</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-primary)', lineHeight: 1.5 }}>「需要我帮你创建一个组件吗？」</div>
+                </div>
+              )}
+              <button onClick={() => setBallOpen(!ballOpen)} className="ai-ball" style={{ width: 48, height: 48, borderRadius: '50%', background: 'var(--accent)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name={ballOpen ? 'close' : 'sparkle'} size={20} color="#fff" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* 右：底部任务栏形态展示 */}
+        <div style={{ background: 'var(--bg-card)', borderRadius: 12, border: '1px solid var(--border)', overflow: 'hidden', minHeight: 480, position: 'relative' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <div className="font-display" style={{ fontSize: 16, fontWeight: 500 }}>底部任务栏</div>
+              <div style={{ fontSize: 11, color: 'var(--text-light)' }}>椭圆发送框 · 气泡在右下角</div>
+            </div>
+            <span style={{ fontSize: 10, color: mode === 'taskbar' ? 'var(--accent)' : 'var(--text-light)', letterSpacing: '0.08em' }}>{mode === 'taskbar' ? '● 当前' : '参考'}</span>
+          </div>
+          <div style={{ position: 'relative', height: 420, background: 'var(--bg-warm)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ flex: 1, padding: 16, overflow: 'auto' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-light)', marginBottom: 12 }}>画布内容区</div>
+              {/* 对话气泡 */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 320, marginLeft: 'auto' }}>
+                {conversation.map((m, i) => (
+                  <div key={i} className="bubble-in" style={{
+                    alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
+                    background: m.role === 'user' ? 'var(--accent)' : 'var(--bg-card)',
+                    color: m.role === 'user' ? '#fff' : 'var(--text-primary)',
+                    padding: '8px 12px', borderRadius: m.role === 'user' ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
+                    fontSize: 12, lineHeight: 1.5, border: m.role === 'user' ? 'none' : '1px solid var(--border)',
+                    boxShadow: '0 2px 6px var(--shadow-base)',
+                  }}>
+                    {m.text}
+                  </div>
+                ))}
+              </div>
+            </div>
+            {/* 底部任务栏 */}
+            <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: 'var(--bg-warm)', borderRadius: 24, padding: '6px 6px 6px 16px', border: '1px solid var(--border)' }}>
+                <input placeholder="输入消息..." style={{ flex: 1, border: 'none', background: 'transparent', fontSize: 13, color: 'var(--text-primary)' }} />
+                <button className="btn-primary" style={{ width: 32, height: 32, borderRadius: '50%', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none' }}>
+                  <Icon name="send" size={14} color="#fff" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ========= 视图4：背景层示例 ========= */
+const BackgroundView = () => {
+  const bgImg = 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=peaceful%20forest%20morning%20mist%20soft%20green&image_size=landscape_16_9';
+  return (
+    <div style={{ maxWidth: 1440, margin: '0 auto', padding: '32px 24px' }}>
+      <div style={{ marginBottom: 24 }}>
+        <h1 className="font-display" style={{ fontSize: 32, fontWeight: 500, color: 'var(--text-primary)', margin: 0 }}>背景层 · 始终存在</h1>
+        <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginTop: 8, maxWidth: 680 }}>
+          背景层在画布最底，AI 可控：上传图片、加特效、放基础组件。<span style={{ color: 'var(--accent)' }}>不随相册缩放消失</span>。
+        </p>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateRows: 'auto auto', gap: 20 }}>
+        {/* 上：图片背景 */}
+        <div style={{ position: 'relative', height: 320, borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border)' }}>
+          <img src={bgImg} alt="背景图片" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.target.style.background = 'linear-gradient(135deg, #2D5F4E, #244D3E)'; }} />
+          <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, transparent 40%, rgba(0,0,0,0.5) 100%)' }} />
+          {/* 基础组件：时钟 */}
+          <div style={{ position: 'absolute', top: 24, left: 24 }}>
+            <Clock size="large" />
+          </div>
+          <div style={{ position: 'absolute', bottom: 20, left: 24, color: '#fff' }}>
+            <div style={{ fontSize: 11, opacity: 0.8, letterSpacing: '0.1em' }}>背景层 · 图片背景</div>
+            <div className="font-display" style={{ fontSize: 18, fontWeight: 500, marginTop: 4 }}>AI 可上传任意图片作为画布背景</div>
+          </div>
+          <div style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.9)', padding: '8px 12px', borderRadius: 6, fontSize: 11, color: 'var(--text-secondary)' }}>
+            <Icon name="info" size={12} color="var(--accent)" /> 始终在最底层
+          </div>
+        </div>
+
+        {/* 下：特效背景 */}
+        <div style={{ position: 'relative', height: 320, borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border)', background: 'linear-gradient(180deg, #1a2e26 0%, #2D5F4E 100%)' }}>
+          {/* 下雨特效 */}
+          <RainEffect count={60} opacity={0.6} />
+          {/* 基础组件 */}
+          <div style={{ position: 'absolute', top: 24, left: 24, zIndex: 2, color: '#fff' }}>
+            <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: '0.1em' }}>背景层 · 特效背景</div>
+            <div className="font-display" style={{ fontSize: 24, fontWeight: 500, marginTop: 6 }}>下雨了</div>
+            <div style={{ fontSize: 13, opacity: 0.8, marginTop: 4 }}>AI 可添加任意 CSS 动画特效</div>
+          </div>
+          {/* 天气信息卡 */}
+          <div style={{ position: 'absolute', bottom: 24, right: 24, background: 'rgba(255,255,255,0.12)', backdropFilter: 'blur(12px)', borderRadius: 8, padding: 16, color: '#fff', border: '1px solid rgba(255,255,255,0.2)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Icon name="cloud" size={28} color="#fff" />
+              <div>
+                <div className="font-display" style={{ fontSize: 24, fontWeight: 500 }}>18°</div>
+                <div style={{ fontSize: 11, opacity: 0.8 }}>小雨 · 湿度 78%</div>
+              </div>
+            </div>
+          </div>
+          {/* 时钟 */}
+          <div style={{ position: 'absolute', bottom: 24, left: 24, zIndex: 2 }}>
+            <Clock size="large" />
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 20, background: 'var(--bg-card)', borderRadius: 8, padding: 16, border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+        <div className="font-display" style={{ fontSize: 14, fontStyle: 'italic', color: 'var(--accent)', marginBottom: 6 }}>背景层能力</div>
+        · 图片背景：AI 上传或用户上传<br/>
+        · 特效背景：下雨、下雪、粒子等 CSS 动画<br/>
+        · 基础组件：时钟、天气等始终可见的信息<br/>
+        · 不参与相册缩放，始终保持原样
+      </div>
+    </div>
+  );
+};
+
+/* ========= 视图5：弹出层示例 ========= */
+const PopupView = () => {
+  const [popups, setPopups] = useState({ login: true, guide: false, ad: false });
+
+  const PopupCard = ({ id, title, desc, trigger, children, accentColor }) => (
+    <div style={{ background: 'var(--bg-card)', borderRadius: 10, border: '1px solid var(--border)', overflow: 'hidden' }}>
+      <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div className="font-display" style={{ fontSize: 16, fontWeight: 500 }}>{title}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-light)', marginTop: 2 }}>{desc}</div>
+        </div>
+        <span style={{ fontSize: 10, color: accentColor, background: 'var(--accent-light)', padding: '3px 8px', borderRadius: 10, letterSpacing: '0.05em' }}>{trigger}</span>
+      </div>
+      <div style={{ padding: 16, minHeight: 140 }}>
+        {children}
+      </div>
+      <div style={{ padding: '8px 16px', borderTop: '1px solid var(--border)', background: 'var(--bg-warm)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 11, color: 'var(--text-light)' }}>{popups[id] ? '已弹出' : '已关闭'}</span>
+        <button className="btn-ghost" style={{ fontSize: 11, padding: '4px 10px', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', background: 'transparent', color: 'var(--accent)' }} onClick={() => setPopups(p => ({ ...p, [id]: !p[id] }))}>
+          {popups[id] ? '关闭' : '弹出'}
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ maxWidth: 1440, margin: '0 auto', padding: '32px 24px' }}>
+      <div style={{ marginBottom: 24 }}>
+        <h1 className="font-display" style={{ fontSize: 32, fontWeight: 500, color: 'var(--text-primary)', margin: 0 }}>弹出层 · 全功能触发</h1>
+        <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginTop: 8, maxWidth: 680 }}>
+          弹出层在画布最上，临时出现用完消失。支持<span style={{ color: 'var(--accent)' }}>进入时 / 条件 / 定时 / 手动</span>四种触发。
+        </p>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }} className="responsive-col-3">
+        <PopupCard id="login" title="登录窗口" desc="用户名密码 + 登录按钮" trigger="条件触发" accentColor="var(--accent)">
+          {popups.login ? (
+            <div className="bubble-in" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--border)', borderRadius: 4, padding: '0 8px' }}>
+                <Icon name="user" size={12} color="var(--text-light)" />
+                <input style={{ flex: 1, border: 'none', padding: '6px 0', fontSize: 12 }} placeholder="用户名" defaultValue="daily_user" />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--border)', borderRadius: 4, padding: '0 8px' }}>
+                <Icon name="lock" size={12} color="var(--text-light)" />
+                <input type="password" style={{ flex: 1, border: 'none', padding: '6px 0', fontSize: 12 }} placeholder="密码" defaultValue="••••••" />
+              </div>
+              <button className="btn-primary" style={{ ...btnStyles.primary, padding: '6px', fontSize: 12 }}>登录</button>
+            </div>
+          ) : <div style={{ color: 'var(--text-light)', fontSize: 12, textAlign: 'center', paddingTop: 40 }}>窗口已关闭</div>}
+        </PopupCard>
+
+        <PopupCard id="guide" title="引导提示" desc="新手引导步骤" trigger="进入时触发" accentColor="#5B7C99">
+          {popups.guide ? (
+            <div className="bubble-in">
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>欢迎使用 Daily，三步上手：</div>
+              {['拖拽组件到画布', '滚轮缩放查看', '点击浮球对话 AI'].map((s, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: 12 }}>
+                  <span style={{ width: 18, height: 18, borderRadius: '50%', background: 'var(--accent-light)', color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 600 }}>{i + 1}</span>
+                  {s}
+                </div>
+              ))}
+              <button className="btn-primary" style={{ ...btnStyles.primary, marginTop: 8, padding: '4px', fontSize: 11 }}>下一步</button>
+            </div>
+          ) : <div style={{ color: 'var(--text-light)', fontSize: 12, textAlign: 'center', paddingTop: 40 }}>引导已完成</div>}
+        </PopupCard>
+
+        <PopupCard id="ad" title="广告弹窗" desc="可关闭的推广内容" trigger="定时触发" accentColor="#B8763E">
+          {popups.ad ? (
+            <div className="bubble-in" style={{ position: 'relative' }}>
+              <button onClick={() => setPopups(p => ({ ...p, ad: false }))} style={{ position: 'absolute', top: -8, right: -8, width: 20, height: 20, borderRadius: '50%', background: 'var(--bg-card)', border: '1px solid var(--border)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="close" size={10} color="var(--text-secondary)" />
+              </button>
+              <div style={{ background: 'linear-gradient(135deg, var(--accent-light), #fff)', borderRadius: 6, padding: 14, textAlign: 'center' }}>
+                <Icon name="sparkle" size={24} color="var(--accent)" />
+                <div className="font-display" style={{ fontSize: 14, fontWeight: 500, marginTop: 6, color: 'var(--accent)' }}>Daily Pro</div>
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.5 }}>解锁更多组件模板<br/>无限画布与高级 AI</div>
+                <button className="btn-primary" style={{ ...btnStyles.primary, marginTop: 8, padding: '4px 12px', fontSize: 11 }}>了解详情</button>
+              </div>
+            </div>
+          ) : <div style={{ color: 'var(--text-light)', fontSize: 12, textAlign: 'center', paddingTop: 40 }}>广告已关闭</div>}
+        </PopupCard>
+      </div>
+
+      <div style={{ marginTop: 20, background: 'var(--bg-card)', borderRadius: 8, padding: 16, border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+        <div className="font-display" style={{ fontSize: 14, fontStyle: 'italic', color: 'var(--accent)', marginBottom: 6 }}>触发方式</div>
+        · <strong style={{ color: 'var(--text-primary)' }}>进入时触发</strong>：第一次打开面板时<br/>
+        · <strong style={{ color: 'var(--text-primary)' }}>条件触发</strong>：未登录时、登录失效时、打开某东西时<br/>
+        · <strong style={{ color: 'var(--text-primary)' }}>定时触发</strong>：每过一段时间<br/>
+        · <strong style={{ color: 'var(--text-primary)' }}>手动触发</strong>：用户或 AI 主动调用<br/>
+        支持单次弹出 / 可重复弹出，多个弹出层可叠加
+      </div>
+    </div>
+  );
+};
+
+/* ========= 主 App ========= */
+const App = () => {
+  const [tab, setTab] = useState('canvas');
+  return (
+    <div style={canvasStyles.pageWrap}>
+      <Header activeTab={tab} onTabChange={setTab} />
+      {tab === 'canvas' && <CanvasView />}
+      {tab === 'zoom' && <ZoomView />}
+      {tab === 'ai' && <AIChatView />}
+      {tab === 'background' && <BackgroundView />}
+      {tab === 'popup' && <PopupView />}
+    </div>
+  );
+};
+
+/* 导出组件到 window（避免多 script 作用域不共享） */
+Object.assign(window, {
+  Header, Clock, DraggableWidget, CalculatorContent, NotepadContent,
+  WeatherContent, AIFloatingBall, RainEffect, FloatingDeco, Icon,
+  CanvasView, ZoomView, AIChatView, BackgroundView, PopupView, App,
+});
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

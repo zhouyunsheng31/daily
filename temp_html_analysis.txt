@@ -1,0 +1,1271 @@
+"""
+================================================================================
+Android WebView HTML 组件渲染异常 - 诊断分析报告
+================================================================================
+诊断时间: 2026-07-11
+设备: 431QHFFK224BC (Android 15, API 35)
+ADB: F:\Android SDK\platform-tools\adb.exe
+包名: com.livingdashboard
+数据库: living.db (Room v4, 表 widgets, 字段 state_json)
+
+================================================================================
+第一部分：App 的 HTML 渲染机制（关键背景）
+================================================================================
+
+文件: app/src/main/java/com/livingdashboard/ui/widget/HtmlCanvasWidget.kt
+行: 177-187
+
+App 的渲染逻辑是把 AI 生成的 HTML 直接嵌入 <body> 标签内：
+
+    val wrappedHtml = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+            <style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;box-sizing:border-box;}*{box-sizing:border-box;}</style>
+        </head>
+        <body>${html}</body>
+        </html>
+    """.trimIndent()
+    loadDataWithBaseURL("about:blank", wrappedHtml, "text/html", "UTF-8", null)
+
+★★★ 核心问题 #1：嵌套 HTML 文档 ★★★
+
+当 AI 生成的 HTML 是完整文档（包含 <!DOCTYPE html><html><head><body>）时，
+app 把它包裹在 <body>${html}</body> 里，会产生如下嵌套结构：
+
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta name="viewport" ...>
+        <style>html,body{...}</style>           ← app 的 CSS 重置
+    </head>
+    <body>
+    <!DOCTYPE html>                              ← 被浏览器忽略
+    <html>                                       ← 被忽略（已在 html 内）
+    <head>                                       ← 被忽略（head 已关闭）
+    <style>...</style>                           ← 作为 body 内 style 处理
+    </head>
+    <body>                                       ← 被忽略（已在 body 内）
+        ... 实际内容 ...
+    </body>
+    </html>
+    </body>
+    </html>
+
+虽然 HTML5 解析器能"修复"这种结构，但会导致：
+  - CSS 优先级混乱（app 的 reset CSS 和 AI 的 CSS 冲突时行为不可预测）
+  - <script> 执行时机问题（DOM 树可能和预期不同）
+  - 某些 WebView 版本的解析器行为不一致
+
+★★★ 核心问题 #2：JS 错误被静默吞掉 ★★★
+
+文件: HtmlCanvasWidget.kt 行 174
+    webChromeClient = WebChromeClient()
+
+App 使用默认的 WebChromeClient，没有覆盖 onConsoleMessage()。
+这意味着所有 JS 错误（TypeError、ReferenceError 等）和 console.log()
+都不会出现在 logcat 中，无法从外部诊断 JS 执行情况。
+
+================================================================================
+第二部分：时钟组件白屏分析
+================================================================================
+
+数据库中有 3 个时钟组件：
+
+┌───┬──────────────────────────┬──────────┬─────────────┬─────────────────────┐
+│ # │ id (前8位)               │ 尺寸 wxh │ HTML 类型   │ 关键 CSS            │
+├───┼──────────────────────────┼──────────┼─────────────┼─────────────────────┤
+│ 1 │ 56c6f38e (时钟)          │ 320x370  │ HTML 片段   │ .clock-container   │
+│   │                          │          │ (无 DOCTYPE)│ height:100%        │
+├───┼──────────────────────────┼──────────┼─────────────┼─────────────────────┤
+│ 2 │ 0c6b73ac (🕒 时钟)       │ 380x220  │ 完整文档    │ body height:100vh   │
+│   │                          │          │             │ -webkit-text-fill- │
+│   │                          │          │             │   color:transparent │
+│   │                          │          │             │ background-clip:text│
+├───┼──────────────────────────┼──────────┼─────────────┼─────────────────────┤
+│ 3 │ 908d3cd4 (🕰️ Clock)     │ 400x240  │ 完整文档    │ body height:100vh   │
+│   │                          │          │             │ ★多了一个 </div>    │
+└───┴──────────────────────────┴──────────┴─────────────┴─────────────────────┘
+
+-------- 白屏原因分析 --------
+
+★★ 原因 A：100vh 在 WebView 中行为异常（影响组件 #2 和 #3）★★
+
+组件 #2 和 #3 的 CSS:
+    body {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;          ← 问题在这里
+        overflow: hidden;
+    }
+
+在 Android WebView + loadDataWithBaseURL 场景中，100vh 的行为和桌面浏览器不同：
+  - vh 单位引用的是 layout viewport 高度
+  - 虽然 app 设置了 viewport meta (width=device-width)，但 height 可能不受此控制
+  - WebView 的 layout viewport 高度可能在初始加载时为 0 或一个很大的默认值
+  - 如果 100vh = 0，body 高度为 0，flex 居中的内容不可见
+  - 如果 100vh ≠ WebView 实际高度，内容可能被定位到可见区域外
+
+app 的 CSS 重置用的是 height:100%（百分比），这是相对于父元素的，更可靠。
+但 AI 生成的 CSS 用 height:100vh 覆盖了它，导致冲突。
+
+★★ 原因 B：嵌套 HTML 文档导致 CSS 解析异常（影响组件 #2 和 #3）★★
+
+组件 #2 和 #3 是完整 HTML 文档（<!DOCTYPE html><html><head><style>...）。
+被 app 包裹后形成嵌套结构（见核心问题 #1）。
+
+在嵌套结构中，AI 的 <style> 被放在 body 内（而非 head），虽然 HTML5 允许
+body 内的 <style>，但：
+  - CSS 层叠优先级可能和预期不同
+  - 某些 CSS 属性可能在 body 上下文中行为不同
+  - app 的 reset CSS（height:100%）和 AI 的 CSS（height:100vh）冲突时，
+    由于都在 body 内，优先级取决于声明顺序，行为不可预测
+
+★★ 原因 C：-webkit-text-fill-color: transparent 兼容性（影响组件 #2）★★
+
+组件 #2 的 CSS:
+    .time {
+        font-size: 64px;
+        background: linear-gradient(135deg, #f093fb, #f5576c, #4facfe);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;    ← 让文字变透明
+        background-clip: text;
+    }
+
+这段 CSS 的意图是用渐变背景作为文字颜色。但如果 WebView 不支持
+background-clip: text，文字会变成完全透明（不可见）。
+
+在 Android 15 (API 35) 的 WebView 中，-webkit-background-clip: text
+通常是支持的，但在某些 OEM 定制 ROM 上可能有问题。
+
+如果文字透明 + body 背景未渲染（100vh=0 导致 body 高度为 0），
+整个组件就显示为 WebView 的白色背景 → "完全白屏"。
+
+★★ 原因 D：HTML 结构错误（影响组件 #3）★★
+
+组件 #3 的 HTML 有一个多余的 </div> 标签：
+
+    <div class="clock-widget">
+      <div class="label">⏱ Digital Clock</div>
+      <div class="digits">...</div>
+      <div class="bottom">...</div>
+    </div>                         ← clock-widget 的闭合标签
+    <script>...</script>
+    </div>                         ← ★多余的 </div>！无对应的 <div>
+
+这会导致 HTML 解析器修复 DOM 树，后续内容（包括 </body></html>）
+可能被放在意想不到的位置，影响渲染。
+
+★★ 原因 E：JS 执行时机（影响所有组件）★★
+
+所有时钟组件的 JS 都在 <script> 标签内同步执行（无 defer/async）。
+
+组件 #1 的 JS:
+    (function() {
+      const hourHand = document.getElementById('hour');
+      ...
+      hourHand.style.transform = `translateX(-50%) rotate(${hourDeg}deg)`;
+      ...
+    })();
+
+如果 DOM 元素未就绪（getElementById 返回 null），
+hourHand.style.transform 会抛出 TypeError，脚本中断。
+但由于核心问题 #2（JS 错误被吞掉），这个错误不会被记录。
+
+不过组件 #1 的 <script> 在 <div> 之后，DOM 应该已解析前面的元素，
+所以这个原因可能性较低。
+
+-------- 白屏结论 --------
+
+最可能的原因组合：
+  1. height:100vh 在 WebView 中不等于 WebView 实际高度 → body 高度异常
+  2. 嵌套 HTML 文档导致 CSS 解析和层叠异常
+  3. -webkit-text-fill-color:transparent 让文字不可见（组件 #2）
+  4. app 的 WebChromeClient 没有捕获 JS 错误，无法诊断
+
+组件 #1（时钟，HTML 片段）最可能正常显示（无嵌套问题，用 height:100%）。
+组件 #2（🕒 时钟）最可能白屏（100vh + 透明文字 + 嵌套）。
+组件 #3（🕰️ Clock）可能白屏（100vh + 多余 </div> + 嵌套）。
+
+================================================================================
+第三部分：下雨动画底部 1/3 黑色分析
+================================================================================
+
+组件信息:
+  id: e4455e09-8d78-4fb3-8214-a0193c40a438
+  title: 🌧️ 雨夜动画
+  尺寸: 400x350 (wxh)
+  HTML 类型: 完整文档（有嵌套问题）
+
+-------- 底部黑色原因分析 --------
+
+★★ 原因 A：canvas.clientHeight 在脚本执行时返回 0 或部分值（最可能）★★
+
+HTML 中的关键代码:
+
+    <canvas id="rainCanvas"></canvas>
+    <script>
+    const canvas = document.getElementById('rainCanvas');
+    const ctx = canvas.getContext('2d');
+
+    let W, H;
+
+    function resize() {
+      W = canvas.width = canvas.clientWidth;      ← 设置 canvas 内部分辨率宽度
+      H = canvas.height = canvas.clientHeight;    ← 设置 canvas 内部分辨率高度
+    }
+    resize();                                       ← ★立即执行！
+    window.addEventListener('resize', resize);     ← 监听窗口大小变化
+    ...
+    function draw() {
+      ctx.fillStyle = 'rgba(10, 10, 26, 0.3)';
+      ctx.fillRect(0, 0, W, H);                    ← 用 W, H 填充背景
+      ...
+      requestAnimationFrame(draw);
+    }
+    draw();
+
+问题分析:
+
+1. <script> 在 HTML 解析到该标签时同步执行
+2. 此时 canvas 元素已在 DOM 中（在 script 之前），但 CSS 布局可能未完成
+3. canvas.clientWidth 可能返回正确值（宽度布局通常先完成）
+4. canvas.clientHeight 可能返回 0 或部分值（高度布局可能未完成）
+
+   场景 1: clientHeight = 0
+   - canvas 内部分辨率: 400x0
+   - H = 0
+   - fillRect(0, 0, 400, 0) → 什么都不画
+   - 整个 canvas 透明 → 显示 body 黑色背景 (#0a0a1a)
+   - 症状: 整个画面黑色（不是"底部1/3黑色"）
+
+   场景 2: clientHeight = 部分值（如 233，约为 350 的 2/3）
+   - canvas 内部分辨率: 400x233
+   - H = 233
+   - fillRect(0, 0, 400, 233) → 填充 400x233 区域
+   - canvas CSS 显示尺寸: 400x350 (height:100%)
+   - 如果浏览器按标准行为缩放: 400x233 内容拉伸到 400x350 → 无黑色区域
+   - 如果 WebView 不缩放（某些版本的行为）: canvas 只显示 400x233，底部 117px 显示 body 背景
+   - 症状: 底部 1/3 黑色 ★符合用户描述★
+
+   场景 3: 嵌套 HTML 导致 body 高度计算异常
+   - AI 的完整 HTML 文档被 app 包裹，形成嵌套结构
+   - 嵌套可能导致 body height:100% 的解析和预期不同
+   - body 高度可能只占 WebView 的 2/3
+   - canvas height:100% = body 的 100% = WebView 的 2/3
+   - 底部 1/3 没有 canvas 覆盖，显示 WebView 白色背景
+   - 但用户看到的是"黑色"不是"白色"...
+
+   ★最可能的是场景 2★：
+   canvas.clientHeight 在脚本执行时返回部分值（约 233px），
+   canvas 内部分辨率被设为 400x233，
+   但 CSS height:100% 让 canvas 显示为 400x350。
+   某些 WebView 版本不按标准缩放 canvas 内容，
+   导致 canvas 只在上部 233px 渲染，底部 117px 空白，显示 body 的 #0a0a1a 黑色背景。
+
+★★ 原因 B：window.resize 事件永不触发 ★★
+
+resize() 只在两种情况被调用：
+1. 脚本执行时（立即调用一次）
+2. window.resize 事件触发时
+
+在 Android WebView 中：
+  - window.resize 事件通常只在设备旋转时触发
+  - WebView 的 layout 变化（如 Compose 布局更新）不触发 window.resize
+  - 因此如果初始 resize() 获取了错误的 canvas 尺寸，永远不会被纠正
+
+这意味着 canvas 的内部分辨率永远停留在初始值（可能是 0 或部分值），
+即使后来 WebView 完成了正确的布局，canvas 也不会重新调整。
+
+★★ 原因 C：嵌套 HTML 文档影响布局 ★★
+
+雨夜动画是完整 HTML 文档（<!DOCTYPE html><html><head><body>），
+被 app 包裹后形成嵌套结构。
+
+嵌套结构可能导致：
+  - body 的 height:100% 解析时机延迟
+  - canvas 的 height:100% 在 body 高度确定前就计算了
+  - 布局分阶段完成，脚本执行时只完成了部分布局
+
+-------- 下雨动画结论 --------
+
+根本原因：canvas 的 resize() 在脚本执行时调用，
+此时 canvas.clientHeight 可能返回 0 或部分值（因为 CSS 布局未完成或嵌套 HTML 导致布局延迟）。
+window.resize 事件永不触发，canvas 尺寸永远不会被纠正。
+
+"底部 1/3 黑色"最可能的解释：
+  canvas.clientHeight 返回了约 2/3 的正确值（约 233px 而非 350px），
+  canvas 内部分辨率被设为 400x233，
+  Canvas 内容只在上部 233px 区域渲染，
+  底部约 117px（350-233）显示 body 背景色 #0a0a1a（接近黑色）。
+
+================================================================================
+第四部分：修复建议（仅供参考，未修改任何代码）
+================================================================================
+
+1. 【App 层面】区分 HTML 片段和完整文档
+   - 如果 AI 生成的 HTML 以 <!DOCTYPE 或 <html 开头，不要再用 <body>${html}</body> 包裹
+   - 直接使用原始 HTML（已包含完整的 html/head/body 结构）
+
+2. 【App 层面】在 WebView 中注入 DOMContentLoaded 回调
+   - 在 <head> 注入一段 JS，在 DOMContentLoaded 时调用 window.dispatchEvent(new Event('resize'))
+   - 确保 canvas 的 resize() 能在布局完成后被重新调用
+
+3. 【App 层面】覆盖 WebChromeClient.onConsoleMessage
+   - 捕获 JS 错误和 console 输出，输出到 logcat
+   - 便于诊断 WebView 渲染问题
+
+4. 【AI Prompt 层面】
+   - 要求 AI 生成 HTML 片段（不含 <!DOCTYPE>/<html>/<head>/<body>），而非完整文档
+   - 禁止使用 100vh，改用 height:100%
+   - 禁止使用 -webkit-text-fill-color:transparent（或提供 fallback）
+   - canvas 的 resize() 应在 DOMContentLoaded 或 requestAnimationFrame 中调用
+   - 不要在 canvas 后面留下多余的 </div>
+
+5. 【AI Prompt 层面 - canvas 特定】
+   - canvas 尺寸初始化应在 DOMContentLoaded 后
+   - 应监听 ResizeObserver（而非 window.resize）获取容器尺寸变化
+   - 示例:
+     if (document.readyState === 'loading') {
+       document.addEventListener('DOMContentLoaded', resize);
+     } else {
+       resize();
+     }
+     // 或更健壮:
+     requestAnimationFrame(() => { resize(); draw(); });
+
+================================================================================
+第五部分：关键文件路径
+================================================================================
+
+App HTML 渲染逻辑:
+  f:\allmylife\event\client\android\app\src\main\java\com\livingdashboard\ui\widget\HtmlCanvasWidget.kt
+  - 行 177-187: HTML 包裹逻辑（factory）
+  - 行 193-203: HTML 包裹逻辑（update）
+  - 行 174: WebChromeClient（默认，无 onConsoleMessage）
+
+Widget 容器布局:
+  f:\allmylife\event\client\android\app\src\main\java\com\livingdashboard\ui\canvas\components\WidgetContainer.kt
+  - 行 118-121: widget 尺寸设置（用 .dp，size = widgetSize * zoom）
+
+数据库结构:
+  f:\allmylife\event\client\android\app\src\main\java\com\livingdashboard\data\db\LivingDatabase.kt
+  - 数据库名: living.db, 版本 4
+
+  f:\allmylife\event\client\android\app\src\main\java\com\livingdashboard\data\entity\WidgetEntity.kt
+  - 表: widgets
+  - HTML 字段: state_json (JSON 字符串, {"html": "...", ...})
+
+本地数据库副本（用于分析）:
+  f:\allmylife\event\temp_db\living.db
+  f:\allmylife\event\temp_db\living.db-wal
+  f:\allmylife\event\temp_db\living.db-shm
+================================================================================
+第六部分：数据库原始 HTML 内容 dump（完整）
+================================================================================
+
+
+---- Widget #1: 时钟 (type=HTML_CANVAS, size=320.0x370.0) ----
+id: 56c6f38e-79dc-4ce2-bb81-0ff1041b9279
+panel_id: b6799829-45da-4414-af7a-87ef95350280
+created_at: 1783687668925
+state_json fields: ['html', 'title', 'agentWidth', 'agentHeight', 'createdAt', 'updatedAt']
+html length: 4629 chars
+
+--- HTML content (raw) ---
+<div class="clock-container">
+  <div class="clock">
+    <div class="clock-face">
+      <div class="hand hour-hand" id="hour"></div>
+      <div class="hand minute-hand" id="minute"></div>
+      <div class="hand second-hand" id="second"></div>
+      <div class="center-dot"></div>
+      <div class="number number-12">12</div>
+      <div class="number number-1">1</div>
+      <div class="number number-2">2</div>
+      <div class="number number-3">3</div>
+      <div class="number number-4">4</div>
+      <div class="number number-5">5</div>
+      <div class="number number-6">6</div>
+      <div class="number number-7">7</div>
+      <div class="number number-8">8</div>
+      <div class="number number-9">9</div>
+      <div class="number number-10">10</div>
+      <div class="number number-11">11</div>
+    </div>
+    <div class="digital-time" id="digitalTime">00:00:00</div>
+  </div>
+</div>
+
+<style>
+.clock-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+  border-radius: 12px;
+  box-sizing: border-box;
+  padding: 10px;
+}
+.clock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.clock-face {
+  position: relative;
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #1a1a3e, #0d0d2b);
+  border: 3px solid #4fc3f7;
+  box-shadow: 0 0 20px rgba(79, 195, 247, 0.3), inset 0 0 30px rgba(0,0,0,0.5);
+}
+.number {
+  position: absolute;
+  font-size: 14px;
+  font-weight: 600;
+  color: #4fc3f7;
+  text-shadow: 0 0 8px rgba(79, 195, 247, 0.5);
+  transform: translate(-50%, -50%);
+  user-select: none;
+}
+.number-12 { top: 12%; left: 50%; }
+.number-1 { top: 17.5%; left: 75%; }
+.number-2 { top: 32%; left: 89%; }
+.number-3 { top: 50%; right: 5%; left: auto; }
+.number-4 { bottom: 32%; left: 89%; top: auto; }
+.number-5 { bottom: 17.5%; left: 75%; top: auto; }
+.number-6 { bottom: 8%; left: 50%; top: auto; }
+.number-7 { bottom: 17.5%; left: 25%; top: auto; }
+.number-8 { bottom: 32%; left: 11%; top: auto; }
+.number-9 { top: 50%; left: 5%; }
+.number-10 { top: 32%; left: 11%; }
+.number-11 { top: 17.5%; left: 25%; }
+
+.hand {
+  position: absolute;
+  bottom: 50%;
+  left: 50%;
+  transform-origin: bottom center;
+  transform: translateX(-50%) rotate(0deg);
+  border-radius: 4px;
+  transition: transform 0.05s cubic-bezier(0.4, 2.08, 0.55, 0.44);
+}
+.hour-hand {
+  width: 5px;
+  height: 50px;
+  background: linear-gradient(to top, #4fc3f7, #81d4fa);
+  box-shadow: 0 0 6px rgba(79, 195, 247, 0.6);
+  border-radius: 3px;
+  z-index: 3;
+}
+.minute-hand {
+  width: 3px;
+  height: 70px;
+  background: linear-gradient(to top, #29b6f6, #4fc3f7);
+  box-shadow: 0 0 6px rgba(79, 195, 247, 0.6);
+  z-index: 2;
+}
+.second-hand {
+  width: 1.5px;
+  height: 80px;
+  background: #ff4081;
+  box-shadow: 0 0 8px rgba(255, 64, 129, 0.8);
+  z-index: 1;
+}
+.center-dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #4fc3f7;
+  box-shadow: 0 0 10px rgba(79, 195, 247, 0.8);
+  z-index: 4;
+}
+.digital-time {
+  font-family: 'Courier New', monospace;
+  font-size: 22px;
+  font-weight: bold;
+  color: #4fc3f7;
+  text-shadow: 0 0 12px rgba(79, 195, 247, 0.5);
+  letter-spacing: 4px;
+  background: rgba(0,0,0,0.3);
+  padding: 6px 20px;
+  border-radius: 8px;
+  border: 1px solid rgba(79, 195, 247, 0.2);
+}
+</style>
+
+<script>
+(function() {
+  const hourHand = document.getElementById('hour');
+  const minuteHand = document.getElementById('minute');
+  const secondHand = document.getElementById('second');
+  const digitalEl = document.getElementById('digitalTime');
+  
+  function updateClock() {
+    const now = new Date();
+    const hours = now.getHours() % 12;
+    const minutes = now.getMinutes();
+    const seconds = now.getSeconds();
+    const ms = now.getMilliseconds();
+    
+    const hourDeg = (hours * 30) + (minutes * 0.5) + (seconds * 0.5 / 60);
+    const minuteDeg = (minutes * 6) + (seconds * 0.1);
+    const secondDeg = (seconds * 6) + (ms * 0.006);
+    
+    hourHand.style.transform = `translateX(-50%) rotate(${hourDeg}deg)`;
+    minuteHand.style.transform = `translateX(-50%) rotate(${minuteDeg}deg)`;
+    secondHand.style.transform = `translateX(-50%) rotate(${secondDeg}deg)`;
+    
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(minutes).padStart(2, '0');
+    const ss = String(seconds).padStart(2, '0');
+    digitalEl.textContent = `${hh}:${mm}:${ss}`;
+  }
+  
+  updateClock();
+  setInterval(updateClock, 50);
+})();
+</script>
+
+
+---- Widget #2: 🕒 时钟 (type=HTML_CANVAS, size=380.0x220.0) ----
+id: 0c6b73ac-fa85-47d4-84b3-e15c22eb1231
+panel_id: b6799829-45da-4414-af7a-87ef95350280
+created_at: 1783700182715
+state_json fields: ['html', 'title', 'agentWidth', 'agentHeight', 'createdAt', 'updatedAt']
+html length: 2176 chars
+
+--- HTML content (raw) ---
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    font-family: 'Segoe UI', sans-serif;
+    overflow: hidden;
+  }
+  .clock {
+    text-align: center;
+    color: #fff;
+    user-select: none;
+  }
+  .time {
+    font-size: 64px;
+    font-weight: 700;
+    background: linear-gradient(135deg, #f093fb, #f5576c, #4facfe);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: 4px;
+    text-shadow: 0 0 40px rgba(245, 87, 108, 0.3);
+  }
+  .date {
+    font-size: 18px;
+    margin-top: 12px;
+    color: rgba(255,255,255,0.7);
+    letter-spacing: 2px;
+    font-weight: 300;
+  }
+  .seconds {
+    font-size: 28px;
+    font-weight: 300;
+    color: rgba(255,255,255,0.5);
+    margin-left: 8px;
+    vertical-align: super;
+  }
+  .ampm {
+    font-size: 20px;
+    font-weight: 300;
+    color: rgba(255,255,255,0.4);
+    margin-left: 6px;
+    vertical-align: super;
+  }
+</style>
+</head>
+<body>
+<div class="clock">
+  <div class="time">
+    <span id="hours">00</span>:<span id="minutes">00</span><span class="seconds" id="seconds">00</span><span class="ampm" id="ampm"></span>
+  </div>
+  <div class="date" id="date"></div>
+</div>
+<script>
+  function updateClock() {
+    const now = new Date();
+    const h = now.getHours();
+    const m = now.getMinutes();
+    const s = now.getSeconds();
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 || 12;
+    document.getElementById('hours').textContent = String(h12).padStart(2, '0');
+    document.getElementById('minutes').textContent = String(m).padStart(2, '0');
+    document.getElementById('seconds').textContent = String(s).padStart(2, '0');
+    document.getElementById('ampm').textContent = ampm;
+    const opts = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+    document.getElementById('date').textContent = now.toLocaleDateString(undefined, opts);
+  }
+  updateClock();
+  setInterval(updateClock, 1000);
+</script>
+</body>
+</html>
+
+
+---- Widget #3: 🕰️ Clock Widget (type=HTML_CANVAS, size=400.0x240.0) ----
+id: 908d3cd4-f27d-465f-9f96-d9cf8bbb2835
+panel_id: b6799829-45da-4414-af7a-87ef95350280
+created_at: 1783700335977
+state_json fields: ['html', 'title', 'agentWidth', 'agentHeight', 'createdAt', 'updatedAt']
+html length: 2934 chars
+
+--- HTML content (raw) ---
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    font-family: 'Courier New', monospace;
+    overflow: hidden;
+  }
+  .clock-widget {
+    background: #16213e;
+    border-radius: 24px;
+    padding: 30px 40px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5), inset 0 0 60px rgba(79, 172, 254, 0.05);
+    border: 1px solid rgba(255,255,255,0.06);
+    text-align: center;
+  }
+  .label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 6px;
+    color: rgba(255,255,255,0.3);
+    margin-bottom: 16px;
+  }
+  .digits {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .digit-block {
+    background: #0f3460;
+    border-radius: 12px;
+    padding: 12px 18px;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.4);
+    min-width: 60px;
+  }
+  .digit-block span {
+    font-size: 52px;
+    font-weight: 700;
+    color: #4facfe;
+    text-shadow: 0 0 20px rgba(79, 172, 254, 0.4);
+    display: block;
+    text-align: center;
+  }
+  .separator {
+    font-size: 48px;
+    color: rgba(255,255,255,0.2);
+    font-weight: 700;
+    animation: blink 1s step-end infinite;
+    padding: 0 4px;
+  }
+  @keyframes blink {
+    50% { opacity: 0.2; }
+  }
+  .bottom {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+  .date-text {
+    font-size: 14px;
+    color: rgba(255,255,255,0.5);
+    letter-spacing: 1px;
+  }
+  .weekday {
+    font-size: 13px;
+    color: #f5576c;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+<div class="clock-widget">
+  <div class="label">⏱ Digital Clock</div>
+  <div class="digits">
+    <div class="digit-block"><span id="h">00</span></div>
+    <div class="separator">:</div>
+    <div class="digit-block"><span id="m">00</span></div>
+    <div class="separator">:</div>
+    <div class="digit-block"><span id="s">00</span></div>
+  </div>
+  <div class="bottom">
+    <span class="date-text" id="date"></span>
+    <span class="weekday" id="weekday"></span>
+  </div>
+</div>
+<script>
+  function tick() {
+    const n = new Date();
+    document.getElementById('h').textContent = String(n.getHours()).padStart(2,'0');
+    document.getElementById('m').textContent = String(n.getMinutes()).padStart(2,'0');
+    document.getElementById('s').textContent = String(n.getSeconds()).padStart(2,'0');
+    const opts = { month: 'short', day: 'numeric', year: 'numeric' };
+    document.getElementById('date').textContent = n.toLocaleDateString(undefined, opts);
+    document.getElementById('weekday').textContent = n.toLocaleDateString(undefined, { weekday: 'long' });
+  }
+  tick();
+  setInterval(tick, 1000);
+</script>
+</div>
+</body>
+</html>
+
+
+---- Widget #4: 自然光感 (type=HTML_CANVAS, size=420.0x480.0) ----
+id: 5f014967-1a7c-400b-883d-f19de0ba53db
+panel_id: 1cffcf09-9043-46df-a949-16c0729fa242
+created_at: 1783705883137
+state_json fields: ['html', 'title', 'agentWidth', 'agentHeight', 'createdAt', 'updatedAt']
+html length: 8766 chars
+
+--- HTML content (raw) ---
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #1a1a2e;
+  }
+
+  .scene {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* 自然光斑背景 */
+  .light-bg {
+    position: absolute;
+    inset: 0;
+    background: 
+      radial-gradient(ellipse 120% 80% at 20% 30%, rgba(255,215,150,0.08) 0%, transparent 50%),
+      radial-gradient(ellipse 100% 60% at 80% 20%, rgba(255,200,100,0.06) 0%, transparent 40%),
+      radial-gradient(ellipse 80% 100% at 50% 100%, rgba(255,180,120,0.05) 0%, transparent 50%);
+    pointer-events: none;
+  }
+
+  /* 主光线 - 从左上角射入 */
+  .sun-ray {
+    position: absolute;
+    top: -20%;
+    left: -10%;
+    width: 60%;
+    height: 140%;
+    background: linear-gradient(
+      135deg,
+      rgba(255,240,200,0.15) 0%,
+      rgba(255,220,160,0.08) 30%,
+      rgba(255,200,120,0.03) 60%,
+      transparent 100%
+    );
+    transform: rotate(-25deg);
+    transform-origin: top left;
+    animation: raySweep 12s ease-in-out infinite alternate;
+    pointer-events: none;
+  }
+
+  .sun-ray-2 {
+    position: absolute;
+    top: -10%;
+    left: 20%;
+    width: 30%;
+    height: 120%;
+    background: linear-gradient(
+      160deg,
+      rgba(255,235,180,0.1) 0%,
+      rgba(255,210,140,0.04) 40%,
+      transparent 70%
+    );
+    transform: rotate(-15deg);
+    transform-origin: top left;
+    animation: raySweep2 15s ease-in-out infinite alternate;
+    pointer-events: none;
+  }
+
+  @keyframes raySweep {
+    0% { transform: rotate(-25deg) translateX(-5%); opacity: 0.7; }
+    50% { transform: rotate(-20deg) translateX(3%); opacity: 1; }
+    100% { transform: rotate(-30deg) translateX(-2%); opacity: 0.8; }
+  }
+
+  @keyframes raySweep2 {
+    0% { transform: rotate(-15deg) translateX(0); opacity: 0.6; }
+    100% { transform: rotate(-10deg) translateX(8%); opacity: 1; }
+  }
+
+  /* 漂浮光粒子 */
+  .particles {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .particle {
+    position: absolute;
+    width: 4px;
+    height: 4px;
+    background: rgba(255,240,200,0.6);
+    border-radius: 50%;
+    box-shadow: 0 0 6px 2px rgba(255,220,150,0.3);
+    animation: float linear infinite;
+  }
+
+  .particle:nth-child(1) { left: 15%; top: 20%; animation-duration: 18s; animation-delay: 0s; width: 3px; height: 3px; }
+  .particle:nth-child(2) { left: 35%; top: 40%; animation-duration: 22s; animation-delay: 2s; width: 2px; height: 2px; }
+  .particle:nth-child(3) { left: 55%; top: 25%; animation-duration: 20s; animation-delay: 4s; width: 4px; height: 4px; }
+  .particle:nth-child(4) { left: 75%; top: 50%; animation-duration: 25s; animation-delay: 1s; width: 2px; height: 2px; }
+  .particle:nth-child(5) { left: 25%; top: 60%; animation-duration: 19s; animation-delay: 3s; width: 3px; height: 3px; }
+  .particle:nth-child(6) { left: 65%; top: 15%; animation-duration: 23s; animation-delay: 5s; width: 2px; height: 2px; }
+  .particle:nth-child(7) { left: 45%; top: 70%; animation-duration: 21s; animation-delay: 7s; width: 3px; height: 3px; }
+  .particle:nth-child(8) { left: 85%; top: 35%; animation-duration: 17s; animation-delay: 2s; width: 2px; height: 2px; }
+
+  @keyframes float {
+    0% { transform: translateY(0) translateX(0); opacity: 0; }
+    10% { opacity: 0.8; }
+    90% { opacity: 0.6; }
+    100% { transform: translateY(-300px) translateX(80px); opacity: 0; }
+  }
+
+  /* 主卡片 - 玻璃质感 */
+  .card {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 320px;
+    padding: 40px;
+    background: linear-gradient(
+      145deg,
+      rgba(255,255,255,0.12) 0%,
+      rgba(255,255,255,0.05) 100%
+    );
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-radius: 24px;
+    border: 1px solid rgba(255,255,255,0.18);
+    box-shadow:
+      0 8px 32px rgba(0,0,0,0.3),
+      inset 0 1px 0 rgba(255,255,255,0.2),
+      0 0 80px rgba(255,220,150,0.05);
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  /* 卡片顶部光晕 */
+  .card::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(
+      ellipse at 30% 20%,
+      rgba(255,240,200,0.1) 0%,
+      transparent 50%
+    );
+    pointer-events: none;
+  }
+
+  .card::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255,255,255,0.3) 20%,
+      rgba(255,255,255,0.5) 50%,
+      rgba(255,255,255,0.3) 80%,
+      transparent 100%
+    );
+  }
+
+  .card h2 {
+    font-size: 24px;
+    font-weight: 300;
+    color: rgba(255,255,255,0.95);
+    margin-bottom: 12px;
+    letter-spacing: 1px;
+    position: relative;
+  }
+
+  .card .time {
+    font-size: 48px;
+    font-weight: 200;
+    color: rgba(255,255,255,0.9);
+    letter-spacing: 2px;
+    line-height: 1;
+    margin-bottom: 8px;
+  }
+
+  .card .date {
+    font-size: 14px;
+    font-weight: 300;
+    color: rgba(255,255,255,0.6);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .divider {
+    width: 100%;
+    height: 1px;
+    margin: 20px 0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255,255,255,0.15) 50%,
+      transparent 100%
+    );
+  }
+
+  .card .quote {
+    font-size: 18px;
+    font-weight: 300;
+    font-style: italic;
+    color: rgba(255,255,255,0.7);
+    line-height: 1.6;
+    position: relative;
+  }
+
+  .card .quote::before {
+    content: '\201C';
+    font-size: 48px;
+    position: absolute;
+    top: -20px;
+    left: -12px;
+    color: rgba(255,220,150,0.2);
+    font-style: normal;
+  }
+
+  /* 底部光晕 */
+  .glow-bottom {
+    position: absolute;
+    bottom: -15%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 60%;
+    height: 30%;
+    background: radial-gradient(
+      ellipse at center,
+      rgba(255,200,150,0.06) 0%,
+      transparent 70%
+    );
+    pointer-events: none;
+  }
+
+  /* 右侧光斑 lens flare */
+  .lens-flare {
+    position: absolute;
+    bottom: 20%;
+    right: 10%;
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: radial-gradient(
+      circle at center,
+      rgba(255,220,160,0.08) 0%,
+      rgba(255,200,120,0.03) 30%,
+      transparent 70%
+    );
+    filter: blur(8px);
+    animation: pulse 6s ease-in-out infinite alternate;
+    pointer-events: none;
+  }
+
+  .lens-flare-2 {
+    position: absolute;
+    top: 15%;
+    right: 25%;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: radial-gradient(
+      circle at center,
+      rgba(255,235,200,0.06) 0%,
+      transparent 60%
+    );
+    filter: blur(4px);
+    animation: pulse 8s ease-in-out infinite alternate-reverse;
+    pointer-events: none;
+  }
+
+  @keyframes pulse {
+    0% { opacity: 0.5; transform: scale(1); }
+    100% { opacity: 1; transform: scale(1.3); }
+  }
+
+  /* 动态时间更新用 JS */
+</style>
+</head>
+<body>
+<div class="scene">
+  <div class="light-bg"></div>
+  <div class="sun-ray"></div>
+  <div class="sun-ray-2"></div>
+
+  <div class="lens-flare"></div>
+  <div class="lens-flare-2"></div>
+
+  <div class="particles">
+    <div class="particle"></div>
+    <div class="particle"></div>
+    <div class="particle"></div>
+    <div class="particle"></div>
+    <div class="particle"></div>
+    <div class="particle"></div>
+    <div class="particle"></div>
+    <div class="particle"></div>
+  </div>
+
+  <div class="card">
+    <h2>☀ 午后</h2>
+    <div class="time" id="time">--:--</div>
+    <div class="date" id="date">----年--月--日 周-</div>
+    <div class="divider"></div>
+    <div class="quote">"最好的光线，是恰好落在手心的那一束。"</div>
+  </div>
+
+  <div class="glow-bottom"></div>
+</div>
+
+<script>
+  function updateTime() {
+    const now = new Date();
+    const h = String(now.getHours()).padStart(2, '0');
+    const m = String(now.getMinutes()).padStart(2, '0');
+    document.getElementById('time').textContent = h + ':' + m;
+
+    const days = ['日', '一', '二', '三', '四', '五', '六'];
+    const y = now.getFullYear();
+    const mo = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    const w = days[now.getDay()];
+    document.getElementById('date').textContent = y + '年' + mo + '月' + d + '日 周' + w;
+
+    // 根据时间调整问候
+    const hour = now.getHours();
+    let greeting = '☀ 上午';
+    if (hour >= 12 && hour < 14) greeting = '☀ 午后';
+    else if (hour >= 14 && hour < 18) greeting = '🌅 下午';
+    else if (hour >= 18) greeting = '🌙 夜晚';
+    else if (hour < 6) greeting = '🌙 深夜';
+    document.querySelector('.card h2').textContent = greeting;
+  }
+  updateTime();
+  setInterval(updateTime, 1000);
+</script>
+</body>
+</html>
+
+
+---- Widget #5: 🌧️ 雨夜动画 (type=HTML_CANVAS, size=400.0x350.0) ----
+id: e4455e09-8d78-4fb3-8214-a0193c40a438
+panel_id: 1cffcf09-9043-46df-a949-16c0729fa242
+created_at: 1783706962212
+state_json fields: ['html', 'title', 'agentWidth', 'agentHeight', 'createdAt', 'updatedAt']
+html length: 3078 chars
+
+--- HTML content (raw) ---
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a1a;
+  overflow: hidden;
+  font-family: 'Segoe UI', Arial, sans-serif;
+  width: 100%;
+  height: 100%;
+}
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+</style>
+</head>
+<body>
+<canvas id="rainCanvas"></canvas>
+<script>
+const canvas = document.getElementById('rainCanvas');
+const ctx = canvas.getContext('2d');
+
+let W, H;
+
+function resize() {
+  W = canvas.width = canvas.clientWidth;
+  H = canvas.height = canvas.clientHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// 雨滴
+const DROPS = 300;
+let drops = [];
+
+class Drop {
+  constructor() {
+    this.reset();
+    // 让初始位置随机分布在画布不同高度
+    this.y = Math.random() * H * 2 - H * 0.5;
+  }
+  reset() {
+    this.x = Math.random() * W;
+    this.y = -10 - Math.random() * 50;
+    this.len = 8 + Math.random() * 18;
+    this.speed = 4 + Math.random() * 10;
+    this.opacity = 0.2 + Math.random() * 0.5;
+    this.wind = -1 + Math.random() * 2; // 轻微左飘
+    this.thickness = 1 + Math.random() * 1.5;
+  }
+  update() {
+    this.y += this.speed;
+    this.x += this.wind;
+    if (this.y > H + 20 || this.x < -20 || this.x > W + 20) {
+      this.reset();
+    }
+  }
+  draw() {
+    ctx.beginPath();
+    ctx.moveTo(this.x, this.y);
+    ctx.lineTo(this.x + this.wind * 3, this.y - this.len);
+    ctx.strokeStyle = `rgba(180, 210, 255, ${this.opacity})`;
+    ctx.lineWidth = this.thickness;
+    ctx.stroke();
+  }
+}
+
+for (let i = 0; i < DROPS; i++) {
+  drops.push(new Drop());
+}
+
+// 涟漪
+let ripples = [];
+class Ripple {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.radius = 2;
+    this.maxRadius = 10 + Math.random() * 15;
+    this.life = 1;
+    this.decay = 0.015 + Math.random() * 0.02;
+  }
+  update() {
+    this.radius += 0.8;
+    this.life -= this.decay;
+  }
+  draw() {
+    if (this.life <= 0) return;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(180, 210, 255, ${this.life * 0.4})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
+// 闪电
+let flashAlpha = 0;
+let flashTimer = 0;
+
+function draw() {
+  // 用半透明覆盖实现拖尾效果
+  ctx.fillStyle = 'rgba(10, 10, 26, 0.3)';
+  ctx.fillRect(0, 0, W, H);
+
+  // 闪电闪光
+  if (flashAlpha > 0) {
+    ctx.fillStyle = `rgba(255, 255, 255, ${flashAlpha})`;
+    ctx.fillRect(0, 0, W, H);
+    flashAlpha *= 0.92;
+    if (flashAlpha < 0.01) flashAlpha = 0;
+  }
+
+  // 雨滴
+  drops.forEach(d => {
+    d.update();
+    d.draw();
+  });
+
+  // 涟漪
+  ripples.forEach(r => {
+    r.update();
+    r.draw();
+  });
+  ripples = ripples.filter(r => r.life > 0);
+
+  // 偶尔生成涟漪（雨滴落地）
+  if (Math.random() < 0.15) {
+    const idx = Math.floor(Math.random() * drops.length);
+    const d = drops[idx];
+    if (d.y > H * 0.6 && d.y < H + 5) {
+      ripples.push(new Ripple(d.x, H - 5));
+    }
+  }
+
+  // 随机闪电
+  flashTimer--;
+  if (flashTimer <= 0 && Math.random() < 0.005) {
+    flashAlpha = 0.15 + Math.random() * 0.25;
+    flashTimer = 60 + Math.random() * 200;
+  }
+
+  requestAnimationFrame(draw);
+}
+
+draw();
+</script>
+</body>
+</html>
+

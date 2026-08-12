@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daily · 画布 + AI Agent 平台</title>
+<!--
+  Daily 平台介绍卡片 · iframe widget 内容
+  -----------------------------------------------------------
+  用途：htmlCanvas widget（sandbox="allow-scripts"，作为 srcDoc 注入 iframe）
+  内容：展示 Daily 平台三大核心能力 —— 画布 / AI / 组件
+  动画：淡入、hover 浮起、背景粒子流
+  无外部依赖，所有 CSS/JS 内联
+  字体：系统字体栈
+-->
+<style>
+  :root {
+    --bg-0: #07091a;
+    --bg-1: #0e1230;
+    --accent-cyan: #00e5ff;
+    --accent-violet: #b026ff;
+    --accent-blue: #4a8fff;
+    --text-primary: #eef3ff;
+    --text-secondary: #9fb0d0;
+    --text-muted: #5f6f95;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+    background:
+      radial-gradient(ellipse 80% 60% at 20% 0%, rgba(74, 143, 255, 0.15), transparent 60%),
+      radial-gradient(ellipse 70% 50% at 85% 100%, rgba(176, 38, 255, 0.12), transparent 55%),
+      linear-gradient(135deg, var(--bg-0) 0%, var(--bg-1) 100%);
+    color: var(--text-primary);
+    position: relative;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 背景粒子画布 */
+  #bg-particles {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  /* 主容器 */
+  .container {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 36px 40px;
+  }
+
+  /* ===== 顶部标题区 ===== */
+  .header {
+    text-align: center;
+    margin-bottom: 28px;
+    opacity: 0;
+    animation: fadeUp 0.9s 0.1s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  }
+
+  .logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+
+  .logo-mark {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, var(--accent-cyan), var(--accent-violet));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 6px 20px rgba(0, 229, 255, 0.35);
+    position: relative;
+    overflow: hidden;
+  }
+  .logo-mark::after {
+    content: '';
+    position: absolute;
+    inset: 2px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, rgba(7, 9, 26, 0.85), rgba(14, 18, 48, 0.85));
+  }
+  .logo-mark svg {
+    position: relative;
+    z-index: 1;
+    width: 22px;
+    height: 22px;
+  }
+
+  .logo-text {
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    background: linear-gradient(90deg, #ffffff 0%, var(--accent-cyan) 50%, var(--accent-violet) 100%);
+    -webkit-background-clip: text;
+            background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .tagline {
+    font-size: 14px;
+    color: var(--text-secondary);
+    letter-spacing: 3px;
+    font-weight: 400;
+  }
+  .tagline span {
+    color: var(--accent-cyan);
+  }
+
+  /* ===== 功能卡片区 ===== */
+  .features {
+    flex: 1;
+    display: flex;
+    gap: 18px;
+    align-items: stretch;
+    min-height: 0;
+  }
+
+  .card {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px;
+    padding: 26px 22px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    position: relative;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateY(24px);
+    cursor: default;
+    transition: opacity 0.7s cubic-bezier(0.2, 0.8, 0.2, 1),
+                transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1),
+                border-color 0.35s ease,
+                box-shadow 0.35s ease,
+                background 0.35s ease;
+  }
+  /* 入场：JS 添加 .visible 触发（避免 animation forwards 锁定 transform，保证 hover 生效） */
+  .card.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* 卡片顶部光带 */
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    opacity: 0.85;
+  }
+  .card.c1::before { background: linear-gradient(90deg, var(--accent-cyan), transparent); }
+  .card.c2::before { background: linear-gradient(90deg, var(--accent-blue), transparent); }
+  .card.c3::before { background: linear-gradient(90deg, var(--accent-violet), transparent); }
+
+  /* hover 上浮 + 发光 */
+  .card:hover {
+    transform: translateY(-8px);
+    border-color: rgba(0, 229, 255, 0.3);
+    background: rgba(255, 255, 255, 0.06);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3), 0 0 30px rgba(74, 143, 255, 0.15);
+  }
+  .card.c1:hover { border-color: rgba(0, 229, 255, 0.4); box-shadow: 0 20px 50px rgba(0,0,0,0.3), 0 0 30px rgba(0,229,255,0.2); }
+  .card.c2:hover { border-color: rgba(74, 143, 255, 0.4); box-shadow: 0 20px 50px rgba(0,0,0,0.3), 0 0 30px rgba(74,143,255,0.2); }
+  .card.c3:hover { border-color: rgba(176, 38, 255, 0.4); box-shadow: 0 20px 50px rgba(0,0,0,0.3), 0 0 30px rgba(176,38,255,0.2); }
+
+  /* 卡片图标 */
+  .card-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 16px;
+    position: relative;
+    transition: transform 0.35s ease;
+  }
+  .card:hover .card-icon { transform: scale(1.08) rotate(-4deg); }
+
+  .card.c1 .card-icon {
+    background: linear-gradient(135deg, rgba(0,229,255,0.2), rgba(0,229,255,0.05));
+    border: 1px solid rgba(0,229,255,0.3);
+  }
+  .card.c2 .card-icon {
+    background: linear-gradient(135deg, rgba(74,143,255,0.2), rgba(74,143,255,0.05));
+    border: 1px solid rgba(74,143,255,0.3);
+  }
+  .card.c3 .card-icon {
+    background: linear-gradient(135deg, rgba(176,38,255,0.2), rgba(176,38,255,0.05));
+    border: 1px solid rgba(176,38,255,0.3);
+  }
+  .card-icon svg { width: 26px; height: 26px; }
+
+  .card.c1 .card-icon svg { color: var(--accent-cyan); }
+  .card.c2 .card-icon svg { color: var(--accent-blue); }
+  .card.c3 .card-icon svg { color: var(--accent-violet); }
+
+  /* 卡片文字 */
+  .card-title {
+    font-size: 19px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    letter-spacing: 0.5px;
+  }
+  .card-title .en {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-muted);
+    margin-left: 8px;
+    letter-spacing: 1px;
+  }
+  .card-desc {
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text-secondary);
+    margin-bottom: 14px;
+  }
+
+  /* 卡片特性标签 */
+  .card-tags {
+    margin-top: auto;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .tag {
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: var(--text-secondary);
+    letter-spacing: 0.5px;
+  }
+  .card.c1 .tag { border-color: rgba(0,229,255,0.2); color: rgba(0,229,255,0.8); }
+  .card.c2 .tag { border-color: rgba(74,143,255,0.2); color: rgba(120,170,255,0.85); }
+  .card.c3 .tag { border-color: rgba(176,38,255,0.2); color: rgba(200,120,255,0.85); }
+
+  /* 卡片角落装饰圆 */
+  .card::after {
+    content: '';
+    position: absolute;
+    bottom: -30px;
+    right: -30px;
+    width: 90px;
+    height: 90px;
+    border-radius: 50%;
+    opacity: 0.5;
+    filter: blur(20px);
+    transition: opacity 0.35s ease;
+  }
+  .card.c1::after { background: var(--accent-cyan); }
+  .card.c2::after { background: var(--accent-blue); }
+  .card.c3::after { background: var(--accent-violet); }
+  .card:hover::after { opacity: 0.8; }
+
+  /* ===== 底部 ===== */
+  .footer {
+    text-align: center;
+    margin-top: 22px;
+    font-size: 12px;
+    color: var(--text-muted);
+    letter-spacing: 2px;
+    opacity: 0;
+    animation: fadeUp 0.8s 0.8s ease forwards;
+  }
+  .footer .dot {
+    display: inline-block;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--accent-cyan);
+    margin: 0 10px;
+    vertical-align: middle;
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+
+  /* ===== 关键帧 ===== */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(24px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 0.5; }
+    50%      { transform: scale(1.6); opacity: 1; }
+  }
+
+  /* 响应式：窄屏纵向排列 */
+  @media (max-width: 720px) {
+    .features { flex-direction: column; gap: 14px; }
+    .container { padding: 24px 20px; }
+    .logo-text { font-size: 26px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 背景粒子 -->
+<canvas id="bg-particles"></canvas>
+
+<div class="container">
+
+  <!-- 顶部标题 -->
+  <header class="header">
+    <div class="logo">
+      <div class="logo-mark">
+        <!-- Daily 图标：画布+节点 -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="url(#lg)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <defs>
+            <linearGradient id="lg" x1="0" y1="0" x2="24" y2="24">
+              <stop offset="0%" stop-color="#00e5ff"/>
+              <stop offset="100%" stop-color="#b026ff"/>
+            </linearGradient>
+          </defs>
+          <rect x="3" y="3" width="18" height="18" rx="3"/>
+          <circle cx="9" cy="9" r="1.5" fill="url(#lg)" stroke="none"/>
+          <circle cx="15" cy="15" r="1.5" fill="url(#lg)" stroke="none"/>
+          <path d="M10.5 10.5 L13.5 13.5"/>
+        </svg>
+      </div>
+      <div class="logo-text">Daily</div>
+    </div>
+    <div class="tagline">画布 <span>+</span> AI Agent 平台</div>
+  </header>
+
+  <!-- 三大能力卡片 -->
+  <section class="features">
+
+    <!-- 画布 -->
+    <div class="card c1">
+      <div class="card-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 3h18v18H3z"/>
+          <path d="M3 9h18M9 3v18"/>
+          <circle cx="15" cy="15" r="2" fill="currentColor" opacity="0.3"/>
+        </svg>
+      </div>
+      <div class="card-title">无限画布<span class="en">Canvas</span></div>
+      <div class="card-desc">自由排布的无限画布，拖拽缩放任意组件，所见即所得的可视化工作台。</div>
+      <div class="card-tags">
+        <span class="tag">自由布局</span>
+        <span class="tag">拖拽缩放</span>
+        <span class="tag">多面板</span>
+      </div>
+    </div>
+
+    <!-- AI -->
+    <div class="card c2">
+      <div class="card-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>
+          <circle cx="12" cy="12" r="4" fill="currentColor" opacity="0.2"/>
+        </svg>
+      </div>
+      <div class="card-title">智能助手<span class="en">AI Agent</span></div>
+      <div class="card-desc">内置 AI Agent，自然语言驱动创作，自动生成组件、内容与交互。</div>
+      <div class="card-tags">
+        <span class="tag">自然语言</span>
+        <span class="tag">自动生成</span>
+        <span class="tag">多模型</span>
+      </div>
+    </div>
+
+    <!-- 组件 -->
+    <div class="card c3">
+      <div class="card-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+          <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+          <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+          <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+        </svg>
+      </div>
+      <div class="card-title">丰富组件<span class="en">Components</span></div>
+      <div class="card-desc">HTML 画布、自由 HTML、多类型组件自由组合，构建专属工作流。</div>
+      <div class="card-tags">
+        <span class="tag">htmlCanvas</span>
+        <span class="tag">freeHtml</span>
+        <span class="tag">可扩展</span>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- 底部 -->
+  <footer class="footer">
+    自由创作<span class="dot"></span>智能生成<span class="dot"></span>无限可能
+  </footer>
+
+</div>
+
+<script>
+/* ==========================================================================
+   背景粒子流：缓慢漂浮的光点，营造科技氛围
+   ========================================================================== */
+(function () {
+  'use strict';
+  var canvas = document.getElementById('bg-particles');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  var W = 0, H = 0, dpr = Math.min(window.devicePixelRatio || 1, 2);
+  var particles = [];
+  var COUNT = 50;
+  var rafId = null;
+
+  function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function init() {
+    particles = [];
+    for (var i = 0; i < COUNT; i++) {
+      particles.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: 0.5 + Math.random() * 1.8,
+        vx: (Math.random() - 0.5) * 0.25,
+        vy: (Math.random() - 0.5) * 0.25,
+        alpha: 0.1 + Math.random() * 0.5,
+        hue: Math.random() < 0.5 ? 190 : 280  // 青色 or 紫色
+      });
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'lighter';
+    for (var i = 0; i < particles.length; i++) {
+      var p = particles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      if (p.x < 0) p.x = W;
+      if (p.x > W) p.x = 0;
+      if (p.y < 0) p.y = H;
+      if (p.y > H) p.y = 0;
+
+      var glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r * 6);
+      glow.addColorStop(0, 'hsla(' + p.hue + ', 100%, 70%, ' + p.alpha + ')');
+      glow.addColorStop(1, 'hsla(' + p.hue + ', 100%, 70%, 0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r * 6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    rafId = requestAnimationFrame(draw);
+  }
+
+  resize();
+  init();
+  window.addEventListener('resize', function () { resize(); init(); });
+  rafId = requestAnimationFrame(draw);
+})();
+
+/* ==========================================================================
+   卡片入场动画：JS 添加 .visible 触发 transition（避免 animation forwards 锁定 transform）
+   ========================================================================== */
+(function () {
+  'use strict';
+  var cards = document.querySelectorAll('.card');
+  cards.forEach(function (card, i) {
+    setTimeout(function () {
+      card.classList.add('visible');
+    }, 300 + i * 150);
+  });
+})();
+</script>
+
+</body>
+</html>

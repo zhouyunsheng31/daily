@@ -1,0 +1,2015 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Living Dashboard 桌面端高保真原型</title>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; width: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: #F0F0F2;
+    color: #1A1A1A;
+    -webkit-font-smoothing: antialiased;
+  }
+  #root { min-height: 100vh; }
+
+  /* ===== 反 AI slop: 无紫渐变背景、无 emoji 图标、无边框线（色块区分优先）===== */
+
+  /* 思考折叠 */
+  .thinking-collapsed {
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s;
+  }
+  .thinking-collapsed:hover { background: rgba(0,0,0,0.04); }
+
+  /* 工具调用流动条：浅蓝→浅紫渐变 CSS 动画（功能性指示器，非装饰背景） */
+  .tool-flow-bar {
+    height: 3px;
+    border-radius: 9999px;
+    background: linear-gradient(90deg, #87CEEB 0%, #B19CD9 50%, #87CEEB 100%);
+    background-size: 200% 100%;
+    animation: tool-flow-anim 2.5s linear infinite;
+  }
+  @keyframes tool-flow-anim {
+    0% { background-position: 0% 0%; }
+    100% { background-position: 200% 0%; }
+  }
+
+  /* 思考等级水平滑块（4 档） */
+  .thinking-slider-track {
+    position: relative;
+    height: 4px;
+    background: rgba(0,0,0,0.08);
+    border-radius: 9999px;
+    margin: 8px 0;
+  }
+  .thinking-slider-fill {
+    position: absolute;
+    height: 100%;
+    background: #3B82F6;
+    border-radius: 9999px;
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .thinking-slider-thumb {
+    position: absolute;
+    top: 50%;
+    width: 16px;
+    height: 16px;
+    background: #FFFFFF;
+    border: 2px solid #3B82F6;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(59,130,246,0.3);
+    transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .thinking-slider-thumb:hover {
+    box-shadow: 0 2px 8px rgba(59,130,246,0.4);
+    transform: translate(-50%, -50%) scale(1.15);
+  }
+  .thinking-slider-tick {
+    position: absolute;
+    top: 50%;
+    width: 6px;
+    height: 6px;
+    background: rgba(0,0,0,0.15);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+  }
+
+  /* 缺漏页面 CSS 已移除（红框占位符已替换为真实 UI） */
+  /* 右下角 AddWidgetMenu FAB（48×48 圆形 + 加号，hover 旋转 90° 变蓝） */
+  .add-widget-fab {
+    position: absolute;
+    right: 24px;
+    bottom: 24px;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: #FFFFFF;
+    color: #1A1A1A;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    transition: transform 0.3s cubic-bezier(0.4,0,0.2,1), background 0.2s, color 0.2s, box-shadow 0.2s;
+    z-index: 50;
+  }
+  .add-widget-fab:hover {
+    transform: rotate(90deg);
+    background: #3B82F6;
+    color: #FFFFFF;
+    box-shadow: 0 6px 20px rgba(59,130,246,0.4);
+  }
+
+  /* 思考动画点 */
+  @keyframes thinking-bounce {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+    30% { transform: translateY(-3px); opacity: 1; }
+  }
+  .thinking-dot {
+    display: inline-block;
+    width: 4px;
+    height: 4px;
+    background: #6B7280;
+    border-radius: 50%;
+    animation: thinking-bounce 1.2s ease-in-out infinite;
+  }
+
+  /* 滚动条美化 */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.2); }
+
+  /* 设备框标签 */
+  .frame-label {
+    font-size: 12px;
+    color: #6B7280;
+    font-style: italic;
+    margin-bottom: 6px;
+    margin-left: 4px;
+    letter-spacing: 0.3px;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>window.__hadError = false; window.addEventListener('error', function(e){ window.__hadError = true; window.__lastError = e.message + ' @ ' + (e.filename||'') + ':' + (e.lineno||0); console.error('[page-error]', e.message); });</script>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+// ============================================================================
+// 图标组件（内联 SVG，避免 AI slop 的 emoji 图标）
+// ============================================================================
+function Icon({ name, size = 16, style, strokeWidth = 2 }) {
+  const icons = {
+    search: <><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></>,
+    plus: <path d="M12 5v14M5 12h14"/>,
+    x: <path d="M18 6 6 18M6 6l12 12"/>,
+    send: <path d="m22 2-7 20-4-9-9-4ZM22 2 11 13"/>,
+    bot: <><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4M9 14h.01M15 14h.01"/><path d="M2 14h2M20 14h2"/></>,
+    settings: <><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/></>,
+    star: <path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z"/>,
+    globe: <><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></>,
+    grid: <><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></>,
+    chevronDown: <path d="m6 9 6 6 6-6"/>,
+    chevronRight: <path d="m9 6 6 6-6 6"/>,
+    panelLeft: <><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></>,
+    panelLeftOpen: <><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 9l3 3-3 3"/></>,
+    panelLeftClose: <><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 9l-3 3 3 3"/></>,
+    message: <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>,
+    loader: <path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/>,
+    wrench: <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2-2z"/>,
+    brain: <path d="M12 5a3 3 0 0 0-3 3 3 3 0 0 0-3 3 3 3 0 0 0 1 2 3 3 0 0 0 2 5 3 3 0 0 0 3 1 3 3 0 0 0 3-1 3 3 0 0 0 2-5 3 3 0 0 0 1-2 3 3 0 0 0-3-3 3 3 0 0 0-3-3z"/>,
+    shield: <path d="M12 2 4 5v7c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V5z"/>,
+    shieldAlert: <><path d="M12 2 4 5v7c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V5z"/><path d="M12 8v4M12 16h.01"/></>,
+    shieldCheck: <><path d="M12 2 4 5v7c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V5z"/><path d="m9 12 2 2 4-4"/></>,
+    check: <path d="M20 6 9 17l-5-5"/>,
+    eye: <><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></>,
+    eyeOff: <path d="M10 6.1A10 10 0 0 1 12 6c6 0 10 6 10 6a14 14 0 0 1-2.3 3M6.1 6.1A14 14 0 0 0 2 12s4 7 10 7a10 10 0 0 0 4-.8M3 3l18 18"/>,
+    trash: <><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1L5 6"/></>,
+    save: <><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></>,
+    folder: <path d="M4 5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/>,
+    keyboard: <><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8"/></>,
+    cloud: <path d="M17.5 19a4.5 4.5 0 0 0 0-9 6 6 0 0 0-11.5 1.5A4 4 0 0 0 6 19z"/>,
+    hardDrive: <><path d="M22 12H2M5.5 5.5h13l3.5 6.5v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-4z"/><path d="M6 14h.01M10 14h.01"/></>,
+    zap: <path d="M13 2 3 14h9l-1 8 10-12h-9z"/>,
+    clock: <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></>,
+    externalLink: <><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></>,
+    sparkles: <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z M19 15l.6 1.7L21 17l-1.4.6L19 19l-.6-1.4L17 17l1.4-.3z"/>,
+    lock: <><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></>,
+    bookmark: <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>,
+    layout: <><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></>,
+    history: <><path d="M3 3v5h5"/><path d="M3.1 9a9 9 0 1 0 2.5-5L3 8"/><path d="M12 7v5l3 3"/></>,
+    script: <><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></>,
+    download: <><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></>,
+    arrowRight: <path d="M5 12h14M13 6l6 6-6 6"/>,
+    arrowLeft: <path d="M19 12H5M11 18l-6-6 6-6"/>,
+    refresh: <path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/>,
+  };
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" style={style}>
+      {icons[name] || null}
+    </svg>
+  );
+}
+
+// ============================================================================
+// MacosWindow 设备框（inlined from huashu-design assets/macos_window.jsx）
+// ============================================================================
+const macosWindowStyles = {
+  window: {
+    display: 'inline-block',
+    background: '#fff',
+    borderRadius: 10,
+    overflow: 'hidden',
+    boxShadow: '0 30px 80px rgba(0,0,0,0.18), 0 0 0 0.5px rgba(0,0,0,0.12)',
+  },
+  titleBar: {
+    height: 38,
+    background: 'linear-gradient(to bottom, #F0F0F0, #E0E0E0)',
+    display: 'flex',
+    alignItems: 'center',
+    padding: '0 14px',
+    position: 'relative',
+    userSelect: 'none',
+  },
+  trafficLights: { display: 'flex', gap: 8, alignItems: 'center' },
+  light: { width: 12, height: 12, borderRadius: '50%', border: '0.5px solid rgba(0,0,0,0.12)' },
+  close: { background: '#FF5F57' },
+  minimize: { background: '#FEBC2E' },
+  maximize: { background: '#28C840' },
+  title: {
+    position: 'absolute', left: 0, right: 0, textAlign: 'center',
+    fontSize: 13, color: '#333', fontWeight: 500, pointerEvents: 'none',
+  },
+  content: { position: 'relative', overflow: 'hidden' },
+};
+
+function MacosWindow({ title = '', width = 900, height = 600, children }) {
+  return (
+    <div style={macosWindowStyles.window}>
+      <div style={macosWindowStyles.titleBar}>
+        <div style={macosWindowStyles.trafficLights}>
+          <div style={{ ...macosWindowStyles.light, ...macosWindowStyles.close }} />
+          <div style={{ ...macosWindowStyles.light, ...macosWindowStyles.minimize }} />
+          <div style={{ ...macosWindowStyles.light, ...macosWindowStyles.maximize }} />
+        </div>
+        {title && <div style={macosWindowStyles.title}>{title}</div>}
+      </div>
+      <div style={{ ...macosWindowStyles.content, width, height }}>{children}</div>
+    </div>
+  );
+}
+
+// ============================================================================
+// BrowserWindow 设备框（inlined from huashu-design assets/browser_window.jsx）
+// 改造：emoji 导航按钮 → 内联 SVG Icon（反 AI slop）
+// ============================================================================
+const browserWindowStyles = {
+  window: { display: 'inline-block', background: '#fff', borderRadius: 10, overflow: 'hidden', boxShadow: '0 30px 80px rgba(0,0,0,0.18), 0 0 0 0.5px rgba(0,0,0,0.12)' },
+  chrome: { background: '#dee1e6', paddingTop: 10, paddingLeft: 10, paddingRight: 10, userSelect: 'none' },
+  tabRow: { display: 'flex', alignItems: 'flex-end', gap: 6, position: 'relative' },
+  trafficLights: { display: 'flex', gap: 8, alignItems: 'center', paddingBottom: 10, marginRight: 8 },
+  light: { width: 12, height: 12, borderRadius: '50%', border: '0.5px solid rgba(0,0,0,0.12)' },
+  close: { background: '#FF5F57' },
+  minimize: { background: '#FEBC2E' },
+  maximize: { background: '#28C840' },
+  tab: { background: '#fff', padding: '8px 30px 8px 14px', borderTopLeftRadius: 10, borderTopRightRadius: 10, fontSize: 12, color: '#222', maxWidth: 220, display: 'flex', alignItems: 'center', gap: 8, position: 'relative', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  favicon: { width: 14, height: 14, borderRadius: 2, background: '#3B82F6', flexShrink: 0 },
+  navBar: { background: '#fff', padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid #e5e7eb' },
+  navButtons: { display: 'flex', gap: 4, color: '#5f6368' },
+  navButton: { width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', cursor: 'pointer' },
+  urlBar: { flex: 1, background: '#f1f3f4', borderRadius: 9999, padding: '7px 14px', fontSize: 13, color: '#333', display: 'flex', alignItems: 'center', gap: 8 },
+  lockIcon: { color: '#5f6368', display: 'inline-flex', alignItems: 'center' },
+  content: { position: 'relative', overflow: 'auto', background: '#fff' },
+};
+
+function BrowserWindow({ title = 'New Tab', url = 'https://example.com', width = 1200, height = 800, showTrafficLights = true, children }) {
+  return (
+    <div style={browserWindowStyles.window}>
+      <div style={browserWindowStyles.chrome}>
+        <div style={browserWindowStyles.tabRow}>
+          {showTrafficLights && (
+            <div style={browserWindowStyles.trafficLights}>
+              <div style={{ ...browserWindowStyles.light, ...browserWindowStyles.close }} />
+              <div style={{ ...browserWindowStyles.light, ...browserWindowStyles.minimize }} />
+              <div style={{ ...browserWindowStyles.light, ...browserWindowStyles.maximize }} />
+            </div>
+          )}
+          <div style={browserWindowStyles.tab}>
+            <div style={browserWindowStyles.favicon} />
+            <span>{title}</span>
+          </div>
+        </div>
+      </div>
+      <div style={browserWindowStyles.navBar}>
+        <div style={browserWindowStyles.navButtons}>
+          <div style={browserWindowStyles.navButton}><Icon name="arrowLeft" size={16} /></div>
+          <div style={{ ...browserWindowStyles.navButton, opacity: 0.4 }}><Icon name="arrowRight" size={16} /></div>
+          <div style={browserWindowStyles.navButton}><Icon name="refresh" size={14} /></div>
+        </div>
+        <div style={browserWindowStyles.urlBar}>
+          <span style={browserWindowStyles.lockIcon}><Icon name="lock" size={12} /></span>
+          <span>{url}</span>
+        </div>
+      </div>
+      <div style={{ ...browserWindowStyles.content, width, height }}>{children}</div>
+    </div>
+  );
+}
+
+// ============================================================================
+// 共享设计变量
+// ============================================================================
+const COLORS = {
+  bgCanvas: '#FAFAFA',
+  bgSurface: '#FFFFFF',
+  bgElevated: 'rgba(0,0,0,0.04)',
+  bgHover: 'rgba(0,0,0,0.06)',
+  textPrimary: '#1A1A1A',
+  textSecondary: '#6B7280',
+  textTertiary: '#9CA3AF',
+  primary: '#3B82F6',
+  primaryMuted: 'rgba(59,130,246,0.1)',
+  primaryLight: 'rgba(59,130,246,0.8)',
+  success: '#22C55E',
+  error: '#EF4444',
+  warning: '#F59E0B',
+  purple: 'rgb(139, 92, 246)',
+  orange: 'rgb(249, 115, 22)',
+  red: 'rgb(239, 68, 68)',
+  borderDefault: 'rgba(0,0,0,0.08)',
+  borderSubtle: 'rgba(0,0,0,0.04)',
+};
+
+// ============================================================================
+// BrowserHome 组件（1:1 还原 BrowserHome.tsx）
+// ============================================================================
+const browserHomeStyles = {
+  container: { height: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '48px 24px 24px', background: COLORS.bgCanvas },
+  logo: { width: 72, height: 72, borderRadius: '50%', background: 'linear-gradient(135deg, #3B82F6, #1D4ED8)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', color: '#fff', fontSize: 24, fontWeight: 700 },
+  searchWrap: { width: '100%', maxWidth: 640, marginBottom: 32, position: 'relative' },
+  searchInput: { width: '100%', padding: '14px 16px 14px 44px', borderRadius: 9999, border: 'none', background: 'rgba(0,0,0,0.04)', color: COLORS.textPrimary, fontSize: 14, outline: 'none' },
+  bookmarkCircle: { width: 64, height: 64, borderRadius: '50%', background: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: COLORS.primary, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' },
+};
+
+function BrowserHome() {
+  const [searchValue, setSearchValue] = useState('');
+  const bookmarks = [
+    { title: 'GitHub', color: '#24292F' },
+    { title: 'Google', color: '#4285F4' },
+    { title: 'YouTube', color: '#FF0000' },
+    { title: 'Twitter', color: '#1DA1F2' },
+    { title: 'Wikipedia', color: '#000000' },
+    { title: 'Gmail', color: '#EA4335' },
+  ];
+  return (
+    <div style={browserHomeStyles.container}>
+      <div style={{ marginBottom: 32, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+        <div style={browserHomeStyles.logo}>LD</div>
+        <span style={{ color: COLORS.textSecondary, fontSize: 13 }}>Living Dashboard</span>
+      </div>
+      <div style={browserHomeStyles.searchWrap}>
+        <Icon name="search" size={18} style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: COLORS.textTertiary }} />
+        <input
+          type="text"
+          value={searchValue}
+          onChange={e => setSearchValue(e.target.value)}
+          placeholder="输入网址或搜索..."
+          style={browserHomeStyles.searchInput}
+          autoFocus
+        />
+      </div>
+      <div style={{ width: '100%', maxWidth: 800, marginBottom: 32 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.textSecondary }}>常用网站</span>
+          <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 9999, border: 'none', background: COLORS.bgElevated, color: COLORS.textSecondary, fontSize: 12, cursor: 'pointer' }}>
+            <Icon name="plus" size={12} /> 添加
+          </button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: 12 }}>
+          {bookmarks.map((b, i) => (
+            <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '12px 8px', borderRadius: 12, cursor: 'pointer', position: 'relative' }}>
+              <div style={{ ...browserHomeStyles.bookmarkCircle, color: b.color }}>
+                <Icon name="globe" size={28} />
+              </div>
+              <span style={{ fontSize: 11, color: COLORS.textSecondary, textAlign: 'center' }}>{b.title}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ width: '100%', maxWidth: 800 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+          <Icon name="bookmark" size={14} style={{ color: COLORS.textSecondary }} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.textSecondary }}>书签</span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {bookmarks.slice(0, 4).map((b, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 9999, background: 'transparent', cursor: 'pointer' }}>
+              <Icon name="star" size={12} style={{ color: COLORS.warning, fill: COLORS.warning }} />
+              <span style={{ fontSize: 12, color: COLORS.textSecondary, flex: 1 }}>{b.title}</span>
+              <span style={{ fontSize: 11, color: COLORS.textTertiary }}>https://{b.title.toLowerCase()}.com</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// CanvasHome 组件（1:1 还原 CanvasHome.tsx + 三态 AI 输入框）
+// ============================================================================
+function CanvasHome() {
+  const [aiMode, setAiMode] = useState('focused');
+  const [inputValue, setInputValue] = useState('');
+  const messages = []; // 空消息 → 显示空态
+
+  return (
+    <div style={{ height: '100%', position: 'relative', background: COLORS.bgCanvas, overflow: 'hidden' }}>
+      <div style={{ height: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '32px 24px 24px' }}>
+      <div style={{ marginBottom: 24, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+        <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'linear-gradient(135deg, #3B82F6, #1D4ED8)', border: `2px solid ${COLORS.primary}`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 20px rgba(59,144,226,0.3)', color: '#fff', fontSize: 28, fontWeight: 700 }}>
+          LD
+        </div>
+        <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.textPrimary }}>学习面板</span>
+        <span style={{ fontSize: 11, color: COLORS.textTertiary }}>点击进入画布</span>
+      </div>
+
+      {/* 收起式 AI 对话框（idle 48px / focused / expanded 480px） */}
+      <div style={{
+        width: '100%', maxWidth: 640, marginBottom: 32, position: 'relative',
+        display: 'flex', flexDirection: 'column',
+        maxHeight: aiMode === 'idle' ? 48 : 480,
+        overflow: 'hidden',
+        transition: 'max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+      }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 6, minHeight: 0 }}>
+          {messages.length === 0 && (
+            <div style={{
+              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: COLORS.textTertiary, fontSize: 20, fontWeight: 300, textAlign: 'center',
+            }}>
+              开始和 AI 对话吧
+            </div>
+          )}
+        </div>
+
+        {/* pill 输入框 */}
+        <div
+          onClick={() => { if (aiMode === 'idle') setAiMode('focused'); }}
+          style={{
+            height: 48, borderRadius: 24, background: COLORS.bgSurface,
+            display: 'flex', alignItems: 'center', padding: '0 12px', gap: 8,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.08)', cursor: 'text',
+            transition: 'border-color 0.2s, box-shadow 0.2s',
+          }}
+        >
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Icon name="bot" size={18} style={{ color: COLORS.primary }} />
+            <span style={{ position: 'absolute', bottom: -1, right: -1, width: 8, height: 8, borderRadius: '50%', background: COLORS.success, border: `1.5px solid ${COLORS.bgSurface}` }} />
+          </div>
+          <textarea
+            value={inputValue}
+            onChange={e => setInputValue(e.target.value)}
+            onFocus={() => { if (aiMode === 'idle') setAiMode('focused'); }}
+            placeholder="有什么想问的..."
+            style={{
+              flex: 1, padding: '4px 0', border: 'none', background: 'transparent',
+              color: COLORS.textPrimary, fontSize: 13, fontFamily: 'inherit',
+              resize: 'none', outline: 'none', minHeight: 24, lineHeight: 1.4,
+            }}
+            rows={1}
+          />
+          {aiMode !== 'idle' && (
+            <button style={{
+              width: 32, height: 32, borderRadius: '50%', border: 'none',
+              background: inputValue.trim() ? COLORS.primary : COLORS.bgElevated,
+              color: inputValue.trim() ? '#fff' : COLORS.textTertiary,
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            }}>
+              <Icon name="send" size={14} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* 收藏组件网格 */}
+      <div style={{ width: '100%', maxWidth: 800, marginBottom: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.textSecondary, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <Icon name="sparkles" size={14} /> 收藏组件
+          </span>
+          <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 9999, border: `1px dashed ${COLORS.borderDefault}`, background: 'transparent', color: COLORS.textSecondary, fontSize: 12, cursor: 'pointer' }}>
+            <Icon name="plus" size={12} /> 添加组件
+          </button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, justifyItems: 'center' }}>
+          {[
+            { name: 'AI 对话', icon: 'bot', color: COLORS.primary },
+            { name: '网页', icon: 'globe', color: COLORS.success },
+            { name: '笔记', icon: 'script', color: COLORS.warning },
+            { name: '待办', icon: 'check', color: COLORS.purple },
+          ].map((w, i) => (
+            <div key={i} style={{
+              width: 160, height: 120, display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 12,
+              background: COLORS.bgSurface, cursor: 'pointer', position: 'relative',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+            }}>
+              <div style={{ position: 'absolute', top: 4, right: 4, color: COLORS.warning }}>
+                <Icon name="star" size={12} />
+              </div>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: COLORS.bgElevated, display: 'flex', alignItems: 'center', justifyContent: 'center', color: w.color }}>
+                <Icon name={w.icon} size={18} />
+              </div>
+              <span style={{ fontSize: 11, color: COLORS.textSecondary }}>{w.name}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <button style={{
+        padding: '8px 16px', borderRadius: 9999, border: 'none',
+        background: COLORS.primaryMuted, color: COLORS.primaryLight, fontSize: 12,
+        cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
+      }}>
+        进入画布 <Icon name="arrowRight" size={12} />
+      </button>
+      </div>
+      {/* 右下角 AddWidgetMenu FAB（48×48 圆形 + 加号，hover 旋转 90° 变蓝） */}
+      <button className="add-widget-fab" title="添加组件（AddWidgetMenu）">
+        <Icon name="plus" size={22} strokeWidth={2.5} />
+      </button>
+    </div>
+  );
+}
+
+// ============================================================================
+// Sidebar 组件（1:1 还原 Sidebar.tsx - canvas 模式）
+// ============================================================================
+function SidebarCanvas() {
+  const panels = [
+    { id: '1', name: '学习面板', active: true },
+    { id: '2', name: '工作面板' },
+    { id: '3', name: '阅读面板' },
+  ];
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: COLORS.bgSurface, width: 240 }}>
+      {/* toggle 按钮组 */}
+      <div style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+        <div style={{ flex: 1, display: 'flex', background: COLORS.bgElevated, borderRadius: 10, padding: 4, gap: 2 }}>
+          <button style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '8px 16px', background: 'rgba(0,0,0,0.08)', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 12, color: COLORS.textPrimary }}>
+            <Icon name="panelLeftOpen" size={12} /><span>画布面板</span>
+          </button>
+          <button style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '8px 16px', background: 'transparent', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 12, color: COLORS.textPrimary }}>
+            <Icon name="bot" size={12} /><span>AI助手</span>
+          </button>
+        </div>
+        <button style={{ flexShrink: 0, width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: 'none', background: 'transparent', color: COLORS.textSecondary, cursor: 'pointer' }}>
+          <Icon name="panelLeftClose" size={16} />
+        </button>
+      </div>
+
+      {/* panel-list */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {panels.map(p => (
+          <div key={p.id} style={{
+            padding: '8px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 13,
+            background: p.active ? COLORS.bgElevated : 'transparent',
+            color: COLORS.textPrimary, fontWeight: p.active ? 500 : 400,
+          }}>
+            {p.name}
+          </div>
+        ))}
+      </div>
+
+      {/* footer */}
+      <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0 }}>
+        <button style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 8, border: 'none', background: 'transparent', color: COLORS.textSecondary, fontSize: 12, cursor: 'pointer', textAlign: 'left' }}>
+          <Icon name="plus" size={14} /> 新建面板
+        </button>
+        <button style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 8, border: 'none', background: 'transparent', color: COLORS.textSecondary, fontSize: 12, cursor: 'pointer', textAlign: 'left' }}>
+          <Icon name="grid" size={14} /> 模板
+        </button>
+        <button style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 8, border: 'none', background: 'transparent', color: COLORS.textSecondary, fontSize: 12, cursor: 'pointer', textAlign: 'left' }}>
+          <Icon name="sparkles" size={14} /> 自动布局
+        </button>
+        {/* Agent 切换快捷入口 */}
+        <button style={{
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+          padding: '4px 8px', marginLeft: 'auto', background: 'transparent',
+          border: `1px solid ${COLORS.borderSubtle}`, borderRadius: 9999,
+          cursor: 'pointer', color: COLORS.textSecondary, fontSize: 11,
+        }}>
+          <Icon name="cloud" size={12} /><span style={{ fontSize: 9, opacity: 0.7 }}>自动</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Sidebar 折叠态
+// ============================================================================
+function SidebarCollapsed({ mode = 'canvas' }) {
+  // 源码 Sidebar.tsx 第 107-126 行：折叠态只显示一个图标，点击整个条带展开
+  // canvas 模式显示 PanelLeftOpen，ai-assistant 模式显示 Bot
+  const iconName = mode === 'ai-assistant' ? 'bot' : 'panelLeftOpen';
+  const titleText = mode === 'ai-assistant' ? '展开侧边栏（AI 助手）' : '展开侧边栏（画布面板）';
+  return (
+    <div title={titleText} style={{ height: '100%', width: 48, background: COLORS.bgSurface, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 0' }}>
+      <div style={{ width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: COLORS.textSecondary }}>
+        <Icon name={iconName} size={16} />
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// 思考等级水平滑块组件（4 档：极简/低/中/高，源码为下拉按钮，设计改进为滑块）
+// ============================================================================
+function ThinkingSlider({ level, onChange }) {
+  // 源码标签 1:1 还原：极简/低/中/高（thinkingLevel.ts LEVEL_LABELS）
+  const levels = ['极简', '低', '中', '高'];
+  const percent = (level / (levels.length - 1)) * 100;
+  return (
+    <div style={{ padding: '4px 8px' }}>
+      <div className="thinking-slider-track">
+        <div className="thinking-slider-fill" style={{ width: `${percent}%` }} />
+        {levels.map((_, i) => (
+          <div key={i} className="thinking-slider-tick" style={{ left: `${(i / (levels.length - 1)) * 100}%` }} />
+        ))}
+        <div className="thinking-slider-thumb" style={{ left: `${percent}%` }} />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: COLORS.textTertiary, marginTop: 4 }}>
+        {levels.map((l, i) => (
+          <span key={i} style={{ fontWeight: i === level ? 600 : 400, color: i === level ? COLORS.primary : COLORS.textTertiary }}>{l}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// AIAssistantSidebar 组件（改造点：会话独立 + 思考滑块 + 空态 + 折叠思维链/工具调用）
+// ============================================================================
+function AIAssistantSidebar() {
+  const [thinkingLevel, setThinkingLevel] = useState(2); // 中（源码默认 medium）
+  const [thinkingExpanded, setThinkingExpanded] = useState(false);
+  const [toolExpanded, setToolExpanded] = useState(false);
+  const displayModel = 'deepseek-chat';
+  // 空态文案：源码为「向 AI 助手提问吧」，按任务要求改为「开始和 AI 对话吧」
+  const hasMessages = true; // 本 demo 预置消息，空态分支不显示但保留代码完整
+
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: COLORS.bgSurface, overflow: 'hidden' }}>
+      {/* 顶部：当前面板 · 会话独立 */}
+      <div style={{ padding: '8px 10px', borderBottom: `1px solid ${COLORS.borderSubtle}`, flexShrink: 0 }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          padding: '4px 10px', background: COLORS.primaryMuted, borderRadius: 9999,
+          fontSize: 10, color: COLORS.primary, fontWeight: 500, marginBottom: 6,
+        }}>
+          <Icon name="panelLeft" size={10} />
+          <span>当前面板：学习面板 · 会话独立</span>
+        </div>
+
+        {/* Agent 模式切换 */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginBottom: 6 }}>
+          <div style={{ display: 'inline-flex', background: COLORS.bgElevated, borderRadius: 9999, padding: 2, gap: 2 }}>
+            <button style={{ padding: '3px 8px', background: 'rgba(0,0,0,0.08)', border: 'none', borderRadius: 9999, fontSize: 10, cursor: 'pointer', color: COLORS.textPrimary, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+              <Icon name="cloud" size={10} /> 云端
+            </button>
+            <button style={{ padding: '3px 8px', background: 'transparent', border: 'none', borderRadius: 9999, fontSize: 10, cursor: 'pointer', color: COLORS.textSecondary, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+              <Icon name="hardDrive" size={10} /> 本地
+            </button>
+            <button style={{ padding: '3px 8px', background: 'transparent', border: 'none', borderRadius: 9999, fontSize: 10, cursor: 'pointer', color: COLORS.textSecondary, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+              <Icon name="zap" size={10} /> 自动
+            </button>
+          </div>
+        </div>
+
+        {/* 会话选择器 */}
+        <button style={{
+          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 6, padding: '6px 10px', background: COLORS.bgElevated,
+          border: `1px solid ${COLORS.borderSubtle}`, borderRadius: 8,
+          cursor: 'pointer', fontSize: 12, color: COLORS.textPrimary,
+        }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, overflow: 'hidden', flex: 1 }}>
+            <Icon name="message" size={12} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>学习面板会话 06/27</span>
+          </span>
+          <Icon name="chevronDown" size={12} />
+        </button>
+
+        {/* 等待徽章 */}
+        <div style={{
+          marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 4,
+          padding: '2px 8px', background: 'rgba(59,130,246,0.12)', color: 'rgb(37,99,235)',
+          borderRadius: 9999, fontSize: 10, fontWeight: 500,
+        }}>
+          <Icon name="loader" size={10} />
+          1 个会话等待回答
+        </div>
+      </div>
+
+      {/* 对话流 */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
+        {/* 空态：无消息时显示「开始和 AI 对话吧」（源码为「向 AI 助手提问吧」，按任务要求修改） */}
+        {!hasMessages && (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: COLORS.textTertiary, fontSize: 16, fontWeight: 300, textAlign: 'center' }}>
+            开始和 AI 对话吧
+          </div>
+        )}
+        {/* 用户消息 */}
+        <div style={{
+          alignSelf: 'flex-end', maxWidth: '80%', padding: '8px 12px',
+          background: COLORS.bgElevated, color: COLORS.textPrimary,
+          borderRadius: '12px 12px 2px 12px', fontSize: 12, lineHeight: 1.5,
+        }}>
+          帮我创建一个学习面板，包含笔记和待办组件
+        </div>
+
+        {/* 思维链折叠（.thinking-collapsed） */}
+        <div className="thinking-collapsed" onClick={() => setThinkingExpanded(!thinkingExpanded)} style={{
+          alignSelf: 'flex-start', maxWidth: '85%', padding: '6px 10px',
+          background: 'rgba(0,0,0,0.03)', borderRadius: 8, fontSize: 11,
+          color: COLORS.textSecondary, display: 'flex', alignItems: 'center', gap: 4,
+        }}>
+          <Icon name={thinkingExpanded ? 'chevronDown' : 'chevronRight'} size={11} />
+          <Icon name="brain" size={11} />
+          <span>已思考 3s</span>
+          {thinkingExpanded && (
+            <div style={{ marginTop: 4, padding: '4px 6px', background: 'rgba(0,0,0,0.04)', borderRadius: 4, fontSize: 10, color: COLORS.textTertiary, width: '100%' }}>
+              用户想要创建学习面板，需要包含笔记和待办组件。我需要先创建面板，然后添加组件...
+            </div>
+          )}
+        </div>
+
+        {/* 工具调用折叠（.tool-flow-bar） */}
+        <div style={{
+          alignSelf: 'flex-start', maxWidth: '85%', padding: '8px 10px',
+          background: 'rgba(0,0,0,0.03)', borderRadius: 8, fontSize: 11,
+          color: COLORS.textSecondary, display: 'flex', flexDirection: 'column', gap: 4,
+        }}>
+          <div className="tool-flow-bar" />
+          <div onClick={() => setToolExpanded(!toolExpanded)} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+            <Icon name={toolExpanded ? 'chevronDown' : 'chevronRight'} size={11} />
+            <Icon name="wrench" size={11} />
+            <span>工具执行了 2 次</span>
+          </div>
+          <div style={{ fontSize: 10, color: COLORS.textTertiary }}>创建面板中...</div>
+        </div>
+
+        {/* AI 回复 */}
+        <div style={{
+          alignSelf: 'flex-start', maxWidth: '85%', padding: '8px 12px',
+          background: 'rgba(0,0,0,0.03)', color: COLORS.textPrimary,
+          borderRadius: '12px 12px 12px 2px', fontSize: 12, lineHeight: 1.5,
+        }}>
+          好的，我已经为你创建了「学习面板」，并添加了笔记和待办组件。你想进一步配置吗？
+        </div>
+
+        {/* AskUserCard（紫色左色条） */}
+        <div style={{
+          alignSelf: 'flex-start', maxWidth: '85%', padding: 12,
+          background: 'rgba(0,0,0,0.03)', borderLeft: '3px solid rgb(139, 92, 246)',
+          borderRadius: 12, fontSize: 12, color: COLORS.textPrimary,
+          display: 'flex', flexDirection: 'column', gap: 8,
+        }}>
+          <div style={{ fontWeight: 500, lineHeight: 1.5 }}>你想用哪种方式创建面板？</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {[
+              { label: '从空白创建', desc: '创建一个空面板，手动添加组件' },
+              { label: '使用模板', desc: '从预设模板快速创建' },
+              { label: '从书签导入', desc: '将书签转换为面板组件' },
+            ].map((opt, i) => (
+              <button key={i} style={{
+                display: 'flex', alignItems: 'flex-start', gap: 6, padding: '6px 10px',
+                background: 'transparent', border: `1px solid ${COLORS.borderSubtle}`,
+                borderRadius: 8, cursor: 'pointer', fontSize: 12, color: COLORS.textPrimary,
+                textAlign: 'left', width: '100%',
+              }}>
+                <span style={{ width: 14, height: 14, borderRadius: '50%', border: `1.5px solid ${COLORS.textTertiary}`, flexShrink: 0, marginTop: 1 }} />
+                <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <span style={{ fontWeight: 400 }}>{opt.label}</span>
+                  <span style={{ fontSize: 10, color: COLORS.textTertiary }}>{opt.desc}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* PermissionCard（橙色左色条 + 白名单按钮） */}
+        <div style={{
+          alignSelf: 'flex-start', maxWidth: '85%', padding: 12,
+          background: 'rgba(0,0,0,0.03)', borderLeft: '3px solid rgb(249, 115, 22)',
+          borderRadius: 12, fontSize: 12, color: COLORS.textPrimary,
+          display: 'flex', flexDirection: 'column', gap: 8,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'rgb(249, 115, 22)', fontWeight: 500 }}>
+            <Icon name="shieldCheck" size={12} /> 权限请求
+            <span style={{ padding: '1px 5px', background: COLORS.bgElevated, borderRadius: 4, fontSize: 9, color: COLORS.textTertiary }}>writeFile</span>
+          </div>
+          <div style={{ lineHeight: 1.5 }}>请求写入配置文件 /config/panels.json</div>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            <button className="whitelist-btn" style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px',
+              background: 'transparent', border: `1px solid ${COLORS.borderDefault}`,
+              borderRadius: 9999, fontSize: 11, color: COLORS.textSecondary, cursor: 'pointer',
+            }}>
+              <Icon name="shield" size={11} /> 添加到白名单
+            </button>
+            <button style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 12px',
+              background: 'transparent', border: `1px solid rgba(239,68,68,0.3)`,
+              borderRadius: 9999, fontSize: 11, color: 'rgb(239,68,68)', cursor: 'pointer',
+            }}>
+              <Icon name="x" size={11} /> 拒绝
+            </button>
+            <button style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 12px',
+              background: 'transparent', border: `1px solid rgba(22,163,74,0.3)`,
+              borderRadius: 9999, fontSize: 11, color: 'rgb(22,163,74)', cursor: 'pointer',
+            }}>
+              <Icon name="check" size={11} /> 允许
+            </button>
+          </div>
+        </div>
+
+        {/* 思考中指示器 */}
+        <div style={{
+          alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 8,
+          padding: '6px 12px', background: 'rgba(0,0,0,0.03)', borderRadius: 12,
+          fontSize: 11, color: COLORS.textSecondary,
+        }}>
+          <span className="thinking-dot" style={{ animationDelay: '0s' }} />
+          <span className="thinking-dot" style={{ animationDelay: '0.15s' }} />
+          <span className="thinking-dot" style={{ animationDelay: '0.3s' }} />
+          思考中...
+        </div>
+      </div>
+
+      {/* 输入区 */}
+      <div style={{ padding: '8px 12px', borderTop: `1px solid ${COLORS.borderSubtle}`, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+          <textarea
+            placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
+            rows={1}
+            style={{
+              flex: 1, padding: '8px 14px', background: COLORS.bgElevated, color: COLORS.textPrimary,
+              border: '1px solid transparent', borderRadius: 9999, fontSize: 12,
+              resize: 'none', outline: 'none', fontFamily: 'inherit', lineHeight: 1.4, maxHeight: 100,
+            }}
+          />
+          <button style={{
+            width: 32, height: 32, background: COLORS.primary, color: '#fff',
+            border: 'none', borderRadius: 9999, cursor: 'pointer', flexShrink: 0,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Icon name="send" size={14} />
+          </button>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, color: COLORS.textTertiary }}>
+          <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', background: 'transparent', border: `1px solid ${COLORS.borderSubtle}`, borderRadius: 9999, cursor: 'pointer', fontSize: 10, color: COLORS.textSecondary }}>
+            <Icon name="settings" size={10} /> API配置
+          </button>
+          {/* 思考等级滑块（水平 4 档） */}
+          <div style={{ flex: 1, minWidth: 100, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+              <Icon name="brain" size={10} />
+              <span style={{ fontSize: 10, color: COLORS.textSecondary }}>思考等级</span>
+            </div>
+            <ThinkingSlider level={thinkingLevel} onChange={setThinkingLevel} />
+            <span style={{ fontSize: 9, color: COLORS.textTertiary, fontStyle: 'italic', marginTop: 2 }}>设计改进：源码为下拉按钮，改为滑块</span>
+          </div>
+          <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', background: 'transparent', border: `1px solid ${COLORS.borderSubtle}`, borderRadius: 9999, cursor: 'pointer', fontSize: 10, color: COLORS.textSecondary }}>
+            {displayModel} <Icon name="chevronDown" size={10} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// SettingsPanel 组件（1:1 还原 8 Tab + AI 配置改造：全允许模式）
+// ============================================================================
+function SettingsPanel({ initialTab = 'ai' }) {
+  const [activeTab, setActiveTab] = useState(initialTab);
+  const [allowAll, setAllowAll] = useState(false);
+  const [defaultThinkingLevel, setDefaultThinkingLevel] = useState(2); // 中（源码默认 medium）
+  const tabs = [
+    { key: 'appearance', label: '外观' },
+    { key: 'behavior', label: '行为' },
+    { key: 'accessibility', label: '动效与无障碍' },
+    { key: 'favorites', label: '收藏管理' },
+    { key: 'shortcuts', label: '快捷键' },
+    { key: 'data', label: '数据管理' },
+    { key: 'server', label: '服务器' },
+    { key: 'ai', label: 'AI 配置' },
+  ];
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: COLORS.bgSurface }}>
+      {/* Header */}
+      <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: `1px solid ${COLORS.borderSubtle}` }}>
+        <h2 style={{ fontSize: 16, fontWeight: 600 }}>设置</h2>
+        <button style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'transparent', cursor: 'pointer', color: COLORS.textSecondary, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="x" size={14} />
+        </button>
+      </div>
+      {/* pill 形状 Tab 栏 */}
+      <div style={{ display: 'flex', gap: 6, padding: '8px 12px', overflowX: 'auto', borderBottom: `1px solid ${COLORS.borderSubtle}` }}>
+        {tabs.map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            style={{
+              padding: '6px 14px', borderRadius: 9999, border: 'none', cursor: 'pointer',
+              fontSize: 12, whiteSpace: 'nowrap',
+              background: activeTab === tab.key ? COLORS.primary : COLORS.bgElevated,
+              color: activeTab === tab.key ? '#fff' : COLORS.textSecondary,
+              fontWeight: activeTab === tab.key ? 500 : 400,
+              transition: 'background 0.2s',
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      {/* Body */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
+        {activeTab === 'appearance' && (
+          <div>
+            <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>主题预设</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
+              {[
+                { name: 'Apple', bg: '#F5F5F7', accent: '#0071E3' },
+                { name: 'GitHub', bg: '#F6F8FA', accent: '#1A7F37' },
+                { name: 'Notion', bg: '#FFFFFF', accent: '#2383E2' },
+                { name: 'Linear', bg: '#F8F9FC', accent: '#5E6AD2' },
+                { name: 'Vercel', bg: '#FAFAFA', accent: '#171717' },
+              ].map((t, i) => (
+                <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: 6, borderRadius: 8, cursor: 'pointer', background: COLORS.bgElevated }}>
+                  <div style={{ width: '100%', aspectRatio: '16/10', borderRadius: 4, background: t.bg, position: 'relative' }}>
+                    <div style={{ position: 'absolute', bottom: 3, left: 3, width: 8, height: 3, borderRadius: 1, background: t.accent }} />
+                  </div>
+                  <span style={{ fontSize: 10, color: COLORS.textSecondary }}>{t.name}</span>
+                </div>
+              ))}
+            </div>
+            <h3 style={{ fontSize: 13, fontWeight: 600, marginTop: 16, marginBottom: 8 }}>背景</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0' }}>
+              <span style={{ fontSize: 12, flex: 1 }}>背景类型</span>
+              <select style={{ padding: '4px 8px', borderRadius: 8, border: `1px solid ${COLORS.borderDefault}`, fontSize: 12 }}>
+                <option>纯色</option><option>渐变</option><option>图片</option>
+              </select>
+            </div>
+          </div>
+        )}
+        {activeTab === 'behavior' && (
+          <div>
+            <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>行为</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0' }}>
+              <span style={{ fontSize: 12, flex: 1 }}>默认搜索引擎</span>
+              <select style={{ padding: '4px 8px', borderRadius: 8, border: `1px solid ${COLORS.borderDefault}`, fontSize: 12 }}>
+                <option>Bing</option><option>Google</option><option>百度</option>
+              </select>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0' }}>
+              <span style={{ fontSize: 12, flex: 1 }}>删除前确认</span>
+              <div style={{ width: 36, height: 20, borderRadius: 9999, background: COLORS.primary, position: 'relative' }}>
+                <div style={{ position: 'absolute', right: 2, top: 2, width: 16, height: 16, borderRadius: '50%', background: '#fff' }} />
+              </div>
+            </div>
+          </div>
+        )}
+        {activeTab === 'accessibility' && (
+          <div>
+            <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>动效与无障碍</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0' }}>
+              <span style={{ fontSize: 12, flex: 1 }}>减少动画</span>
+              <div style={{ width: 36, height: 20, borderRadius: 9999, background: COLORS.bgElevated, position: 'relative' }}>
+                <div style={{ position: 'absolute', left: 2, top: 2, width: 16, height: 16, borderRadius: '50%', background: '#fff' }} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0' }}>
+              <span style={{ fontSize: 12, flex: 1 }}>高对比度</span>
+              <div style={{ width: 36, height: 20, borderRadius: 9999, background: COLORS.bgElevated, position: 'relative' }}>
+                <div style={{ position: 'absolute', left: 2, top: 2, width: 16, height: 16, borderRadius: '50%', background: '#fff' }} />
+              </div>
+            </div>
+          </div>
+        )}
+        {activeTab === 'favorites' && <div style={{ padding: 20, textAlign: 'center', color: COLORS.textTertiary, fontSize: 12 }}>收藏组件管理（1:1 还原 FavoritesManager 组件）</div>}
+        {activeTab === 'shortcuts' && <div style={{ padding: 20, textAlign: 'center', color: COLORS.textTertiary, fontSize: 12 }}>快捷键配置（1:1 还原 ShortcutsConfig 组件）</div>}
+        {activeTab === 'data' && (
+          <div>
+            <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>数据管理</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0' }}>
+              <span style={{ fontSize: 12, flex: 1 }}>导出数据</span>
+              <button style={{ padding: '4px 12px', borderRadius: 9999, border: 'none', background: COLORS.bgElevated, fontSize: 12, cursor: 'pointer' }}>导出</button>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0' }}>
+              <span style={{ fontSize: 12, flex: 1 }}>导入数据</span>
+              <button style={{ padding: '4px 12px', borderRadius: 9999, border: 'none', background: COLORS.bgElevated, fontSize: 12, cursor: 'pointer' }}>导入</button>
+            </div>
+          </div>
+        )}
+        {activeTab === 'server' && (
+          <div>
+            <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>服务器配置</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0' }}>
+              <span style={{ fontSize: 12, flex: 1 }}>设备 ID</span>
+              <input readOnly value="device-abc123" style={{ width: 200, padding: '4px 8px', borderRadius: 8, border: `1px solid ${COLORS.borderDefault}`, fontSize: 12 }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0' }}>
+              <span style={{ fontSize: 12, flex: 1 }}>服务器 Token</span>
+              <input type="password" placeholder="输入服务器 token" style={{ width: 200, padding: '4px 8px', borderRadius: 8, border: `1px solid ${COLORS.borderDefault}`, fontSize: 12 }} />
+            </div>
+          </div>
+        )}
+        {activeTab === 'ai' && (
+          <div>
+            {/* 全允许模式开关（改造点） */}
+            <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>全允许模式</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', marginBottom: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 500 }}>全允许模式</div>
+                <div style={{ fontSize: 11, color: COLORS.error, marginTop: 2 }}>开启后所有工具调用将自动执行，不再询问</div>
+              </div>
+              <div
+                onClick={() => setAllowAll(!allowAll)}
+                style={{ width: 36, height: 20, borderRadius: 9999, background: allowAll ? COLORS.error : COLORS.bgElevated, position: 'relative', cursor: 'pointer', transition: 'background 0.2s' }}
+              >
+                <div style={{ position: 'absolute', left: allowAll ? 18 : 2, top: 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
+              </div>
+            </div>
+
+            {/* 默认思考等级（改造点：用滑块替代下拉） */}
+            <h3 style={{ fontSize: 13, fontWeight: 600, marginTop: 16, marginBottom: 8 }}>默认思考等级</h3>
+            <div style={{ padding: '8px 0' }}>
+              <ThinkingSlider level={defaultThinkingLevel} onChange={setDefaultThinkingLevel} />
+            </div>
+
+            {/* 默认运行模式 */}
+            <h3 style={{ fontSize: 13, fontWeight: 600, marginTop: 16, marginBottom: 8 }}>默认运行模式</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0' }}>
+              <span style={{ fontSize: 12, flex: 1 }}>运行模式</span>
+              <select style={{ padding: '4px 8px', borderRadius: 8, border: `1px solid ${COLORS.borderDefault}`, fontSize: 12 }}>
+                <option>云端（服务器 Pi Agent）</option>
+                <option>本地（轻 Agent，调 API Key）</option>
+                <option>自动（在线用云端，离线切本地）</option>
+              </select>
+            </div>
+          </div>
+        )}
+      </div>
+      {/* Footer */}
+      <div style={{ padding: '8px 16px', borderTop: `1px solid ${COLORS.borderSubtle}`, display: 'flex', justifyContent: 'flex-end' }}>
+        <button style={{ padding: '6px 16px', borderRadius: 9999, border: 'none', background: COLORS.primary, color: '#fff', fontSize: 12, cursor: 'pointer' }}>完成</button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Omnibox 组件（1:1 还原 Omnibox.tsx）
+// ============================================================================
+function Omnibox() {
+  return (
+    <div style={{ width: '100%', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 8, background: COLORS.bgSurface }}>
+      <div style={{ display: 'flex', gap: 4, color: COLORS.textTertiary }}>
+        <div style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', cursor: 'pointer' }}><Icon name="arrowLeft" size={16} /></div>
+        <div style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', cursor: 'pointer', color: COLORS.textTertiary, opacity: 0.4 }}><Icon name="arrowRight" size={16} /></div>
+        <div style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', cursor: 'pointer' }}><Icon name="refresh" size={14} /></div>
+      </div>
+      <div style={{ flex: 1, position: 'relative' }}>
+        <Icon name="search" size={14} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: COLORS.textTertiary }} />
+        <input
+          type="text"
+          placeholder="输入 URL、搜索内容、/ 命令"
+          style={{
+            width: '100%', padding: '8px 14px 8px 38px', borderRadius: 9999,
+            border: 'none', background: COLORS.bgElevated, color: COLORS.textPrimary,
+            fontSize: 13, outline: 'none',
+          }}
+        />
+      </div>
+      <button style={{ width: 28, height: 28, borderRadius: '50%', border: 'none', background: 'transparent', color: COLORS.textSecondary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name="star" size={14} />
+      </button>
+    </div>
+  );
+}
+
+// ============================================================================
+// PermissionCard 组件（1:1 还原 + 白名单按钮 + 危险操作）
+// ============================================================================
+function PermissionCardDemo() {
+  return (
+    <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16, background: COLORS.bgCanvas, height: '100%', overflowY: 'auto' }}>
+      {/* 普通权限（橙色） */}
+      <div style={{
+        padding: 12, background: 'rgba(0,0,0,0.03)',
+        borderLeft: '3px solid rgb(249, 115, 22)',
+        borderRadius: 12, fontSize: 12, color: COLORS.textPrimary,
+        display: 'flex', flexDirection: 'column', gap: 8,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'rgb(249, 115, 22)', fontWeight: 500 }}>
+          <Icon name="shieldCheck" size={12} /> 权限请求
+          <span style={{ padding: '1px 5px', background: COLORS.bgElevated, borderRadius: 4, fontSize: 9, color: COLORS.textTertiary }}>writeFile</span>
+        </div>
+        <div style={{ lineHeight: 1.5 }}>请求写入配置文件 /config/panels.json</div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          <button className="whitelist-btn" style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px',
+            background: 'transparent', border: `1px solid ${COLORS.borderDefault}`,
+            borderRadius: 9999, fontSize: 11, color: COLORS.textSecondary, cursor: 'pointer',
+          }}>
+            <Icon name="shield" size={11} /> 添加到白名单
+          </button>
+          <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 12px', background: 'transparent', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 9999, fontSize: 11, color: 'rgb(239,68,68)', cursor: 'pointer' }}>
+            <Icon name="x" size={11} /> 拒绝
+          </button>
+          <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 12px', background: 'transparent', border: '1px solid rgba(22,163,74,0.3)', borderRadius: 9999, fontSize: 11, color: 'rgb(22,163,74)', cursor: 'pointer' }}>
+            <Icon name="check" size={11} /> 允许
+          </button>
+        </div>
+      </div>
+
+      {/* 危险操作（红色） */}
+      <div style={{
+        padding: 12, background: 'rgba(0,0,0,0.03)',
+        borderLeft: '3px solid rgb(239, 68, 68)',
+        borderRadius: 12, fontSize: 12, color: COLORS.textPrimary,
+        display: 'flex', flexDirection: 'column', gap: 8,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'rgb(239, 68, 68)', fontWeight: 500 }}>
+          <Icon name="shieldAlert" size={12} /> 危险操作（不可逆）
+          <span style={{ padding: '1px 5px', background: COLORS.bgElevated, borderRadius: 4, fontSize: 9, color: COLORS.textTertiary }}>deleteDir</span>
+        </div>
+        <div style={{ lineHeight: 1.5 }}>请求删除目录 /data/old-panels（此操作不可逆）</div>
+        <div style={{ padding: '4px 8px', background: 'rgba(239,68,68,0.1)', borderRadius: 6, fontSize: 10, color: 'rgb(239,68,68)', fontWeight: 500 }}>
+          此操作不可逆，确定要允许吗？
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          <button className="whitelist-btn" style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px',
+            background: 'transparent', border: `1px solid ${COLORS.borderDefault}`,
+            borderRadius: 9999, fontSize: 11, color: COLORS.textSecondary, cursor: 'pointer',
+          }}>
+            <Icon name="shield" size={11} /> 添加到白名单
+          </button>
+          <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 12px', background: 'transparent', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 9999, fontSize: 11, color: 'rgb(239,68,68)', cursor: 'pointer' }}>
+            <Icon name="x" size={11} /> 拒绝
+          </button>
+          <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 12px', background: 'rgba(22,163,74,0.1)', border: '1px solid rgba(22,163,74,0.5)', borderRadius: 9999, fontSize: 11, color: 'rgb(22,163,74)', cursor: 'pointer' }}>
+            <Icon name="check" size={11} /> 确认允许
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// ApiConfigModal 组件（1:1 还原 + 获取模型列表 + endpoint 自动补全）
+// ============================================================================
+function ApiConfigModalDemo() {
+  const [selectedPreset, setSelectedPreset] = useState(0);
+  const presets = [
+    { name: 'DeepSeek 官方', endpoint: 'https://api.deepseek.com/v1/chat/completions', apiKey: 'sk-deepseek-***', models: ['deepseek-chat', 'deepseek-reasoner'] },
+    { name: 'OpenAI', endpoint: 'https://api.openai.com/v1/chat/completions', apiKey: 'sk-openai-***', models: ['gpt-4o', 'gpt-4o-mini'] },
+    { name: 'StepFun', endpoint: 'https://api.stepfun.com/v1/chat/completions', apiKey: 'sk-stepfun-***', models: ['step-1-8k', 'step-2-16k'] },
+    { name: 'Anthropic Claude', endpoint: 'https://api.anthropic.com/v1/messages', apiKey: 'sk-ant-***', models: ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'] },
+    { name: 'Qwen 通义千问', endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', apiKey: 'sk-qwen-***', models: ['qwen-max', 'qwen-plus', 'qwen-turbo'] },
+    { name: '自定义 API', endpoint: '', apiKey: '', models: [] },
+  ];
+  const preset = presets[selectedPreset];
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [modelInput, setModelInput] = useState('');
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [endpointInput, setEndpointInput] = useState(preset.endpoint);
+  const [showEndpointList, setShowEndpointList] = useState(false);
+
+  const endpointSuggestions = [
+    { label: 'DeepSeek', value: 'https://api.deepseek.com/v1/chat/completions' },
+    { label: 'OpenAI', value: 'https://api.openai.com/v1/chat/completions' },
+    { label: 'StepFun', value: 'https://api.stepfun.com/v1/chat/completions' },
+    { label: 'Anthropic', value: 'https://api.anthropic.com/v1/messages' },
+    { label: 'Qwen 通义千问', value: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions' },
+  ];
+  const filteredSuggestions = endpointInput
+    ? endpointSuggestions.filter(s => s.value.toLowerCase().includes(endpointInput.toLowerCase()) || s.label.toLowerCase().includes(endpointInput.toLowerCase()))
+    : endpointSuggestions;
+
+  function handleFetchModels() { setFetchingModels(true); setTimeout(() => setFetchingModels(false), 1500); }
+  function handleSelectPreset(idx) { setSelectedPreset(idx); setEndpointInput(presets[idx].endpoint); }
+
+  return (
+    <div style={{ padding: 16, background: COLORS.bgCanvas, height: '100%', overflowY: 'auto' }}>
+      <div style={{ background: COLORS.bgSurface, borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+        {/* 头部 */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: `1px solid ${COLORS.borderSubtle}` }}>
+          <h2 style={{ fontSize: 14, fontWeight: 600, color: COLORS.textPrimary }}>API 配置</h2>
+          <button style={{ width: 28, height: 28, borderRadius: '50%', border: 'none', background: 'transparent', color: COLORS.textSecondary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="x" size={18} />
+          </button>
+        </div>
+        <div style={{ display: 'flex', minHeight: 360 }}>
+          {/* 左侧：预设列表 */}
+          <div style={{ width: 160, borderRight: `1px solid ${COLORS.borderSubtle}`, padding: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {presets.map((p, idx) => (
+              <button key={idx} onClick={() => handleSelectPreset(idx)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', borderRadius: 8, fontSize: 12, background: idx === selectedPreset ? COLORS.bgElevated : 'transparent', color: idx === selectedPreset ? COLORS.textPrimary : COLORS.textSecondary, border: 'none', cursor: 'pointer', textAlign: 'left', fontWeight: idx === selectedPreset ? 500 : 400, fontFamily: 'inherit' }}>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                {idx === 0 && <span style={{ padding: '1px 6px', background: COLORS.bgCanvas, borderRadius: 4, fontSize: 9, color: COLORS.textTertiary }}>默认</span>}
+              </button>
+            ))}
+          </div>
+          {/* 右侧：编辑区 */}
+          <div style={{ flex: 1, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* 配置名称 */}
+            <div>
+              <label style={{ display: 'block', fontSize: 11, color: COLORS.textSecondary, marginBottom: 4, fontWeight: 500 }}>配置名称</label>
+              <input type="text" defaultValue={preset.name} placeholder="如：DeepSeek 官方" style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: `1px solid ${COLORS.borderDefault}`, background: COLORS.bgSurface, color: COLORS.textPrimary, fontSize: 12, outline: 'none', fontFamily: 'inherit' }} />
+            </div>
+            {/* Endpoint（带自动补全） */}
+            <div style={{ position: 'relative' }}>
+              <label style={{ display: 'block', fontSize: 11, color: COLORS.textSecondary, marginBottom: 4, fontWeight: 500 }}>Endpoint</label>
+              <input type="text" value={endpointInput} onChange={(e) => { setEndpointInput(e.target.value); setShowEndpointList(true); }} onFocus={() => setShowEndpointList(true)} onBlur={() => setTimeout(() => setShowEndpointList(false), 200)} placeholder="https://api.example.com/v1/chat/completions" style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: `1px solid ${COLORS.borderDefault}`, background: COLORS.bgSurface, color: COLORS.textPrimary, fontSize: 12, outline: 'none', fontFamily: 'monospace' }} />
+              {showEndpointList && filteredSuggestions.length > 0 && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, background: COLORS.bgSurface, border: `1px solid ${COLORS.borderDefault}`, borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.08)', zIndex: 10, maxHeight: 180, overflowY: 'auto' }}>
+                  {filteredSuggestions.map((s, idx) => (
+                    <button key={idx} onMouseDown={() => { setEndpointInput(s.value); setShowEndpointList(false); }} style={{ display: 'block', width: '100%', padding: '8px 12px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer', fontSize: 11, color: COLORS.textPrimary, fontFamily: 'inherit' }}>
+                      <div style={{ fontWeight: 500, marginBottom: 2 }}>{s.label}</div>
+                      <div style={{ fontSize: 10, color: COLORS.textTertiary, fontFamily: 'monospace' }}>{s.value}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {/* API Key */}
+            <div>
+              <label style={{ display: 'block', fontSize: 11, color: COLORS.textSecondary, marginBottom: 4, fontWeight: 500 }}>API Key</label>
+              <div style={{ position: 'relative' }}>
+                <input type={showApiKey ? 'text' : 'password'} defaultValue={preset.apiKey} placeholder="sk-..." style={{ width: '100%', padding: '8px 36px 8px 12px', borderRadius: 8, border: `1px solid ${COLORS.borderDefault}`, background: COLORS.bgSurface, color: COLORS.textPrimary, fontSize: 12, outline: 'none', fontFamily: 'monospace' }} />
+                <button onClick={() => setShowApiKey(!showApiKey)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'transparent', color: COLORS.textTertiary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name={showApiKey ? 'eyeOff' : 'eye'} size={14} />
+                </button>
+              </div>
+            </div>
+            {/* Models chips + 获取模型列表按钮 */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <label style={{ fontSize: 11, color: COLORS.textSecondary, fontWeight: 500 }}>Models</label>
+                <button onClick={handleFetchModels} disabled={fetchingModels} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 9999, border: `1px solid ${COLORS.borderDefault}`, background: COLORS.bgSurface, color: COLORS.textSecondary, fontSize: 11, cursor: fetchingModels ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
+                  <Icon name={fetchingModels ? 'loader' : 'download'} size={12} /> {fetchingModels ? '获取中...' : '获取模型列表'}
+                </button>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6, minHeight: 24 }}>
+                {preset.models.map(m => (
+                  <span key={m} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', background: COLORS.bgElevated, borderRadius: 9999, fontSize: 11, color: COLORS.textPrimary }}>
+                    {m}
+                    <button style={{ width: 14, height: 14, borderRadius: '50%', border: 'none', background: 'transparent', color: COLORS.textTertiary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
+                      <Icon name="x" size={10} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <div style={{ position: 'relative' }}>
+                <input type="text" value={modelInput} onChange={(e) => setModelInput(e.target.value)} placeholder="输入 model 名称后回车或点击 +" style={{ width: '100%', padding: '8px 36px 8px 12px', borderRadius: 8, border: `1px solid ${COLORS.borderDefault}`, background: COLORS.bgSurface, color: COLORS.textPrimary, fontSize: 12, outline: 'none', fontFamily: 'inherit' }} />
+                <button style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'transparent', color: COLORS.textSecondary, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="plus" size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        {/* 底部按钮 */}
+        <div style={{ display: 'flex', gap: 8, padding: '12px 16px', borderTop: `1px solid ${COLORS.borderSubtle}`, justifyContent: 'flex-end' }}>
+          <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '6px 14px', borderRadius: 8, border: `1px solid ${COLORS.borderDefault}`, background: COLORS.bgSurface, color: COLORS.textPrimary, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>
+            <Icon name="plus" size={14} /> 新建预设
+          </button>
+          <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '6px 14px', borderRadius: 8, border: `1px solid rgba(239,68,68,0.3)`, background: COLORS.bgSurface, color: 'rgb(239,68,68)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>
+            <Icon name="trash" size={14} /> 删除预设
+          </button>
+          <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '6px 14px', borderRadius: 8, border: 'none', background: COLORS.primary, color: '#FFFFFF', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>
+            <Icon name="save" size={14} /> 保存
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// AskUserCard 组件（1:1 还原：紫色左色条 + 单选/多选）
+// ============================================================================
+function AskUserCardDemo() {
+  const [multiSelected, setMultiSelected] = useState(new Set(['opt_a']));
+  const options = [
+    { value: 'opt_a', label: '选项 A：使用现有面板布局', description: '复用当前模板，快速生成' },
+    { value: 'opt_b', label: '选项 B：创建新布局', description: '从空白开始，自定义排版' },
+    { value: 'opt_c', label: '选项 C：导入 JSON 配置', description: '从已有 JSON 文件导入布局' },
+  ];
+  function toggle(v) {
+    const next = new Set(multiSelected);
+    if (next.has(v)) next.delete(v); else next.add(v);
+    setMultiSelected(next);
+  }
+  return (
+    <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16, background: COLORS.bgCanvas, height: '100%', overflowY: 'auto' }}>
+      {/* 单选 */}
+      <div style={{ padding: 12, background: 'rgba(0,0,0,0.03)', borderLeft: '3px solid rgb(139, 92, 246)', borderRadius: 12, fontSize: 12, color: COLORS.textPrimary, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ fontWeight: 500, lineHeight: 1.5 }}>你想用哪种方式打开这个面板？</div>
+        {options.slice(0, 2).map((o, idx) => {
+          const isSelected = idx === 1;
+          return (
+            <button key={o.value} type="button" style={{ display: 'flex', alignItems: 'flex-start', gap: 6, padding: '6px 10px', background: isSelected ? 'rgba(0,0,0,0.08)' : 'transparent', border: `1px solid ${COLORS.borderSubtle}`, borderRadius: 8, fontSize: 12, color: COLORS.textPrimary, fontFamily: 'inherit', textAlign: 'left', width: '100%', cursor: 'pointer' }}>
+              <span style={{ flexShrink: 0, width: 14, height: 14, marginTop: 1, borderRadius: '50%', border: isSelected ? 'none' : `1.5px solid ${COLORS.textTertiary}`, background: isSelected ? 'rgb(139, 92, 246)' : 'transparent', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>
+                {isSelected && <Icon name="check" size={10} strokeWidth={3} />}
+              </span>
+              <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+                <span style={{ fontWeight: isSelected ? 500 : 400, lineHeight: 1.4 }}>{o.label}</span>
+                <span style={{ fontSize: 10, color: COLORS.textTertiary, lineHeight: 1.4 }}>{o.description}</span>
+              </span>
+            </button>
+          );
+        })}
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, color: COLORS.textTertiary }}>
+          <Icon name="check" size={10} style={{ color: 'rgb(139, 92, 246)' }} /> 已回答
+        </div>
+      </div>
+      {/* 多选 */}
+      <div style={{ padding: 12, background: 'rgba(0,0,0,0.03)', borderLeft: '3px solid rgb(139, 92, 246)', borderRadius: 12, fontSize: 12, color: COLORS.textPrimary, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ fontWeight: 500, lineHeight: 1.5 }}>请选择要启用的功能模块（可多选）</div>
+        {options.map((o) => {
+          const isSelected = multiSelected.has(o.value);
+          return (
+            <button key={o.value} type="button" onClick={() => toggle(o.value)} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, padding: '6px 10px', background: isSelected ? 'rgba(0,0,0,0.08)' : 'transparent', border: `1px solid ${COLORS.borderSubtle}`, borderRadius: 8, fontSize: 12, color: COLORS.textPrimary, fontFamily: 'inherit', textAlign: 'left', width: '100%', cursor: 'pointer' }}>
+              <span style={{ flexShrink: 0, width: 14, height: 14, marginTop: 1, borderRadius: 3, border: isSelected ? 'none' : `1.5px solid ${COLORS.textTertiary}`, background: isSelected ? 'rgb(139, 92, 246)' : 'transparent', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>
+                {isSelected && <Icon name="check" size={10} strokeWidth={3} />}
+              </span>
+              <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+                <span style={{ fontWeight: isSelected ? 500 : 400, lineHeight: 1.4 }}>{o.label}</span>
+                <span style={{ fontSize: 10, color: COLORS.textTertiary, lineHeight: 1.4 }}>{o.description}</span>
+              </span>
+            </button>
+          );
+        })}
+        <button type="button" disabled={multiSelected.size === 0} style={{ alignSelf: 'flex-end', padding: '4px 12px', background: multiSelected.size > 0 ? 'rgb(139, 92, 246)' : 'rgba(0,0,0,0.05)', color: multiSelected.size > 0 ? '#fff' : COLORS.textTertiary, border: 'none', borderRadius: 9999, fontSize: 11, cursor: multiSelected.size > 0 ? 'pointer' : 'not-allowed', fontFamily: 'inherit' }}>
+          确认 ({multiSelected.size})
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// 补全 UI 1：Phase 9 AgentModeSwitcher 展开态（Pi Agent / 单机轻 Agent / 自动）
+// 源码：components/ai/AgentModeSwitcher.tsx — pill 按钮 + 下拉菜单（cloud/local/auto）
+// 位置：AIAssistantSidebar 顶部，会话选择器上方，右对齐
+// ============================================================================
+const agentModeSwitcherStyles = {
+  wrap: { height: '100%', background: COLORS.bgSurface, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  topBar: { padding: '8px 10px', borderBottom: '1px solid ' + COLORS.borderSubtle, flexShrink: 0 },
+  panelPill: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '4px 10px', background: COLORS.primaryMuted, borderRadius: 9999, fontSize: 10, color: COLORS.primary, fontWeight: 500, marginBottom: 6 },
+  modeRow: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginBottom: 6, position: 'relative' },
+  modeBtn: { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', background: 'transparent', border: '1px solid ' + COLORS.borderDefault, borderRadius: 9999, cursor: 'pointer', fontSize: 10, color: COLORS.textSecondary, fontFamily: 'inherit' },
+  dropdown: { position: 'absolute', top: 'calc(100% + 4px)', right: 0, minWidth: 248, background: 'rgba(255,255,255,0.96)', border: '1px solid ' + COLORS.borderSubtle, borderRadius: 12, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', zIndex: 1000, padding: 4 },
+  item: { width: '100%', display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 10px', background: 'transparent', border: 'none', borderRadius: 8, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', transition: 'background 0.15s' },
+  itemActive: { background: COLORS.bgElevated },
+  itemIcon: { width: 24, height: 24, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  itemTitleRow: { display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 },
+  itemLabel: { fontSize: 12, fontWeight: 500, color: COLORS.textPrimary },
+  itemHint: { fontSize: 9, color: COLORS.textTertiary },
+  itemDesc: { fontSize: 10, color: COLORS.textSecondary, lineHeight: 1.4 },
+  sessionRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, padding: '6px 10px', background: COLORS.bgElevated, border: '1px solid ' + COLORS.borderSubtle, borderRadius: 8, fontSize: 11, color: COLORS.textSecondary },
+  ctxArea: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 16, gap: 8 },
+  ctxMsg: { fontSize: 11, color: COLORS.textTertiary, textAlign: 'center', lineHeight: 1.6 },
+};
+
+function AgentModeSwitcherDemo() {
+  const [mode, setMode] = useState('auto');
+  const [open, setOpen] = useState(true);
+  const effectiveMode = 'cloud';
+  const modes = [
+    { id: 'cloud', label: '云端', desc: '完整能力，需联网，调用云端大模型', icon: 'cloud' },
+    { id: 'local', label: '本地', desc: '本地推理，离线可用，能力受限', icon: 'hardDrive' },
+    { id: 'auto', label: '自动', desc: '根据网络与任务复杂度自动切换', icon: 'zap' },
+  ];
+  const current = modes.find(m => m.id === mode);
+  const buttonLabel = mode === 'auto' ? '自动 (云端)' : current.label;
+  return (
+    <div style={agentModeSwitcherStyles.wrap}>
+      <div style={agentModeSwitcherStyles.topBar}>
+        <div style={agentModeSwitcherStyles.panelPill}>
+          <Icon name="panelLeft" size={10} />
+          <span>当前面板：学习面板 · 会话独立</span>
+        </div>
+        <div style={agentModeSwitcherStyles.modeRow}>
+          <button onClick={() => setOpen(!open)} style={agentModeSwitcherStyles.modeBtn} title={'当前 Agent 模式：' + buttonLabel + '（点击切换）'}>
+            <Icon name={current.icon} size={10} />
+            <span>{buttonLabel}</span>
+            <Icon name="chevronDown" size={10} style={{ transition: 'transform 0.2s', transform: open ? 'rotate(180deg)' : 'none' }} />
+          </button>
+          {open && (
+            <div style={agentModeSwitcherStyles.dropdown}>
+              {modes.map(m => {
+                const isActive = m.id === mode;
+                return (
+                  <button key={m.id} onClick={() => { setMode(m.id); setOpen(false); }} style={Object.assign({}, agentModeSwitcherStyles.item, isActive ? agentModeSwitcherStyles.itemActive : null)}>
+                    <div style={Object.assign({}, agentModeSwitcherStyles.itemIcon, { background: isActive ? COLORS.primary : COLORS.bgElevated, color: isActive ? '#fff' : COLORS.textSecondary })}>
+                      <Icon name={m.icon} size={12} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={agentModeSwitcherStyles.itemTitleRow}>
+                        <span style={agentModeSwitcherStyles.itemLabel}>{m.label}</span>
+                        {m.id === 'auto' && <span style={agentModeSwitcherStyles.itemHint}>({effectiveMode === 'cloud' ? '云端' : '本地'})</span>}
+                      </div>
+                      <div style={agentModeSwitcherStyles.itemDesc}>{m.desc}</div>
+                    </div>
+                    {isActive && <Icon name="check" size={12} strokeWidth={3} style={{ color: COLORS.primary, flexShrink: 0, marginTop: 2 }} />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <div style={agentModeSwitcherStyles.sessionRow}>
+          <span>新建会话</span>
+          <Icon name="chevronDown" size={12} />
+        </div>
+      </div>
+      <div style={agentModeSwitcherStyles.ctxArea}>
+        <Icon name="bot" size={20} style={{ color: COLORS.textTertiary }} />
+        <div style={agentModeSwitcherStyles.ctxMsg}>AgentModeSwitcher 展开态<br/>位于 AIAssistantSidebar 顶部右对齐<br/>会话选择器上方</div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// 补全 UI 2：Phase 9 离线降级 UI 提示（OfflineBanner）
+// 源码：components/OfflineBanner.tsx — 顶部全宽橙色 banner
+// 触发：isOfflineDowngraded === true 时显示，含"切换到云端"按钮 + dismiss
+// ============================================================================
+const offlineBannerStyles = {
+  wrap: { height: '100%', background: COLORS.bgSurface, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  banner: { position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '8px 28px 8px 14px', background: 'linear-gradient(90deg, #fef3c7 0%, #fde68a 100%)', borderBottom: '1px solid ' + COLORS.warning, color: '#92400e', fontSize: 11, fontWeight: 500, flexShrink: 0 },
+  bannerText: { flex: 1, textAlign: 'center' },
+  switchBtn: { padding: '3px 10px', background: '#92400e', border: 'none', borderRadius: 9999, color: '#fff', fontSize: 10, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' },
+  dismissBtn: { position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', borderRadius: 9999, cursor: 'pointer', color: '#92400e' },
+  sidebarTop: { padding: '8px 10px', borderBottom: '1px solid ' + COLORS.borderSubtle, flexShrink: 0 },
+  panelPill: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '4px 10px', background: COLORS.primaryMuted, borderRadius: 9999, fontSize: 10, color: COLORS.primary, fontWeight: 500, marginBottom: 6 },
+  warnModeRow: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginBottom: 6 },
+  warnModeBtn: { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.5)', borderRadius: 9999, fontSize: 10, color: '#b45309', fontFamily: 'inherit' },
+  statusList: { padding: 12, display: 'flex', flexDirection: 'column', gap: 6 },
+  statusItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: COLORS.bgElevated, borderRadius: 8, fontSize: 11 },
+  statusLabel: { color: COLORS.textSecondary },
+  retryBtn: { margin: '4px 12px 12px', padding: '8px', borderRadius: 8, border: 'none', background: COLORS.primary, color: '#fff', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 },
+};
+
+function OfflineBannerDemo() {
+  const [dismissed, setDismissed] = useState(false);
+  return (
+    <div style={offlineBannerStyles.wrap}>
+      {!dismissed && (
+        <div style={offlineBannerStyles.banner} role="alert">
+          <Icon name="zap" size={14} style={{ flexShrink: 0 }} />
+          <span style={offlineBannerStyles.bannerText}>已切换到本地 Agent（离线模式）。云端服务不可用，正在使用本地轻 Agent。</span>
+          <button style={offlineBannerStyles.switchBtn}>切换到云端</button>
+          <button style={offlineBannerStyles.dismissBtn} onClick={() => setDismissed(true)} aria-label="关闭">
+            <Icon name="x" size={12} />
+          </button>
+        </div>
+      )}
+      <div style={offlineBannerStyles.sidebarTop}>
+        <div style={offlineBannerStyles.panelPill}>
+          <Icon name="panelLeft" size={10} />
+          <span>当前面板：学习面板 · 会话独立</span>
+        </div>
+        <div style={offlineBannerStyles.warnModeRow}>
+          <button style={offlineBannerStyles.warnModeBtn} title="服务器离线，已自动切换到本地">
+            <Icon name="zap" size={10} />
+            <span>本地</span>
+            <Icon name="chevronDown" size={10} />
+          </button>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, padding: '6px 10px', background: COLORS.bgElevated, border: '1px solid ' + COLORS.borderSubtle, borderRadius: 8, fontSize: 11, color: COLORS.textSecondary }}>
+          <span>新建会话</span>
+          <Icon name="chevronDown" size={12} />
+        </div>
+      </div>
+      <div style={offlineBannerStyles.statusList}>
+        <div style={offlineBannerStyles.statusItem}>
+          <span style={offlineBannerStyles.statusLabel}>云端模型调用</span>
+          <span style={{ color: COLORS.error, fontSize: 10, display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon name="x" size={10} /> 不可用</span>
+        </div>
+        <div style={offlineBannerStyles.statusItem}>
+          <span style={offlineBannerStyles.statusLabel}>本地推理</span>
+          <span style={{ color: COLORS.success, fontSize: 10, display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon name="check" size={10} /> 运行中</span>
+        </div>
+        <div style={offlineBannerStyles.statusItem}>
+          <span style={offlineBannerStyles.statusLabel}>面板数据读写</span>
+          <span style={{ color: COLORS.success, fontSize: 10, display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon name="check" size={10} /> 正常</span>
+        </div>
+      </div>
+      <button style={offlineBannerStyles.retryBtn}>
+        <Icon name="refresh" size={12} /> 重试连接
+      </button>
+    </div>
+  );
+}
+
+// ============================================================================
+// 补全 UI 3：Phase 12.4 搜索引擎配置 tab
+// 源码：SettingsPanel.tsx behavior tab + types/index.ts SearchEngine 类型
+// 设计：独立 tab，多选启用 + 默认引擎 + 自定义引擎（名称 + URL 模板 %s）
+// ============================================================================
+const searchEngineConfigStyles = {
+  wrap: { height: '100%', background: COLORS.bgSurface, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  header: { padding: '12px 16px', borderBottom: '1px solid ' + COLORS.borderSubtle, flexShrink: 0 },
+  title: { fontSize: 14, fontWeight: 600, color: COLORS.textPrimary, marginBottom: 2 },
+  desc: { fontSize: 11, color: COLORS.textSecondary },
+  body: { flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 14 },
+  section: { display: 'flex', flexDirection: 'column', gap: 6 },
+  sectionTitle: { fontSize: 11, fontWeight: 600, color: COLORS.textPrimary, display: 'flex', alignItems: 'center', gap: 4 },
+  engineRow: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: COLORS.bgCanvas, borderRadius: 8 },
+  engineRowActive: { background: COLORS.primaryMuted },
+  favicon: { width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#fff', flexShrink: 0 },
+  engineInfo: { flex: 1, minWidth: 0 },
+  engineName: { fontSize: 12, fontWeight: 500, color: COLORS.textPrimary, marginBottom: 1 },
+  engineUrl: { fontSize: 10, color: COLORS.textTertiary, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  toggle: { width: 32, height: 18, borderRadius: 9999, border: 'none', cursor: 'pointer', position: 'relative', padding: 0, flexShrink: 0, transition: 'background 0.2s' },
+  toggleKnob: { position: 'absolute', top: 2, width: 14, height: 14, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.2s' },
+  defaultRadio: { width: 14, height: 14, borderRadius: '50%', border: '1.5px solid ' + COLORS.textTertiary, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  customCard: { padding: 10, background: COLORS.bgCanvas, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 6 },
+  input: { width: '100%', padding: '6px 8px', background: COLORS.bgSurface, border: '1px solid ' + COLORS.borderDefault, borderRadius: 6, fontSize: 11, color: COLORS.textPrimary, fontFamily: 'inherit' },
+  inputMono: { fontFamily: 'monospace', fontSize: 10 },
+  addBtn: { padding: '6px 10px', background: COLORS.primary, border: 'none', borderRadius: 6, color: '#fff', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center', gap: 4, alignSelf: 'flex-start' },
+};
+
+function SearchEngineConfigTab() {
+  const [enabled, setEnabled] = useState({ google: true, bing: true, duckduckgo: false, baidu: true, custom1: false });
+  const [defaultEngine, setDefaultEngine] = useState('google');
+  const engines = [
+    { id: 'google', label: 'Google', url: 'https://www.google.com/search?q=%s', color: '#4285F4', letter: 'G' },
+    { id: 'bing', label: 'Bing', url: 'https://www.bing.com/search?q=%s', color: '#00897B', letter: 'B' },
+    { id: 'duckduckgo', label: 'DuckDuckGo', url: 'https://duckduckgo.com/?q=%s', color: '#DE5833', letter: 'D' },
+    { id: 'baidu', label: '百度', url: 'https://www.baidu.com/s?wd=%s', color: '#2932E1', letter: '百' },
+  ];
+  return (
+    <div style={searchEngineConfigStyles.wrap}>
+      <div style={searchEngineConfigStyles.header}>
+        <div style={searchEngineConfigStyles.title}>搜索引擎配置</div>
+        <div style={searchEngineConfigStyles.desc}>配置 AI 联网搜索与地址栏快捷搜索使用的引擎</div>
+      </div>
+      <div style={searchEngineConfigStyles.body}>
+        <div style={searchEngineConfigStyles.section}>
+          <div style={searchEngineConfigStyles.sectionTitle}><Icon name="zap" size={11} /> 默认搜索引擎</div>
+          {engines.map(e => (
+            <div key={e.id} style={Object.assign({}, searchEngineConfigStyles.engineRow, defaultEngine === e.id ? searchEngineConfigStyles.engineRowActive : null)}>
+              <div style={Object.assign({}, searchEngineConfigStyles.favicon, { background: e.color })}>{e.letter}</div>
+              <div style={searchEngineConfigStyles.engineInfo}>
+                <div style={searchEngineConfigStyles.engineName}>{e.label}</div>
+                <div style={searchEngineConfigStyles.engineUrl}>{e.url}</div>
+              </div>
+              <button onClick={() => setDefaultEngine(e.id)} style={searchEngineConfigStyles.defaultRadio}>
+                {defaultEngine === e.id && <div style={{ width: 7, height: 7, borderRadius: '50%', background: COLORS.primary }} />}
+              </button>
+            </div>
+          ))}
+        </div>
+        <div style={searchEngineConfigStyles.section}>
+          <div style={searchEngineConfigStyles.sectionTitle}><Icon name="check" size={11} /> 启用的搜索引擎（快捷切换）</div>
+          {engines.map(e => (
+            <div key={e.id} style={searchEngineConfigStyles.engineRow}>
+              <div style={Object.assign({}, searchEngineConfigStyles.favicon, { background: e.color })}>{e.letter}</div>
+              <div style={searchEngineConfigStyles.engineInfo}>
+                <div style={searchEngineConfigStyles.engineName}>{e.label}</div>
+              </div>
+              <button onClick={() => setEnabled(Object.assign({}, enabled, { [e.id]: !enabled[e.id] }))} style={Object.assign({}, searchEngineConfigStyles.toggle, { background: enabled[e.id] ? COLORS.primary : COLORS.bgElevated })}>
+                <span style={Object.assign({}, searchEngineConfigStyles.toggleKnob, { left: enabled[e.id] ? 16 : 2 })} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div style={searchEngineConfigStyles.section}>
+          <div style={searchEngineConfigStyles.sectionTitle}><Icon name="plus" size={11} /> 自定义搜索引擎</div>
+          <div style={searchEngineConfigStyles.customCard}>
+            <input style={searchEngineConfigStyles.input} placeholder="引擎名称（如：搜狗）" defaultValue="" />
+            <input style={Object.assign({}, searchEngineConfigStyles.input, searchEngineConfigStyles.inputMono)} placeholder="URL 模板，用 %s 占位搜索词（如：https://www.sogou.com/web?query=%s）" />
+            <button style={searchEngineConfigStyles.addBtn}><Icon name="plus" size={11} /> 添加自定义引擎</button>
+          </div>
+          <div style={{ fontSize: 10, color: COLORS.textTertiary, lineHeight: 1.5, padding: '0 2px' }}>
+            提示：%s 会被替换为实际搜索词。自定义引擎加入后可在"默认搜索引擎"中选为默认。
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// 补全 UI 4：历史记录独立页面（HistoryPage）
+// 设计：左侧时间分组 + 右侧记录列表 + 顶部搜索/筛选/清空/导出
+// ============================================================================
+const historyPageStyles = {
+  wrap: { height: '100%', background: COLORS.bgSurface, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  header: { padding: '10px 14px', borderBottom: '1px solid ' + COLORS.borderSubtle, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 },
+  title: { fontSize: 13, fontWeight: 600, color: COLORS.textPrimary, marginRight: 8 },
+  searchBox: { flex: 1, display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: COLORS.bgElevated, borderRadius: 9999, fontSize: 11, color: COLORS.textTertiary },
+  searchInput: { flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: 11, color: COLORS.textPrimary, fontFamily: 'inherit' },
+  filterBtn: { padding: '4px 10px', background: COLORS.bgElevated, border: 'none', borderRadius: 9999, fontSize: 10, color: COLORS.textSecondary, cursor: 'pointer', fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center', gap: 3 },
+  actionBtn: { padding: '4px 10px', background: 'transparent', border: '1px solid ' + COLORS.borderDefault, borderRadius: 9999, fontSize: 10, color: COLORS.textSecondary, cursor: 'pointer', fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center', gap: 3 },
+  body: { flex: 1, display: 'flex', minHeight: 0 },
+  leftPane: { width: 110, borderRight: '1px solid ' + COLORS.borderSubtle, padding: 8, display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0, overflowY: 'auto' },
+  groupItem: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 11 },
+  groupItemActive: { background: COLORS.primaryMuted, color: COLORS.primary, fontWeight: 500 },
+  groupCount: { fontSize: 9, color: COLORS.textTertiary },
+  rightPane: { flex: 1, overflowY: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 4 },
+  histItem: { display: 'flex', gap: 10, padding: '8px 10px', borderRadius: 8, cursor: 'pointer' },
+  histItemHover: { background: COLORS.bgCanvas },
+  thumb: { width: 40, height: 30, borderRadius: 4, background: COLORS.bgElevated, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: COLORS.textTertiary },
+  histInfo: { flex: 1, minWidth: 0 },
+  histTitle: { fontSize: 11, color: COLORS.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 2 },
+  histUrl: { fontSize: 9, color: COLORS.textTertiary, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 2 },
+  histMeta: { fontSize: 9, color: COLORS.textTertiary },
+};
+
+function HistoryPage() {
+  const [activeGroup, setActiveGroup] = useState('today');
+  const groups = [
+    { id: 'today', label: '今天', count: 12 },
+    { id: 'yesterday', label: '昨天', count: 8 },
+    { id: 'week', label: '本周', count: 23 },
+    { id: 'earlier', label: '更早', count: 56 },
+  ];
+  const items = [
+    { id: 1, title: '如何用 React 实现拖拽布局？', url: 'living-dashboard://panel/learning/chat/1', time: '14:32', session: '学习面板', group: 'today' },
+    { id: 2, title: '帮我生成一个 dashboard 模板', url: 'living-dashboard://panel/work/chat/2', time: '11:08', session: '工作面板', group: 'today' },
+    { id: 3, title: '配置 DeepSeek API 连接', url: 'living-dashboard://settings/ai', time: '昨天 22:15', session: '设置', group: 'yesterday' },
+    { id: 4, title: '分析这段 TypeScript 代码的类型问题', url: 'living-dashboard://panel/learning/chat/4', time: '昨天 16:42', session: '学习面板', group: 'yesterday' },
+    { id: 5, title: '总结今天读的论文核心思想', url: 'living-dashboard://panel/reading/chat/5', time: '周一 09:20', session: '阅读面板', group: 'week' },
+    { id: 6, title: '自动排版算法优化思路', url: 'living-dashboard://script/auto-layout', time: '上周三', session: '脚本管理', group: 'week' },
+  ];
+  const filtered = items.filter(it => it.group === activeGroup);
+  return (
+    <div style={historyPageStyles.wrap}>
+      <div style={historyPageStyles.header}>
+        <span style={historyPageStyles.title}>历史记录</span>
+        <div style={historyPageStyles.searchBox}>
+          <Icon name="search" size={11} />
+          <input style={historyPageStyles.searchInput} placeholder="搜索历史记录…" />
+        </div>
+        <button style={historyPageStyles.filterBtn}><Icon name="globe" size={10} /> 按站点</button>
+        <button style={historyPageStyles.filterBtn}><Icon name="clock" size={10} /> 按时间</button>
+        <button style={historyPageStyles.actionBtn}><Icon name="trash" size={10} /> 清空</button>
+        <button style={historyPageStyles.actionBtn}><Icon name="download" size={10} /> 导出</button>
+      </div>
+      <div style={historyPageStyles.body}>
+        <div style={historyPageStyles.leftPane}>
+          {groups.map(g => (
+            <div key={g.id} onClick={() => setActiveGroup(g.id)} style={Object.assign({}, historyPageStyles.groupItem, activeGroup === g.id ? historyPageStyles.groupItemActive : null)}>
+              <span>{g.label}</span>
+              <span style={historyPageStyles.groupCount}>{g.count}</span>
+            </div>
+          ))}
+        </div>
+        <div style={historyPageStyles.rightPane}>
+          {filtered.length === 0 ? (
+            <div style={{ padding: 20, textAlign: 'center', color: COLORS.textTertiary, fontSize: 11 }}>该时间段暂无记录</div>
+          ) : filtered.map(it => (
+            <div key={it.id} style={historyPageStyles.histItem}>
+              <div style={historyPageStyles.thumb}><Icon name="message" size={14} /></div>
+              <div style={historyPageStyles.histInfo}>
+                <div style={historyPageStyles.histTitle}>{it.title}</div>
+                <div style={historyPageStyles.histUrl}>{it.url}</div>
+                <div style={historyPageStyles.histMeta}>{it.session} · {it.time}</div>
+              </div>
+              <Icon name="chevronRight" size={12} style={{ color: COLORS.textTertiary, flexShrink: 0, marginTop: 4 }} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// 补全 UI 5：脚本管理 UI（ScriptManagementPage）
+// 设计：左侧脚本列表 + 右侧详情 + 顶部新建/导入/导出 + 底部运行/编辑/删除
+// ============================================================================
+const scriptManagementStyles = {
+  wrap: { height: '100%', background: COLORS.bgSurface, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  header: { padding: '10px 14px', borderBottom: '1px solid ' + COLORS.borderSubtle, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 },
+  title: { fontSize: 13, fontWeight: 600, color: COLORS.textPrimary, marginRight: 8 },
+  spacer: { flex: 1 },
+  actionBtn: { padding: '4px 10px', background: COLORS.bgElevated, border: 'none', borderRadius: 9999, fontSize: 10, color: COLORS.textSecondary, cursor: 'pointer', fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center', gap: 3 },
+  primaryBtn: { padding: '4px 10px', background: COLORS.primary, border: 'none', borderRadius: 9999, fontSize: 10, color: '#fff', cursor: 'pointer', fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center', gap: 3 },
+  body: { flex: 1, display: 'flex', minHeight: 0 },
+  leftPane: { width: 130, borderRight: '1px solid ' + COLORS.borderSubtle, padding: 6, display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, overflowY: 'auto' },
+  scriptItem: { padding: '8px 10px', borderRadius: 8, cursor: 'pointer' },
+  scriptItemActive: { background: COLORS.primaryMuted },
+  scriptName: { fontSize: 11, fontWeight: 500, color: COLORS.textPrimary, fontFamily: 'monospace', marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  scriptMeta: { display: 'flex', alignItems: 'center', gap: 4 },
+  dot: { width: 5, height: 5, borderRadius: '50%', flexShrink: 0 },
+  scriptTime: { fontSize: 9, color: COLORS.textTertiary },
+  rightPane: { flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 10 },
+  detailName: { fontSize: 13, fontWeight: 600, color: COLORS.textPrimary, fontFamily: 'monospace' },
+  detailDesc: { fontSize: 11, color: COLORS.textSecondary, lineHeight: 1.5 },
+  detailRow: { display: 'flex', gap: 8, fontSize: 10, color: COLORS.textTertiary },
+  detailLabel: { fontWeight: 500, color: COLORS.textSecondary, minWidth: 64 },
+  codePreview: { padding: 10, background: '#1A1A1A', borderRadius: 8, fontSize: 10, fontFamily: 'monospace', color: '#E0E0E0', lineHeight: 1.6, whiteSpace: 'pre-wrap', flex: 1, overflow: 'auto' },
+  footer: { padding: '8px 12px', borderTop: '1px solid ' + COLORS.borderSubtle, display: 'flex', gap: 6, flexShrink: 0 },
+  footerBtn: { flex: 1, padding: '6px', borderRadius: 6, border: 'none', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 },
+};
+
+function ScriptManagementPage() {
+  const [activeId, setActiveId] = useState(1);
+  const scripts = [
+    { id: 1, name: 'auto-layout.ts', desc: '自动排版算法：检测面板重叠并重新排列', enabled: true, lastRun: '2 分钟前', trigger: '手动 / Ctrl+L', code: 'export function autoLayout(panels) {\n  const sorted = panels.sort((a,b) => a.x - b.x);\n  return resolveOverlaps(sorted);\n}' },
+    { id: 2, name: 'sync-config.ts', desc: '同步本地配置到云端服务器', enabled: true, lastRun: '1 小时前', trigger: '定时（每 30 分钟）', code: 'export async function syncConfig() {\n  const cfg = await loadLocalConfig();\n  await api.upload(cfg);\n}' },
+    { id: 3, name: 'export-pdf.ts', desc: '将当前面板导出为 PDF 文件', enabled: false, lastRun: '从未运行', trigger: '手动', code: 'export function exportPdf(panel) {\n  const doc = renderPanel(panel);\n  return doc.save();\n}' },
+  ];
+  const active = scripts.find(s => s.id === activeId);
+  return (
+    <div style={scriptManagementStyles.wrap}>
+      <div style={scriptManagementStyles.header}>
+        <span style={scriptManagementStyles.title}>脚本管理</span>
+        <div style={scriptManagementStyles.spacer}></div>
+        <button style={scriptManagementStyles.primaryBtn}><Icon name="plus" size={10} /> 新建</button>
+        <button style={scriptManagementStyles.actionBtn}><Icon name="download" size={10} /> 导入</button>
+        <button style={scriptManagementStyles.actionBtn}><Icon name="externalLink" size={10} /> 导出</button>
+      </div>
+      <div style={scriptManagementStyles.body}>
+        <div style={scriptManagementStyles.leftPane}>
+          {scripts.map(s => (
+            <div key={s.id} onClick={() => setActiveId(s.id)} style={Object.assign({}, scriptManagementStyles.scriptItem, activeId === s.id ? scriptManagementStyles.scriptItemActive : null)}>
+              <div style={scriptManagementStyles.scriptName}>{s.name}</div>
+              <div style={scriptManagementStyles.scriptMeta}>
+                <div style={Object.assign({}, scriptManagementStyles.dot, { background: s.enabled ? COLORS.success : COLORS.textTertiary })}></div>
+                <span style={scriptManagementStyles.scriptTime}>{s.lastRun}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={scriptManagementStyles.rightPane}>
+          <div style={scriptManagementStyles.detailName}>{active.name}</div>
+          <div style={scriptManagementStyles.detailDesc}>{active.desc}</div>
+          <div style={scriptManagementStyles.detailRow}>
+            <span style={scriptManagementStyles.detailLabel}>触发条件</span>
+            <span>{active.trigger}</span>
+          </div>
+          <div style={scriptManagementStyles.detailRow}>
+            <span style={scriptManagementStyles.detailLabel}>状态</span>
+            <span style={{ color: active.enabled ? COLORS.success : COLORS.textTertiary }}>{active.enabled ? '已启用' : '已禁用'}</span>
+          </div>
+          <div style={scriptManagementStyles.detailRow}>
+            <span style={scriptManagementStyles.detailLabel}>最后运行</span>
+            <span>{active.lastRun}</span>
+          </div>
+          <div style={{ fontSize: 10, fontWeight: 500, color: COLORS.textSecondary, marginTop: 4 }}>代码预览</div>
+          <pre style={scriptManagementStyles.codePreview}>{active.code}</pre>
+        </div>
+      </div>
+      <div style={scriptManagementStyles.footer}>
+        <button style={Object.assign({}, scriptManagementStyles.footerBtn, { background: COLORS.primary, color: '#fff' })}><Icon name="zap" size={11} /> 立即运行</button>
+        <button style={Object.assign({}, scriptManagementStyles.footerBtn, { background: COLORS.bgElevated, color: COLORS.textPrimary })}><Icon name="wrench" size={11} /> 编辑</button>
+        <button style={Object.assign({}, scriptManagementStyles.footerBtn, { background: COLORS.bgElevated, color: COLORS.error })}><Icon name="trash" size={11} /> 删除</button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// 补全 UI 6：AddWidgetMenu 展开态（FAB + 搜索 + 分类网格 + 最近使用）
+// 源码：components/AddWidgetMenu.tsx — +加号 FAB，点击展开"添加组件"菜单
+// ============================================================================
+const addWidgetMenuStyles = {
+  wrap: { height: '100%', background: COLORS.bgCanvas, position: 'relative', overflow: 'hidden' },
+  ctxLabel: { position: 'absolute', top: 12, left: 12, fontSize: 10, color: COLORS.textTertiary, zIndex: 1 },
+  ctxHint: { position: 'absolute', bottom: 12, left: 12, right: 12, fontSize: 10, color: COLORS.textTertiary, textAlign: 'center', zIndex: 1 },
+  fab: { position: 'absolute', right: 16, bottom: 16, width: 40, height: 40, borderRadius: '50%', background: COLORS.primary, color: '#fff', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 16px rgba(59,130,246,0.4)', zIndex: 10 },
+  menu: { position: 'absolute', right: 16, bottom: 64, width: 280, maxHeight: 'calc(100% - 80px)', background: 'rgba(255,255,255,0.98)', border: '1px solid ' + COLORS.borderSubtle, borderRadius: 12, boxShadow: '0 12px 40px rgba(0,0,0,0.18)', zIndex: 20, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  searchBar: { display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderBottom: '1px solid ' + COLORS.borderSubtle, flexShrink: 0 },
+  searchInput: { flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: 11, color: COLORS.textPrimary, fontFamily: 'inherit' },
+  scroll: { flex: 1, overflowY: 'auto', padding: 4 },
+  catGroup: { marginBottom: 4 },
+  catLabel: { padding: '6px 10px 4px', fontSize: 9, fontWeight: 600, color: COLORS.textTertiary, textTransform: 'uppercase', letterSpacing: 0.5 },
+  menuItem: { width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', background: 'transparent', border: 'none', borderRadius: 6, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', fontSize: 11, color: COLORS.textPrimary },
+  menuIcon: { width: 24, height: 24, borderRadius: 5, background: COLORS.bgElevated, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: COLORS.textSecondary },
+  menuText: { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  envTag: { fontSize: 9, padding: '1px 5px', borderRadius: 3, whiteSpace: 'nowrap', flexShrink: 0 },
+};
+
+function AddWidgetMenuExpanded() {
+  const [search, setSearch] = useState('');
+  const cats = [
+    { cat: '最近使用', items: [
+      { type: 'calculator', name: '计算器', icon: 'wrench', env: null },
+      { type: 'ai-assistant', name: 'AI 助手', icon: 'bot', env: null },
+    ]},
+    { cat: '基础组件', items: [
+      { type: 'calculator', name: '计算器', icon: 'wrench', env: 'pure' },
+      { type: 'focus-timer', name: '专注计时器', icon: 'clock', env: 'pure' },
+      { type: 'music', name: '音乐播放器', icon: 'layout', env: 'pure' },
+    ]},
+    { cat: 'AI 助手', items: [
+      { type: 'ai-assistant', name: 'AI 助手', icon: 'bot', env: 'local' },
+      { type: 'ai-quiz', name: 'AI 出题', icon: 'sparkles', env: 'local' },
+    ]},
+    { cat: '学习工具', items: [
+      { type: 'latex-quiz', name: 'LaTeX 公式练习', icon: 'script', env: 'pure' },
+      { type: 'sudoku', name: '数独', icon: 'grid', env: 'pure' },
+      { type: 'pdf-viewer', name: 'PDF 阅读器', icon: 'folder', env: 'local' },
+    ]},
+    { cat: '媒体与阅读', items: [
+      { type: 'webview', name: '网页嵌入', icon: 'globe', env: 'local' },
+      { type: 'html-canvas', name: 'HTML 画布', icon: 'layout', env: 'pure' },
+    ]},
+  ];
+  const filteredCats = search.trim()
+    ? cats.map(c => Object.assign({}, c, { items: c.items.filter(it => it.name.toLowerCase().includes(search.trim().toLowerCase())) })).filter(c => c.items.length > 0)
+    : cats;
+  return (
+    <div style={addWidgetMenuStyles.wrap}>
+      <div style={addWidgetMenuStyles.ctxLabel}>CanvasHome · 右下角 AddWidgetMenu 展开态</div>
+      <button style={addWidgetMenuStyles.fab} title="添加组件">
+        <Icon name="plus" size={20} strokeWidth={2.5} />
+      </button>
+      <div style={addWidgetMenuStyles.menu}>
+        <div style={addWidgetMenuStyles.searchBar}>
+          <Icon name="search" size={12} style={{ color: COLORS.textTertiary }} />
+          <input style={addWidgetMenuStyles.searchInput} placeholder="搜索组件…" value={search} onChange={e => setSearch(e.target.value)} />
+        </div>
+        <div style={addWidgetMenuStyles.scroll}>
+          {filteredCats.map(c => (
+            <div key={c.cat} style={addWidgetMenuStyles.catGroup}>
+              <div style={addWidgetMenuStyles.catLabel}>{c.cat}</div>
+              {c.items.map(it => (
+                <button key={it.type} style={addWidgetMenuStyles.menuItem}>
+                  <div style={addWidgetMenuStyles.menuIcon}><Icon name={it.icon} size={12} /></div>
+                  <span style={addWidgetMenuStyles.menuText}>{it.name}</span>
+                  {it.env === 'local' && <span style={Object.assign({}, addWidgetMenuStyles.envTag, { background: 'rgba(249,115,22,0.15)', color: COLORS.orange })}>仅桌面端</span>}
+                  {it.env === 'pure' && <span style={Object.assign({}, addWidgetMenuStyles.envTag, { background: 'rgba(34,197,94,0.15)', color: COLORS.success })}>纯前端</span>}
+                </button>
+              ))}
+            </div>
+          ))}
+          {filteredCats.length === 0 && (
+            <div style={{ padding: 20, textAlign: 'center', color: COLORS.textTertiary, fontSize: 11 }}>未找到匹配的组件</div>
+          )}
+        </div>
+      </div>
+      <div style={addWidgetMenuStyles.ctxHint}>点击 FAB 展开/收起 · 搜索框 + 分类网格 + 环境标签</div>
+    </div>
+  );
+}
+
+// ============================================================================
+// App 组件：平铺多个 MacosWindow 设备框，每个上方带斜体标签
+// ============================================================================
+function App() {
+  return (
+    <div style={{ padding: 32, display: 'flex', flexDirection: 'column', gap: 40, alignItems: 'flex-start' }}>
+      <div style={{ width: '100%', marginBottom: 8 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 600, color: COLORS.textPrimary, marginBottom: 4 }}>Living Dashboard · 桌面端高保真原型</h1>
+        <p style={{ fontSize: 12, color: COLORS.textSecondary }}>1:1 还原 9 个核心组件 + 6 个补全 UI 设计</p>
+      </div>
+
+      <div>
+        <div className="frame-label">BrowserHome · 浏览器首页（72px Logo + pill 搜索 + 圆形书签） — 使用 BrowserWindow 设备框</div>
+        <BrowserWindow title="Living Dashboard" url="https://app.living-dashboard.com/home" width={900} height={560}>
+          <BrowserHome />
+        </BrowserWindow>
+      </div>
+
+      <div>
+        <div className="frame-label">CanvasHome · 画布首页（80×80 Logo + 可折叠 AI 输入框 + widget 网格）</div>
+        <MacosWindow title="Living Dashboard" width={900} height={600}>
+          <CanvasHome />
+        </MacosWindow>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 11, color: COLORS.textTertiary, marginBottom: 8, padding: '6px 10px', background: COLORS.bgElevated, borderRadius: 6, display: 'inline-block' }}>
+          互斥状态：同一时刻仅显示其一，通过顶部 toggle 切换 · 源码 Sidebar.tsx 第 232-347 行三元渲染
+        </div>
+        <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          {/* 设备框 A：画布面板模式 */}
+          <div>
+            <div className="frame-label">Sidebar 展开（240px） — 画布面板模式</div>
+            <MacosWindow title="Living Dashboard" width={280} height={680}>
+              <SidebarCanvas />
+            </MacosWindow>
+            <div style={{ fontSize: 11, color: COLORS.textTertiary, marginTop: 6, maxWidth: 280, lineHeight: 1.5 }}>
+              此模式下面板列表独占，不显示 AIAssistantSidebar<br/>
+              互斥状态：同一时刻仅显示其一，通过顶部 toggle 切换
+            </div>
+          </div>
+          {/* 设备框 B：AI 助手模式 */}
+          <div>
+            <div className="frame-label">Sidebar 展开（240px） — AI 助手模式</div>
+            <MacosWindow title="Living Dashboard" width={280} height={680}>
+              <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: COLORS.bgSurface, width: 240 }}>
+                {/* toggle 按钮组（AI助手高亮，画布面板置灰） */}
+                <div style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                  <div style={{ flex: 1, display: 'flex', background: COLORS.bgElevated, borderRadius: 10, padding: 4, gap: 2 }}>
+                    <button style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '8px 16px', background: 'transparent', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 12, color: COLORS.textPrimary }}>
+                      <Icon name="panelLeftOpen" size={12} /><span>画布面板</span>
+                    </button>
+                    <button style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '8px 16px', background: 'rgba(0,0,0,0.08)', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 12, color: COLORS.textPrimary }}>
+                      <Icon name="bot" size={12} /><span>AI助手</span>
+                    </button>
+                  </div>
+                  <button style={{ flexShrink: 0, width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: 'none', background: 'transparent', color: COLORS.textSecondary, cursor: 'pointer' }}>
+                    <Icon name="panelLeftClose" size={16} />
+                  </button>
+                </div>
+                {/* AIAssistantSidebar 独占剩余空间 */}
+                <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                  <AIAssistantSidebar />
+                </div>
+              </div>
+            </MacosWindow>
+            <div style={{ fontSize: 11, color: COLORS.textTertiary, marginTop: 6, maxWidth: 280, lineHeight: 1.5 }}>
+              此模式下 AIAssistantSidebar 独占，不显示面板列表<br/>
+              互斥状态：同一时刻仅显示其一，通过顶部 toggle 切换
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div className="frame-label">Sidebar 折叠态（48px）· 独立组件（canvas 模式 PanelLeftOpen / ai-assistant 模式 Bot，点击展开）</div>
+        <MacosWindow title="Living Dashboard" width={280} height={560}>
+          <div style={{ display: 'flex', width: '100%', height: '100%', background: COLORS.bgCanvas }}>
+            <SidebarCollapsed mode="canvas" />
+            <SidebarCollapsed mode="ai-assistant" />
+          </div>
+        </MacosWindow>
+      </div>
+
+      <div>
+        <div className="frame-label">CanvasHome · 画布首页（侧栏折叠后主页占满，含右下角 AddWidgetMenu + FAB）</div>
+        <MacosWindow title="Living Dashboard" width={900} height={560}>
+          <CanvasHome />
+        </MacosWindow>
+      </div>
+
+      <div>
+        <div className="frame-label">SettingsPanel · 8 Tabs（含 AI Tab：思考等级滑块 + 全允许模式开关 + API 配置入口）</div>
+        <MacosWindow title="设置" width={900} height={620}>
+          <SettingsPanel />
+        </MacosWindow>
+      </div>
+
+      <div>
+        <div className="frame-label">Omnibox · 顶部地址栏（pill 输入 + URL/搜索/斜杠命令）</div>
+        <MacosWindow title="Living Dashboard" width={900} height={80}>
+          <Omnibox />
+        </MacosWindow>
+      </div>
+
+      <div>
+        <div className="frame-label">PermissionCard · 权限请求卡片（橙色普通 + 红色危险 + 白名单按钮 + 二次确认）</div>
+        <MacosWindow title="Living Dashboard" width={600} height={500}>
+          <PermissionCardDemo />
+        </MacosWindow>
+      </div>
+
+      <div>
+        <div className="frame-label">AskUserCard · AI 提问卡片（紫色左色条 + 单选/多选 + 已回答态）</div>
+        <MacosWindow title="Living Dashboard" width={500} height={500}>
+          <AskUserCardDemo />
+        </MacosWindow>
+      </div>
+
+      <div>
+        <div className="frame-label">ApiConfigModal · API 配置弹窗（预设列表 + endpoint 自动补全 + 获取模型列表按钮）</div>
+        <MacosWindow title="API 配置" width={720} height={520}>
+          <ApiConfigModalDemo />
+        </MacosWindow>
+      </div>
+
+      <div>
+        <div className="frame-label">补全 UI 合集（6 个原红框占位符已替换为真实设计）</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'flex-start' }}>
+          <div style={{ width: 320, height: 360 }}><AgentModeSwitcherDemo /></div>
+          <div style={{ width: 320, height: 400 }}><OfflineBannerDemo /></div>
+          <div style={{ width: 320, height: 460 }}><SearchEngineConfigTab /></div>
+          <div style={{ width: 360, height: 380 }}><HistoryPage /></div>
+          <div style={{ width: 360, height: 380 }}><ScriptManagementPage /></div>
+          <div style={{ width: 320, height: 380 }}><AddWidgetMenuExpanded /></div>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 16, padding: 16, fontSize: 11, color: COLORS.textTertiary, borderTop: `1px solid ${COLORS.borderSubtle}`, width: '100%' }}>
+        Living Dashboard Desktop Prototype · 基于 huashu-design 反 AI slop 规范 · 单文件 inline React
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { BrowserHome, CanvasHome, SidebarCanvas, SidebarCollapsed, AIAssistantSidebar, SettingsPanel, Omnibox, PermissionCardDemo, AskUserCardDemo, ApiConfigModalDemo, AgentModeSwitcherDemo, OfflineBannerDemo, SearchEngineConfigTab, HistoryPage, ScriptManagementPage, AddWidgetMenuExpanded, MacosWindow, BrowserWindow, App });
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "./",
+    "declaration": false
+  },
+  "include": ["src/**/*", "test/**/*"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "test/helpers/**",
+    "test/**/*-script.ts",
+    "test/**/*-test.ts",
+    "test/**/*-verify.ts",
+    "test/**/*-diag.ts",
+    "test/**/*-find-*.ts",
+    "test/**/poc-*.ts",
+    "test/**/adv-*.ts",
+    "test/**/phase-*.ts",
+    "test/**/search-*.ts",
+    "test/**/s2-*.ts",
+    "src/db/test-sqlite.ts"
+  ]
+}

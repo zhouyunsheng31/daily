@@ -1,0 +1,24 @@
+# Gradle
+.gradle/
+build/
+*/build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# 签名（绝不含密钥）
+*.jks
+*.keystore
+
+# APK 产物
+*.apk
+*.aab
+
+# Kotlin
+.kotlin/

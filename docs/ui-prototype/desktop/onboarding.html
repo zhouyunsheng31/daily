@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Living Dashboard · Onboarding 原型</title>
+<script src="./vendor/react.development.js"></script>
+<script src="./vendor/react-dom.development.js"></script>
+<script src="./vendor/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; width: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: #FAFAFA;
+    color: #1A1A1A;
+    -webkit-font-smoothing: antialiased;
+  }
+  #root { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+
+  /* 反 AI slop：无紫渐变背景、无 emoji 图标、无边框线（色块区分优先） */
+
+  /* Logo 圆形（蓝色渐变 + LD 白字） */
+  .logo-circle {
+    width: 80px; height: 80px; border-radius: 50%;
+    background: linear-gradient(135deg, #3B82F6, #1D4ED8);
+    display: flex; align-items: center; justify-content: center;
+    color: #FFFFFF; font-weight: 700; font-size: 30px; letter-spacing: -1px;
+    box-shadow: 0 8px 24px rgba(59,130,246,0.28), 0 2px 6px rgba(29,78,216,0.18);
+  }
+
+  /* Primary pill 按钮 */
+  .btn-primary-pill {
+    background: #3B82F6; color: #FFFFFF;
+    padding: 12px 28px; border-radius: 9999px;
+    border: none; cursor: pointer; font-size: 14px; font-weight: 500;
+    box-shadow: 0 4px 12px rgba(59,130,246,0.24), 0 1px 3px rgba(59,130,246,0.18);
+    transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+    font-family: inherit;
+  }
+  .btn-primary-pill:hover { background: #2563EB; transform: translateY(-1px); box-shadow: 0 6px 18px rgba(59,130,246,0.32); }
+  .btn-primary-pill:active { transform: translateY(0); }
+  .btn-primary-pill:disabled { background: #9CA3AF; cursor: not-allowed; box-shadow: none; transform: none; }
+
+  /* 次级 pill 按钮（无边框美学：色块差） */
+  .btn-ghost-pill {
+    background: rgba(0,0,0,0.05); color: #1A1A1A;
+    padding: 12px 24px; border-radius: 9999px;
+    border: none; cursor: pointer; font-size: 14px; font-weight: 500;
+    transition: all 0.18s; font-family: inherit;
+  }
+  .btn-ghost-pill:hover { background: rgba(0,0,0,0.08); }
+  .btn-ghost-pill:disabled { color: #9CA3AF; cursor: not-allowed; background: rgba(0,0,0,0.03); }
+
+  /* 步骤指示器圆点 */
+  .step-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: rgba(0,0,0,0.12);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+  }
+  .step-dot.active {
+    width: 28px; border-radius: 9999px;
+    background: #3B82F6;
+  }
+  .step-dot.done { background: #3B82F6; opacity: 0.5; }
+
+  /* 输入框（无边框美学：色块差 + 大圆角） */
+  .input-field {
+    width: 100%;
+    background: rgba(0,0,0,0.04);
+    border: none;
+    padding: 12px 14px;
+    border-radius: 12px;
+    font-size: 13px;
+    color: #1A1A1A;
+    font-family: inherit;
+    outline: none;
+    transition: all 0.18s;
+  }
+  .input-field:focus { background: rgba(59,130,246,0.08); box-shadow: 0 0 0 3px rgba(59,130,246,0.16); }
+  .input-field::placeholder { color: #9CA3AF; }
+
+  .select-field {
+    appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+  }
+
+  /* 高亮标签（要点卡片） */
+  .highlight-card {
+    display: flex; gap: 12px; padding: 14px 16px;
+    background: #FFFFFF; border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    align-items: flex-start;
+  }
+  .highlight-num {
+    flex-shrink: 0;
+    width: 26px; height: 26px; border-radius: 50%;
+    background: rgba(59,130,246,0.12); color: #3B82F6;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 600;
+  }
+
+  /* 滑块（思考等级示意） */
+  .slider-track {
+    position: relative; height: 4px; background: rgba(0,0,0,0.08);
+    border-radius: 9999px;
+  }
+  .slider-fill { position: absolute; height: 100%; background: #3B82F6; border-radius: 9999px; }
+  .slider-thumb {
+    position: absolute; top: 50%; width: 14px; height: 14px;
+    background: #FFFFFF; border: 2px solid #3B82F6; border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 1px 4px rgba(59,130,246,0.3);
+  }
+
+  /* MacosWindow 内部容器（防止内容溢出） */
+  .macos-content { width: 100%; height: 100%; overflow: hidden; }
+
+  /* 滚动条 */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 3px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="env,react">
+const { useState, useEffect, useMemo, useRef } = React;
+
+// ============================================================================
+// 设计 token（与任务描述对齐）
+// ============================================================================
+const TOKENS = {
+  primary: '#3B82F6',
+  primaryDeep: '#1D4ED8',
+  canvas: '#FAFAFA',
+  surface: '#FFFFFF',
+  textPrimary: '#1A1A1A',
+  textSecondary: '#6B7280',
+  textTertiary: '#9CA3AF',
+  borderSubtle: 'rgba(0,0,0,0.04)',
+  bgHover: 'rgba(0,0,0,0.04)',
+  bgActive: 'rgba(0,0,0,0.08)',
+  cardShadow: '0 1px 3px rgba(0,0,0,0.04)',
+  logoGradient: 'linear-gradient(135deg, #3B82F6, #1D4ED8)',
+  fontStack: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Microsoft YaHei', sans-serif",
+};
+
+// ============================================================================
+// MacosWindow 设备框（与 index.html 同款样式）
+// ============================================================================
+const macosWindowStyles = {
+  window: {
+    display: 'inline-block',
+    background: '#fff',
+    borderRadius: 10,
+    overflow: 'hidden',
+    boxShadow: '0 30px 80px rgba(0,0,0,0.18), 0 0 0 0.5px rgba(0,0,0,0.12)',
+  },
+  titleBar: {
+    height: 38,
+    background: 'linear-gradient(to bottom, #F0F0F0, #E0E0E0)',
+    display: 'flex', alignItems: 'center', padding: '0 14px',
+    position: 'relative', userSelect: 'none',
+  },
+  trafficLights: { display: 'flex', gap: 8, alignItems: 'center' },
+  light: { width: 12, height: 12, borderRadius: '50%', border: '0.5px solid rgba(0,0,0,0.12)' },
+  close: { background: '#FF5F57' },
+  minimize: { background: '#FEBC2E' },
+  maximize: { background: '#28C840' },
+  title: {
+    position: 'absolute', left: 0, right: 0, textAlign: 'center',
+    fontSize: 13, color: '#424242', fontWeight: 500, pointerEvents: 'none',
+  },
+  content: { background: '#fff' },
+};
+
+function MacosWindow({ title = 'Living Dashboard', width = 720, height = 480, children }) {
+  return (
+    <div style={macosWindowStyles.window}>
+      <div style={macosWindowStyles.titleBar}>
+        <div style={macosWindowStyles.trafficLights}>
+          <div style={{ ...macosWindowStyles.light, ...macosWindowStyles.close }} />
+          <div style={{ ...macosWindowStyles.light, ...macosWindowStyles.minimize }} />
+          <div style={{ ...macosWindowStyles.light, ...macosWindowStyles.maximize }} />
+        </div>
+        <div style={macosWindowStyles.title}>{title}</div>
+      </div>
+      <div style={{ ...macosWindowStyles.content, width, height }}>{children}</div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Logo 圆形（80×80 蓝色渐变 + LD 白字）
+// ============================================================================
+function LogoCircle({ size = 80, radius = 22 }) {
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: '50%',
+      background: TOKENS.logoGradient,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      color: '#FFFFFF', fontWeight: 700, fontSize: radius,
+      letterSpacing: '-1px',
+      boxShadow: '0 8px 24px rgba(59,130,246,0.28), 0 2px 6px rgba(29,78,216,0.18)',
+    }}>LD</div>
+  );
+}
+
+// ============================================================================
+// SVG Icon 集（反 AI slop：无 emoji，全内联 SVG）
+// ============================================================================
+function Icon({ name, size = 14, color = 'currentColor', strokeWidth = 1.8 }) {
+  const icons = {
+    arrowRight: <polyline points="9 18 15 12 9 6" />,
+    arrowLeft: <polyline points="15 18 9 12 15 6" />,
+    check: <polyline points="20 6 9 17 4 12" />,
+    plus: <><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>,
+    cloud: <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />,
+    hardDrive: <><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></>,
+    zap: <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />,
+    bot: <><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></>,
+    brain: <><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></>,
+    settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></>,
+    panelLeftOpen: <><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></>,
+    layout: <><rect x="3" y="3" width="18" height="18" rx="2"/><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></>,
+    bookmark: <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>,
+    send: <><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></>,
+    loader: <><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></>,
+    chevronDown: <polyline points="6 9 12 15 18 9" />,
+    sparkles: <path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z"/>,
+    shield: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>,
+  };
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round"
+      style={{ flexShrink: 0 }}>
+      {icons[name]}
+    </svg>
+  );
+}
+
+// ============================================================================
+// 步骤定义
+// ============================================================================
+const STEP_META = [
+  { id: 1, label: '欢迎' },
+  { id: 2, label: '面板与画布' },
+  { id: 3, label: 'AI 助手' },
+  { id: 4, label: '组件生态' },
+  { id: 5, label: 'AI 配置' },
+];
+
+// ============================================================================
+// Step 1：欢迎页（全宽居中布局）
+// ============================================================================
+function WelcomeStep() {
+  return (
+    <div style={{
+      width: '100%', height: '100%', background: TOKENS.canvas,
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      gap: 20, padding: 40, position: 'relative',
+    }}>
+      <LogoCircle size={80} radius={30} />
+      <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <h1 style={{ fontSize: 30, fontWeight: 700, color: TOKENS.textPrimary, letterSpacing: '-0.5px' }}>
+          Living Dashboard
+        </h1>
+        <p style={{ fontSize: 15, color: TOKENS.textSecondary, fontWeight: 400 }}>
+          你的可定制 AI 学习工作台
+        </p>
+      </div>
+      {/* 装饰性背景色块（反 AI slop：不用紫渐变，用色块差） */}
+      <div style={{
+        position: 'absolute', top: 0, left: 0, right: 0, height: 120,
+        background: 'radial-gradient(ellipse at top, rgba(59,130,246,0.06), transparent 70%)',
+        pointerEvents: 'none',
+      }} />
+      <div style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0, height: 120,
+        background: 'radial-gradient(ellipse at bottom, rgba(59,130,246,0.04), transparent 70%)',
+        pointerEvents: 'none',
+      }} />
+    </div>
+  );
+}
+
+// ============================================================================
+// Step 2：Panel 与 Canvas（CanvasHome 风格预览）
+// ============================================================================
+function CanvasHomePreview() {
+  // 收藏 widget 缩略图（4 个示例）
+  const widgets = [
+    { id: 1, name: '笔记', color: '#FEF3C7', accent: '#D97706', letter: 'N' },
+    { id: 2, name: '待办', color: '#DBEAFE', accent: '#2563EB', letter: 'T' },
+    { id: 3, name: '计算器', color: '#F3E8FF', accent: '#7C3AED', letter: 'C' },
+    { id: 4, name: '番茄钟', color: '#FEE2E2', accent: '#DC2626', letter: 'P' },
+  ];
+  return (
+    <div className="macos-content" style={{ background: TOKENS.canvas, padding: 28, display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {/* 顶部 Logo + 标题 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <LogoCircle size={40} radius={16} />
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: TOKENS.textPrimary }}>Living Dashboard</span>
+          <span style={{ fontSize: 11, color: TOKENS.textSecondary }}>我的学习工作台</span>
+        </div>
+      </div>
+      {/* AI 对话框 */}
+      <div style={{
+        background: TOKENS.surface, borderRadius: 16, padding: '14px 16px',
+        boxShadow: TOKENS.cardShadow,
+        display: 'flex', alignItems: 'center', gap: 10,
+      }}>
+        <Icon name="sparkles" size={16} color={TOKENS.primary} />
+        <span style={{ flex: 1, fontSize: 13, color: TOKENS.textTertiary }}>问 AI 帮你创建学习面板...</span>
+        <button style={{
+          width: 30, height: 30, borderRadius: '50%', border: 'none',
+          background: TOKENS.primary, color: '#fff', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}><Icon name="send" size={12} color="#fff" /></button>
+      </div>
+      {/* 收藏组件网格 */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: TOKENS.textSecondary }}>收藏组件</span>
+          <span style={{ fontSize: 10, color: TOKENS.textTertiary }}>查看全部</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+          {widgets.map(w => (
+            <div key={w.id} style={{
+              background: TOKENS.surface, borderRadius: 12, padding: 12,
+              boxShadow: TOKENS.cardShadow,
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+            }}>
+              <div style={{
+                width: 32, height: 32, borderRadius: 8,
+                background: w.color, color: w.accent,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 14, fontWeight: 700,
+              }}>{w.letter}</div>
+              <span style={{ fontSize: 10, color: TOKENS.textSecondary }}>{w.name}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* 进入画布按钮 */}
+      <button style={{
+        marginTop: 4, padding: '10px 16px', background: 'transparent',
+        color: TOKENS.primary, border: 'none', cursor: 'pointer',
+        fontSize: 12, fontWeight: 500, borderRadius: 8,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+        width: 'fit-content', alignSelf: 'center',
+      }}>
+        进入画布 <Icon name="arrowRight" size={12} color={TOKENS.primary} />
+      </button>
+    </div>
+  );
+}
+
+// ============================================================================
+// Step 3：AI 助手（AIAssistantSidebar 风格预览）
+// ============================================================================
+function AiAssistantPreview() {
+  return (
+    <div className="macos-content" style={{ background: TOKENS.surface, display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* 顶部：Agent 模式切换 */}
+      <div style={{ padding: '10px 12px', borderBottom: `1px solid ${TOKENS.borderSubtle}`, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{
+          flex: 1, display: 'flex', background: TOKENS.canvas, borderRadius: 8, padding: 3, gap: 2,
+        }}>
+          {[
+            { key: 'cloud', label: '云端', active: true },
+            { key: 'hardDrive', label: '本地', active: false },
+            { key: 'zap', label: '自动', active: false },
+          ].map(opt => (
+            <button key={opt.key} style={{
+              flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+              padding: '6px 8px', borderRadius: 6, border: 'none', cursor: 'pointer',
+              fontSize: 11, fontWeight: 500,
+              background: opt.active ? TOKENS.surface : 'transparent',
+              color: TOKENS.textPrimary,
+              boxShadow: opt.active ? TOKENS.cardShadow : 'none',
+            }}>
+              <Icon name={opt.key} size={10} color={TOKENS.textSecondary} />
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 对话流 */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* 用户消息 */}
+        <div style={{ alignSelf: 'flex-end', maxWidth: '80%', padding: '8px 12px', background: TOKENS.primary, color: '#fff', borderRadius: 12, borderBottomRightRadius: 4, fontSize: 12 }}>
+          帮我创建一个学习面板，包含笔记和待办
+        </div>
+        {/* AI 思考折叠 */}
+        <div style={{ alignSelf: 'flex-start', maxWidth: '85%', padding: '8px 12px', background: TOKENS.canvas, borderRadius: 12, borderBottomLeftRadius: 4, fontSize: 12, color: TOKENS.textSecondary }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <Icon name="brain" size={11} color={TOKENS.primary} />
+            <span style={{ fontWeight: 500, color: TOKENS.textPrimary }}>思考中</span>
+            <span style={{ fontSize: 10, color: TOKENS.textTertiary }}>· 中等</span>
+          </div>
+          <div style={{ padding: '4px 6px', background: 'rgba(0,0,0,0.03)', borderRadius: 4, fontSize: 10, color: TOKENS.textTertiary }}>
+            用户想要创建学习面板，需要包含笔记和待办组件。我需要先创建面板...
+          </div>
+        </div>
+        {/* 权限请求卡片 */}
+        <div style={{
+          alignSelf: 'flex-start', maxWidth: '90%', padding: 10,
+          background: 'rgba(239,68,68,0.06)', borderRadius: 10, border: '1px solid rgba(239,68,68,0.18)',
+          display: 'flex', flexDirection: 'column', gap: 6,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Icon name="shield" size={11} color="rgb(239,68,68)" />
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'rgb(239,68,68)' }}>权限请求</span>
+          </div>
+          <div style={{ fontSize: 11, color: TOKENS.textSecondary }}>AI 想要创建新面板，是否允许？</div>
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+            <button style={{ padding: '3px 10px', background: 'transparent', border: 'none', borderRadius: 9999, fontSize: 10, cursor: 'pointer', color: TOKENS.textSecondary }}>拒绝</button>
+            <button style={{ padding: '3px 10px', background: TOKENS.primary, color: '#fff', border: 'none', borderRadius: 9999, fontSize: 10, cursor: 'pointer' }}>允许</button>
+          </div>
+        </div>
+      </div>
+
+      {/* 底部：思考等级滑块 + 模型 */}
+      <div style={{ padding: '8px 12px', borderTop: `1px solid ${TOKENS.borderSubtle}`, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button style={{
+          display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px',
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          fontSize: 10, color: TOKENS.textSecondary,
+        }}>
+          <Icon name="settings" size={10} /> API配置
+        </button>
+        <div style={{ flex: 1, minWidth: 80, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+            <Icon name="brain" size={10} color={TOKENS.textSecondary} />
+            <span style={{ fontSize: 10, color: TOKENS.textSecondary }}>思考等级</span>
+          </div>
+          <div className="slider-track">
+            <div className="slider-fill" style={{ width: '50%' }} />
+            <div className="slider-thumb" style={{ left: '50%' }} />
+          </div>
+        </div>
+        <button style={{
+          display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px',
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          fontSize: 10, color: TOKENS.textSecondary,
+        }}>
+          deepseek-v4 <Icon name="chevronDown" size={10} color={TOKENS.textSecondary} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Step 4：Widget 生态（FAB + widget 网格 + 环境标签）
+// ============================================================================
+function WidgetEcosystemPreview() {
+  const widgets = [
+    { name: 'AI 助手', letter: 'AI', color: '#DBEAFE', accent: '#2563EB', env: 'desktop', icon: 'bot' },
+    { name: '笔记', letter: 'N', color: '#FEF3C7', accent: '#D97706', env: 'frontend', icon: 'bookmark' },
+    { name: '计算器', letter: 'C', color: '#F3E8FF', accent: '#7C3AED', env: 'frontend', icon: 'layout' },
+    { name: '番茄钟', letter: 'P', color: '#FEE2E2', accent: '#DC2626', env: 'frontend', icon: 'zap' },
+    { name: '网页', letter: 'W', color: '#D1FAE5', accent: '#059669', env: 'desktop', icon: 'cloud' },
+    { name: 'PDF', letter: 'D', color: '#FED7AA', accent: '#EA580C', env: 'desktop', icon: 'panelLeftOpen' },
+  ];
+  return (
+    <div className="macos-content" style={{ background: TOKENS.canvas, padding: 24, position: 'relative' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: TOKENS.textPrimary }}>组件生态</span>
+          <span style={{ fontSize: 10, color: TOKENS.textTertiary }}>点击右下角 + 添加</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+          {widgets.map((w, i) => (
+            <div key={i} style={{
+              background: TOKENS.surface, borderRadius: 12, padding: 14,
+              boxShadow: TOKENS.cardShadow,
+              display: 'flex', flexDirection: 'column', gap: 8, position: 'relative',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{
+                  width: 32, height: 32, borderRadius: 8,
+                  background: w.color, color: w.accent,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Icon name={w.icon} size={14} color={w.accent} />
+                </div>
+                {/* 环境标签：纯前端绿色 / 仅桌面端橙色 */}
+                <span style={{
+                  padding: '2px 6px', borderRadius: 9999, fontSize: 9, fontWeight: 500,
+                  background: w.env === 'frontend' ? 'rgba(16,185,129,0.12)' : 'rgba(249,115,22,0.12)',
+                  color: w.env === 'frontend' ? 'rgb(16,185,129)' : 'rgb(249,115,22)',
+                }}>
+                  {w.env === 'frontend' ? '纯前端' : '仅桌面端'}
+                </span>
+              </div>
+              <span style={{ fontSize: 11, fontWeight: 500, color: TOKENS.textPrimary }}>{w.name}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* 右下角 FAB + 按钮 */}
+      <button style={{
+        position: 'absolute', right: 18, bottom: 18,
+        width: 44, height: 44, borderRadius: '50%',
+        background: TOKENS.primary, border: 'none', cursor: 'pointer',
+        boxShadow: '0 6px 16px rgba(59,130,246,0.36), 0 2px 6px rgba(59,130,246,0.24)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <Icon name="plus" size={20} color="#fff" strokeWidth={2.4} />
+      </button>
+    </div>
+  );
+}
+
+// ============================================================================
+// Step 5：AI 配置（provider + endpoint + model + apiKey + 测试 + 完成）
+// ============================================================================
+const PROVIDER_PRESETS = {
+  deepseek: {
+    label: 'DeepSeek',
+    endpoint: 'https://api.deepseek.com/v1/chat/completions',
+    model: 'deepseek-v4-flash',
+  },
+  openai: {
+    label: 'OpenAI',
+    endpoint: 'https://api.openai.com/v1/chat/completions',
+    model: 'gpt-4o-mini',
+  },
+  anthropic: {
+    label: 'Anthropic Claude',
+    endpoint: 'https://api.anthropic.com/v1/messages',
+    model: 'claude-3-5-sonnet-20241022',
+  },
+  google: {
+    label: 'Google Gemini',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
+    model: 'gemini-1.5-flash',
+  },
+};
+
+function AiConfigForm({ onComplete }) {
+  const [provider, setProvider] = useState('deepseek');
+  const [endpoint, setEndpoint] = useState(PROVIDER_PRESETS.deepseek.endpoint);
+  const [model, setModel] = useState(PROVIDER_PRESETS.deepseek.model);
+  const [apiKey, setApiKey] = useState('');
+  const [testStatus, setTestStatus] = useState('idle'); // idle | testing | success | error
+  const [testMessage, setTestMessage] = useState('');
+
+  // 切换 provider 时自动填充 endpoint 和 model
+  function handleProviderChange(nextProvider) {
+    setProvider(nextProvider);
+    const preset = PROVIDER_PRESETS[nextProvider];
+    setEndpoint(preset.endpoint);
+    setModel(preset.model);
+    setTestStatus('idle');
+    setTestMessage('');
+  }
+
+  function handleTest() {
+    if (!apiKey.trim()) {
+      setTestStatus('error');
+      setTestMessage('请先输入 API Key');
+      return;
+    }
+    setTestStatus('testing');
+    setTestMessage('');
+    // 模拟测试（真实场景调 window.aiKeyApi + ping）
+    setTimeout(() => {
+      setTestStatus('success');
+      setTestMessage('连接测试通过');
+    }, 900);
+  }
+
+  function handleComplete() {
+    // 真实场景调 window.aiKeyApi.setApiKey + setActiveProvider + setHasCompletedOnboarding(true)
+    onComplete && onComplete();
+  }
+
+  return (
+    <div className="macos-content" style={{ background: TOKENS.canvas, padding: 28, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 4 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 600, color: TOKENS.textPrimary }}>配置 AI 助手</h2>
+        <p style={{ fontSize: 11, color: TOKENS.textSecondary }}>填写 API 信息以启用 AI 功能，可稍后在设置中修改</p>
+      </div>
+
+      {/* Provider 选择 */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <label style={{ fontSize: 11, fontWeight: 500, color: TOKENS.textSecondary }}>Provider</label>
+        <select
+          className="input-field select-field"
+          value={provider}
+          onChange={(e) => handleProviderChange(e.target.value)}
+          style={{ cursor: 'pointer' }}
+        >
+          {Object.entries(PROVIDER_PRESETS).map(([key, val]) => (
+            <option key={key} value={key}>{val.label}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Endpoint */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <label style={{ fontSize: 11, fontWeight: 500, color: TOKENS.textSecondary }}>API Endpoint</label>
+        <input
+          className="input-field"
+          type="text"
+          value={endpoint}
+          onChange={(e) => setEndpoint(e.target.value)}
+          placeholder="https://api.example.com/v1/chat/completions"
+        />
+      </div>
+
+      {/* Model */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <label style={{ fontSize: 11, fontWeight: 500, color: TOKENS.textSecondary }}>Model</label>
+        <input
+          className="input-field"
+          type="text"
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          placeholder="model-id"
+        />
+      </div>
+
+      {/* API Key */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <label style={{ fontSize: 11, fontWeight: 500, color: TOKENS.textSecondary }}>API Key</label>
+        <input
+          className="input-field"
+          type="password"
+          value={apiKey}
+          onChange={(e) => { setApiKey(e.target.value); setTestStatus('idle'); setTestMessage(''); }}
+          placeholder="sk-..."
+        />
+      </div>
+
+      {/* 测试按钮 + 状态 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button
+          className="btn-ghost-pill"
+          onClick={handleTest}
+          disabled={testStatus === 'testing'}
+          style={{ padding: '8px 16px', fontSize: 12 }}
+        >
+          {testStatus === 'testing' ? '测试中...' : '连接测试'}
+        </button>
+        {testStatus === 'success' && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'rgb(16,185,129)' }}>
+            <Icon name="check" size={12} color="rgb(16,185,129)" /> {testMessage}
+          </span>
+        )}
+        {testStatus === 'error' && (
+          <span style={{ fontSize: 11, color: 'rgb(239,68,68)' }}>{testMessage}</span>
+        )}
+      </div>
+
+      {/* 完成按钮（内嵌在表单底部，外部步骤导航也有"下一步"但 Step 5 时变成"完成"） */}
+      <div style={{ marginTop: 8, padding: 12, background: 'rgba(59,130,246,0.06)', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <Icon name="check" size={14} color={TOKENS.primary} />
+        <span style={{ flex: 1, fontSize: 11, color: TOKENS.textSecondary }}>配置完成，可以开始使用 Living Dashboard</span>
+      </div>
+      {/* onComplete 触发由外层下一步按钮调用，本组件不直接渲染完成按钮，避免与底部 nav 重复 */}
+      <span style={{ display: 'none' }} data-on-complete-trigger="true" />
+    </div>
+  );
+}
+
+// ============================================================================
+// 步骤右侧要点说明
+// ============================================================================
+function StepHighlights({ items }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, maxWidth: 320 }}>
+      {items.map((item, i) => (
+        <div key={i} className="highlight-card">
+          <div className="highlight-num">{i + 1}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: TOKENS.textPrimary }}>{item.title}</div>
+            <div style={{ fontSize: 11, color: TOKENS.textSecondary, lineHeight: 1.55 }}>{item.desc}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ============================================================================
+// 步骤指示器
+// ============================================================================
+function StepIndicator({ current, onSelect }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 24px' }}>
+      {STEP_META.map((s, i) => (
+        <React.Fragment key={s.id}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
+            onClick={() => onSelect(s.id - 1)}>
+            <div className={`step-dot ${s.id === current + 1 ? 'active' : ''} ${s.id < current + 1 ? 'done' : ''}`} />
+            <span style={{
+              fontSize: 11, fontWeight: 500,
+              color: s.id === current + 1 ? TOKENS.textPrimary : TOKENS.textTertiary,
+            }}>{s.label}</span>
+          </div>
+          {i < STEP_META.length - 1 && (
+            <div style={{ width: 24, height: 1, background: TOKENS.borderSubtle }} />
+          )}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+// ============================================================================
+// 主 App：Onboarding 容器
+// ============================================================================
+function OnboardingApp() {
+  const [step, setStep] = useState(0); // 0-indexed: 0..4
+  const [completed, setCompleted] = useState(false);
+
+  // Step 5 表单的内部状态（提升到外层，便于"下一步"按钮触发完成）
+  const aiConfigRef = useRef(null);
+
+  function handleNext() {
+    if (step === STEP_META.length - 1) {
+      // Step 5 → 完成
+      setCompleted(true);
+      return;
+    }
+    setStep(s => Math.min(s + 1, STEP_META.length - 1));
+  }
+  function handlePrev() {
+    setStep(s => Math.max(s - 1, 0));
+  }
+  function handleSkip() {
+    setCompleted(true);
+  }
+
+  if (completed) {
+    return (
+      <div style={{
+        width: '100%', height: '100vh', background: TOKENS.canvas,
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20,
+      }}>
+        <LogoCircle size={64} radius={24} />
+        <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <h1 style={{ fontSize: 24, fontWeight: 600, color: TOKENS.textPrimary }}>配置完成</h1>
+          <p style={{ fontSize: 13, color: TOKENS.textSecondary }}>欢迎开始使用 Living Dashboard</p>
+        </div>
+        <button className="btn-primary-pill" onClick={() => setCompleted(false)}>
+          重新查看 Onboarding
+        </button>
+      </div>
+    );
+  }
+
+  // 步骤内容
+  const isWelcome = step === 0;
+  const isConfig = step === STEP_META.length - 1;
+
+  // 每步的设备框内容
+  const windowContent = (() => {
+    switch (step) {
+      case 0: return <WelcomeStep />;
+      case 1: return <CanvasHomePreview />;
+      case 2: return <AiAssistantPreview />;
+      case 3: return <WidgetEcosystemPreview />;
+      case 4: return <AiConfigForm onComplete={handleNext} />;
+      default: return null;
+    }
+  })();
+
+  // 每步的右侧要点
+  const highlights = useMemo(() => {
+    switch (step) {
+      case 1: return [
+        { title: '多面板切换', desc: '左侧标签栏管理多个独立面板，类似浏览器标签页，每面板有独立画布与 AI 会话' },
+        { title: '画布拖拽', desc: '自由摆放 widget、连线关联、缩放平移，画布无限延展，支持坐标书签' },
+        { title: '收藏组件', desc: '收藏常用 widget 配置，一键添加到任意面板，跨面板复用' },
+      ];
+      case 2: return [
+        { title: 'Agent 模式', desc: '云端（服务器 LLM）/ 本地（轻 agent）/ 自动（按任务复杂度切换）三种模式' },
+        { title: '思考等级滑块', desc: '4 档思考等级（minimal/low/medium/high），控制 AI 推理深度与响应速度' },
+        { title: '权限请求卡片', desc: 'AI 执行创建面板、删除组件等敏感操作前，弹出权限卡片由用户确认' },
+      ];
+      case 3: return [
+        { title: '右下角 + 按钮', desc: '悬浮 FAB 快速添加 widget，弹出组件选择网格' },
+        { title: '环境标签', desc: '纯前端（绿色）：浏览器/移动端通用；仅桌面端（橙色）：依赖 Electron 能力' },
+        { title: '组件搜索', desc: 'Ctrl+F 全局搜索组件，支持模糊匹配与最近使用' },
+      ];
+      default: return [];
+    }
+  }, [step]);
+
+  // 设备框尺寸
+  const windowSize = isWelcome
+    ? { width: 720, height: 460 }
+    : isConfig
+      ? { width: 560, height: 540 }
+      : { width: 720, height: 480 };
+
+  return (
+    <div style={{
+      width: '100%', minHeight: '100vh', background: TOKENS.canvas,
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      padding: '40px 32px', position: 'relative',
+    }}>
+      {/* 右上角跳过按钮 */}
+      <button onClick={handleSkip} style={{
+        position: 'absolute', top: 24, right: 32,
+        background: 'transparent', border: 'none', cursor: 'pointer',
+        fontSize: 12, color: TOKENS.textSecondary, padding: '6px 12px',
+        borderRadius: 9999, transition: 'all 0.18s',
+      }} onMouseEnter={(e) => { e.target.style.background = TOKENS.bgHover; e.target.style.color = TOKENS.textPrimary; }}
+        onMouseLeave={(e) => { e.target.style.background = 'transparent'; e.target.style.color = TOKENS.textSecondary; }}>
+        跳过 <Icon name="arrowRight" size={11} color={TOKENS.textSecondary} />
+      </button>
+
+      {/* 顶部步骤指示器 */}
+      <div style={{ marginBottom: 28 }}>
+        <StepIndicator current={step} onSelect={(idx) => setStep(idx)} />
+      </div>
+
+      {/* 主体内容：欢迎/配置用单列居中，其他步骤用左右布局 */}
+      {isWelcome || isConfig ? (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24 }}>
+          <MacosWindow title="Living Dashboard" {...windowSize}>
+            {windowContent}
+          </MacosWindow>
+          {/* 欢迎页底部"开始"按钮 / 配置页提示 */}
+          {isWelcome && (
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <button className="btn-primary-pill" onClick={handleNext}>
+                开始 <Icon name="arrowRight" size={12} color="#fff" />
+              </button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 32, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <MacosWindow title="Living Dashboard" {...windowSize}>
+            {windowContent}
+          </MacosWindow>
+          <StepHighlights items={highlights} />
+        </div>
+      )}
+
+      {/* 底部导航：上一步 / 下一步 */}
+      <div style={{ marginTop: 28, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <button
+          className="btn-ghost-pill"
+          onClick={handlePrev}
+          disabled={step === 0}
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <Icon name="arrowLeft" size={12} color={step === 0 ? TOKENS.textTertiary : TOKENS.textPrimary} /> 上一步
+          </span>
+        </button>
+        <button
+          className="btn-primary-pill"
+          onClick={handleNext}
+          // Step 5 需要用户输入 apiKey 才能完成（实际由测试状态决定，这里演示无强校验）
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            {isConfig ? '配置完成，开始使用' : '下一步'}
+            <Icon name={isConfig ? 'check' : 'arrowRight'} size={12} color="#fff" />
+          </span>
+        </button>
+      </div>
+
+      {/* 步骤计数 */}
+      <div style={{ marginTop: 14, fontSize: 11, color: TOKENS.textTertiary }}>
+        {step + 1} / {STEP_META.length}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// 渲染
+// ============================================================================
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<OnboardingApp />);
+</script>
+</body>
+</html>

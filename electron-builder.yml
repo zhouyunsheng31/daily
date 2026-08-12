@@ -1,0 +1,130 @@
+# Electron Builder 配置（Phase 10）
+# 产物结构：electron-vite 输出到 out/{main,preload,renderer}
+# pi-coding-agent / pi-ai 是 ESM-only，动态 import 在 asar 内可能失败，需要 asarUnpack
+
+appId: com.allmylife.event
+productName: Daily
+# 版本号从 package.json 读取（当前 1.0.0，对齐 Phase 13 发布）
+
+directories:
+  # Phase 14：build-out-v1 目录被 Windows 文件锁（Defender/旧句柄）锁定无法删除，
+  # 改用 build-out-v2/ 规避。这是 electron-builder 在 Windows 上的已知问题，
+  # 当 win-unpacked 目录被 Defender 扫描或进程占用时无法 rename。
+  # 历史路径：dist → build-out → build-out-v1 → build-out-v2
+  output: build-out-v3
+  buildResources: build
+
+# files：allow-list 策略，只包含桌面端运行时必需的文件
+# Phase 13.5 修复（P0）：原 deny-list 遗漏了 .gradle-cache（1GB Android 构建缓存）、
+# pkg-staging、src（遗留 Vite 模板）、e2e、contest-registration、org、public 等目录，
+# 以及大量根目录散落文件（m8_*.png/logcat、docker-compose*.yml、*.bat、test_sudoku.py、
+# test-stepfun-e2e.ps1 等），导致 win-unpacked 膨胀到 1.5GB、setup.exe 589MB。
+# 改用 allow-list 从根本杜绝遗漏——任何新增到根目录的文件默认不进包。
+#
+# electron-builder 自动处理（无需在此声明）：
+# - node_modules：只包含 package.json dependencies（不含 devDependencies）
+# - 自动排除 package-lock.json、electron-builder.{yaml,yml}、.gitignore 等
+# - directories.output 和 directories.buildResources 自动排除
+files:
+  # === 运行时必需文件（allow-list）===
+  - out/**/*              # electron-vite 构建产物（out/main + out/preload + out/renderer，共 8.19MB）
+  - build/tray-icon.png   # 托盘图标，main 进程运行时引用（client/desktop/electron/main/index.ts:108 → join(__dirname,'../../build/tray-icon.png')）
+  - package.json          # 应用元数据（main 入口 ./out/main/index.js、version、name）
+  # === Phase 14 C2：server 作为 resources/server/ 子目录随安装包分发 ===
+  # server 已完成 SQLite 改造（C1），可用 DB_DRIVER=sqlite 运行
+  # 打包前需在 server/ 下执行 npm prune --production 去除 devDependencies
+  - server/dist/**/*      # 编译后的 server 代码（tsc 输出，不含 src/test/tsconfig）
+  - server/node_modules/**/*  # server 依赖（打包时先 npm prune --production）
+  - server/package.json   # server 元数据（运行时需要，含 scripts.start）
+  # === 防御性排除（针对 node_modules 内部的测试/IDE 文件）===
+  - '!**/__tests__/**'
+  - '!**/*.test.{ts,tsx,js,jsx}'
+  - '!**/*.spec.{ts,tsx,js,jsx}'
+  - '!**/.trae/**'
+  - '!**/.pi/**'
+  # Phase 14 C2：重新包含 .pi/skills（置于 !**/.pi/** 之后，后置 glob 模式覆盖前置排除）
+  - .pi/skills/**/*       # skills 目录（server piBridge 运行时引用）
+
+# Phase 14 E3：重新启用 asar 打包
+# 历史背景：Phase 13 P0 C2 时 asar 打包卡住（58780 文件，CPU 不增长，疑似文件锁），
+#   当时禁用 asar 以产出 setup.exe。但 asar: false 导致 3121 文件散装，
+#   安装卡顿（用户反馈"安装过程特别卡，拖动进度条才动"）。
+# 重新启用原因：Phase 14 改用 allow-list 策略（见上方 files 字段），只包含
+#   桌面端运行时必需文件，文件数大幅减少，预期不再卡住。
+# asar 内 __dirname 行为说明：asar 内 __dirname 指向 app.asar 虚拟路径，
+#   Node.js fs API 可透明读取 asar 内文件；但 better-sqlite3 的 .node 二进制
+#   无法在 asar 内加载，pi-coding-agent 是 ESM-only 动态 import 在 asar 内可能失败，
+#   这两者必须通过下方 asarUnpack 解包到真实文件系统。
+# Phase 14 E3 实测：asar: true 在本机环境下打包卡住（>10 分钟无输出，与 Phase 13 相同症状），
+# 疑似 Windows Defender 实时扫描 + 大量小文件（server/node_modules 256MB）导致。
+# 暂时回退为 asar: false，先产出可用 setup.exe。asar 优化留待后续。
+# Phase 15 portable 打包：重新启用 asar（已 prune devDependencies，文件数减少）
+asar: true
+# asarUnpack：把 native 模块和 ESM-only 包解压到 asar 外
+# - better-sqlite3：.node 二进制不能在 asar 内加载（必须解包）
+# - electron：防御性（若误包含则解包）
+# - @earendil-works/*：pi-coding-agent ESM-only，动态 import 在 asar 内可能失败
+# - resources/**：历史保留（如有 resources 目录）
+asarUnpack:
+  - resources/**
+  - node_modules/@earendil-works/**
+  # Phase 14 C2：server native 模块需解包到 asar 外（.node 二进制不能在 asar 内加载）
+  - '**/node_modules/better-sqlite3/**'  # SQLite native 模块（server DB_DRIVER=sqlite 时加载）
+  - '**/node_modules/electron/**'        # Electron 本身（防御性，若误包含则解包）
+
+win:
+  # executableName 不能含空格、不能太长，避免 NSIS 问题
+  executableName: daily
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico  # Phase 13 A 线 13.1.2：从 logo.png 生成（scripts/generate-icons.mjs）
+  # Phase 10：跳过签名步骤（无代码签名证书；同时避免 winCodeSign 在非管理员 Windows 上的符号链接解压失败）
+  signAndEditExecutable: false
+  # signtoolOptions 留空
+
+nsis:
+  # artifactName 用 ${name}（= name 字段，event）+ 版本号；${productName} 才是 Daily
+  artifactName: ${name}-${version}-setup.${ext}
+  shortcutName: ${productName}
+  uninstallDisplayName: ${productName}
+  # Phase 14 工作流 E2：自定义 NSIS 脚本
+  #   - preInit：默认安装路径改 daily 目录
+  #   - customPageAfterChangeDir：安装选项页（开机启动 / 桌面快捷方式 / 开始菜单快捷方式）
+  #   - customInstall：根据用户选择写入开机启动注册表、删除未勾选的快捷方式
+  #   - customUnInstall：卸载时清理开机启动注册表
+  include: build/installer.nsh
+  oneClick: false                # 非一键安装，显示安装向导
+  perMachine: false              # 当前用户安装（无需管理员）
+  allowElevation: true           # 允许提权（perMachine=false 时一般不需要）
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  # Phase 15 批次 6：安装完成页显示'运行应用'选项（electron-builder 自动注入 MUI_FINISHPAGE_RUN）
+  runAfterFinish: true
+  # Phase 13 A 线 13.1.3：NSIS 品牌化资源（banner/sidebar BMP + 中文安装向导）
+  # 注意：electron-builder 字段名是 installerHeader（MUI_HEADERIMAGE，150×57 顶部 banner），
+  #       spec/任务描述中的 "installerBanner" 是笔误（schema 中无此字段，会被忽略）。
+  #       文件名保留 spec 要求的 installer-banner.bmp，由 installerHeader 显式指向。
+  installerHeader: build/installer-banner.bmp
+  installerSidebar: build/installer-sidebar.bmp
+  uninstallerSidebar: build/uninstaller-sidebar.bmp
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  language: '2052'  # zh_CN / SimpChinese（中文安装向导，2052 = 简体中文 LCID）
+
+# native 模块 rebuild 策略：
+# - npmRebuild: false（不自动 rebuild app/node_modules）
+# - better-sqlite3 在 server/node_modules 中，dev 时为 Node ABI（npm rebuild）
+# - 打包时由 afterPack 钩子（scripts/after-pack.js）重新编译为 Electron ABI
+# - 桌面端运行时通过 ELECTRON_RUN_AS_NODE=1 子进程加载，使用 Electron 内置 Node ABI
+npmRebuild: false
+
+# Phase 14 C3 / Bug 6 修复：afterPack 钩子，打包后对 resources/server/node_modules
+# 执行 electron-rebuild，把 better-sqlite3 切换为 Electron ABI
+afterPack: scripts/after-pack.cjs
+
+# electron 二进制下载镜像（npmmirror 国内加速）
+electronDownload:
+  mirror: https://npmmirror.com/mirrors/electron/
