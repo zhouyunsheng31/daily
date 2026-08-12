@@ -57,20 +57,24 @@
 
 ## 4. 已拍板执行决策（本轮确认）
 
-1. **主路径 = GitHub Actions 云构建**（权威、可复现、日志可查）；**本地 ARM64 构建 = 可选加速**（zip 包已解 aapt2 障碍，但受内存/存储限制）。
-2. 本地构建成功定义（13 号文档 §9）：同一 commit 本地与云端都能 assembleDebug 且 APK 行为一致；否则云端权威。
-3. **先本地 git init 建基线 → 后续开发有回滚点**；首次推送 GitHub 用 `--force` 一次性替换远端旧快照（用户已确认）。
-4. `client/android/` 旧 LivingDashboard 工程（2026-07-29，Hilt/AGP8.2.2/单模块，196 个 .kt）**不删除，移入 `tmp/legacy-livingdashboard/` 存档**（其中 AI 对话/WS 实现有参考价值，且是自有代码可复用）。
-5. 签名纪律：debug keystore 走 GitHub Secret（base64）统一签名；release keystore 手机离线生成后进私有加密存储，绝不入库/对话/日志。
-6. ⚠️ 安全记录：用户曾将 GitHub PAT 直接发在对话中，**该 token 已视为暴露，需在 GitHub 后台 revoke 并重新签发**；后续凭证只走环境变量/Secret。
+1. ~~**主路径 = GitHub Actions 云构建**~~ → **2026-08-15 晚调整：GitHub 不可达，本地 ARM64 构建为主路径**（见 §5 执行记录：HTTPS push 408 超时、梯子无效、服务器中转手机上行也超时；待网络改善后再补 GitHub 推送与 CI）
+2. 本地构建成功定义（13 号文档 §9）：同一 commit 本地与云端都能 assembleDebug 且 APK 行为一致；否则云端权威——**当前云端不可用，本地即为唯一验证环境**
+3. **本地 git = 版本管理的唯一权威**（5b94ade 基线），不依赖任何远端
+4. `client/android/` 旧 LivingDashboard 工程（2026-07-29，Hilt/AGP8.2.2/单模块，196 个 .kt）**不删除，移入 `docs/android/assets/legacy-livingdashboard/` 存档**（其中 AI 对话/WS 实现有参考价值，且是自有代码可复用）。
+5. 签名纪律：debug 签名本地自动生成；release keystore 手机离线生成后进私有加密存储，绝不入库/对话/日志。
+6. ⚠️ 安全记录：用户曾将 GitHub PAT 直接发在对话中，**该 token 已视为暴露，需在 GitHub 后台 revoke 并重新签发**；后续凭证只走环境变量/Secret。另已注册：手机 SSH key（daily-dev-phone，id 160050633）、服务器 GitHub deploy key（daily-server-mirror，id 160051375，只对 daily 仓库可写）。
 
 ## 5. 执行记录（时间线）
 
 - 2026-08-15：README/12-roadmap 更新、新增 13-dev-toolchain（云构建主路径）
 - 2026-08-15：拿到脚手架 zip（/sdcard/workspace_42e234d4.zip）并解压存档
 - 2026-08-15：确认 GitHub 仓库 zhouyunsheng31/daily（private，无 Actions）
-- 2026-08-15：安装 git、本地仓库初始化 + 基线 commit、旧 LivingDashboard 存档（见 git log）
-- 下一步：M0-1 脚手架改造 → 首次 push（--force 建历史）→ CI 绿 → 手机装 APK 验证四 Tab
+- 2026-08-15：安装 git、本地仓库初始化 + 基线 commit（37ffe68 → 重建 5b94ade）、旧 LivingDashboard 存档
+- 2026-08-15：M0-1 脚手架（9 模块 + 四 Tab + CI workflow）落地
+- 2026-08-15 ⚠️ **事故与教训**：误删 `.git/objects` 下的 `.l2s.tmp_obj_*`（本环境 git 对象的延迟存储符号链接目标），导致对象库损坏 → 工作区无损，重建 .git 为单 commit（5b94ade）。**教训：绝不对 `.git/objects` 手动 find -delete；本环境 git 对象以 symlink 指向 `.l2s.tmp_obj_*` 延迟文件，属 Operit 存储层特性**
+- 2026-08-15：GitHub push 尝试全部失败（HTTPS 408 / SSH 443 超时 / 香港服务器中转手机上行也超时）→ **决策：本地构建为主路径，GitHub 推送挂起**
+- 2026-08-15：`setup_android_env.sh` 后台执行中（JDK17 已装，cmdline-tools/SDK 下载中，手机网络 ~130KB/s 较慢）
+- 下一步：本地 assembleDebug 验证脚手架 → 手机安装四 Tab 空壳 → M0-2 对话链路
 
 ## 6. 相关文档索引
 
