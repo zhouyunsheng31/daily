@@ -74,7 +74,9 @@
 - 2026-08-15 ⚠️ **事故与教训**：误删 `.git/objects` 下的 `.l2s.tmp_obj_*`（本环境 git 对象的延迟存储符号链接目标），导致对象库损坏 → 工作区无损，重建 .git 为单 commit（5b94ade）。**教训：绝不对 `.git/objects` 手动 find -delete；本环境 git 对象以 symlink 指向 `.l2s.tmp_obj_*` 延迟文件，属 Operit 存储层特性**
 - 2026-08-15：GitHub push 尝试全部失败（HTTPS 408 / SSH 443 超时 / 香港服务器中转手机上行也超时）→ **决策：本地构建为主路径，GitHub 推送挂起**
 - 2026-08-15：`setup_android_env.sh` 后台执行中（JDK17 已装，cmdline-tools/SDK 下载中，手机网络 ~130KB/s 较慢）
-- 下一步：本地 assembleDebug 验证脚手架 → 手机安装四 Tab 空壳 → M0-2 对话链路
+- 2026-08-15 ✅ **服务器构建打通（最终主路径）**：手机 proot 本地构建受限于 ARM64 aapt2 兼容（AGP9 不认 `aapt2FromMavenOverride` 校验、transforms 缓存完整性保护），改用 **香港服务器（x86_64, 2h4g）中转构建**：手机打包（2MB）→ scp 服务器（2.3s）→ 服务器装 JDK17 + cmdline-tools + platforms-35 + build-tools-35/36 + Gradle9.1（腾讯云）→ `gradle :app:assembleDebug --no-daemon --max-workers=1 -Xmx1536m` **2m58s 构建成功**（官方 x86_64 aapt2 零兼容问题）→ APK 拉回手机（20MB, SHA256 b644d0e1...）→ `pm install` 成功 → 启动截图验证**四 Tab 空壳运行**（对话/桌面/商店/我的）
+- 2026-08-15：一键构建脚本 `deploy/android-build.sh`（打包→上传→服务器构建[自动移除 ARM64 hack + 限内存防 OOM]→拉回→可选安装）
+- 下一步：M0-2 对话链路（游客鉴权 + bootstrap + SSE 全事件渲染）
 
 ## 6. 相关文档索引
 

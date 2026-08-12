@@ -38,5 +38,6 @@ include(":overlay-runtime")
 include(":capability")
 include(":packages")
 include(":sync")
-include(":baselineprofile")
-include(":macrobenchmark")
+// M1-8 接入（AGP9 兼容版 benchmark 插件就绪后再启用）：
+// include(":baselineprofile")
+// include(":macrobenchmark")
