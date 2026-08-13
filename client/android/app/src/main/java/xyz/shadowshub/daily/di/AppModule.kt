@@ -20,9 +20,8 @@ import java.util.concurrent.TimeUnit
 val appModule = module {
     single { SessionStore(get()) }
 
-    single {
-        PersistentCookieJar(get())
-    }
+    // 显式按接口注册：OkHttpClient.cookieJar(get()) 按 CookieJar 解析
+    single<okhttp3.CookieJar> { PersistentCookieJar(get()) }
 
     single {
         OkHttpClient.Builder()
