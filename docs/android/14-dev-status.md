@@ -64,6 +64,7 @@
 5. 签名纪律：debug 签名本地自动生成；release keystore 手机离线生成后进私有加密存储，绝不入库/对话/日志。
 6. ⚠️ 安全记录：用户曾将 GitHub PAT 直接发在对话中，**该 token 已视为暴露，需在 GitHub 后台 revoke 并重新签发**；后续凭证只走环境变量/Secret。另已注册：手机 SSH key（daily-dev-phone，id 160050633）、服务器 GitHub deploy key（daily-server-mirror，id 160051375，只对 daily 仓库可写）。
 7. **UI/图标设计协作红线（2026-08-15 用户要求）**：正式 UI 设计与 App 图标设计**必须由用户主导**——AI 按用户指示执行（用户给方向 → AI 出候选 → 用户选定 → AI 落地），禁止 AI 自行拍板界面风格/配色/布局/图标。M0 占位界面/占位图标（技术验证载体）除外，不得对外宣称是最终设计。已同步写入根 AGENT.md。
+8. **真机输入注入红线（2026-08-15 事故）**：禁止对非被测应用（尤其 Operit 宿主）执行 input text/tap/keyevent 注入；测试前必须 `dumpsys window | grep mCurrentFocus` 确认前台是被测应用；输入法操作（ime set/force-stop IME）须用户许可。事故记录：误向 Operit 输入框注入文本 → 微信键盘（默认输入法 wetype）连接异常、用户无法拉起键盘 → 修复：`am force-stop com.tencent.wetype` + `ime set` 切换刷新。
 
 ## 4.5 里程碑进度（2026-08-15 晚快照）
 

@@ -64,6 +64,8 @@ Daily 正式立项 Android 原生端（后续鸿蒙/iOS），产品定位 **「�
 
 > **UI/图标设计协作红线（2026-08-15 用户明确要求）**：正式 UI 设计与 App 图标设计**必须由用户主导**——AI 只能按用户指示执行（如：用户给方向 → AI 出候选 → 用户选定 → AI 落地），**禁止 AI 自行拍板界面风格、配色、布局或图标设计**。M0 阶段的占位界面/占位图标（技术验证载体）除外，但不得对外宣称是最终设计。执行依据：docs/android/10-ui-design.md §4（图标 brief 仅当用户要求执行时才生图）。
 
+> **真机输入注入红线（2026-08-15 事故教训，用户明确要求）**：禁止对**非被测应用**（尤其 Operit 宿主）执行 `input text` / `input tap` / `input keyevent` 注入；测试前必须先 `dumpsys window | grep mCurrentFocus` 确认前台窗口属于被测应用；输入法操作（`ime set` / force-stop IME）须用户许可。事故：误向 Operit 输入框注入文本导致微信键盘（默认输入法 wetype）连接异常、用户无法拉起键盘，修复：force-stop wetype + ime 切换刷新。
+
 ## webOS 后端端点快速索引
 
 新 Shell 使用独立的 `/webos/api/` 命名空间，避免修改 Legacy Dashboard 的 `/api/` 路由和既有 WS 协议。所有端点（除 `/api/auth/guest` 游客发放和既有登录端点）都继承现有 JWT `authMiddleware`，前端必须使用 `credentials: 'include'`。
