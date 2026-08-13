@@ -11,7 +11,7 @@
 | M0-2 ⚠️ | **端侧 pi spike（全方案最大不确定性，D15）**：proot Ubuntu + Node ≥22（arm64）+ pi-coding-agent SDK 在真机跑通；本地桥（stdio JSON-RPC）最小协议：session.turn / event / abort；BYOK provider 注入（DeepSeek 直连） | 真机完成 10 轮本地对话无事件丢失；断网继续可用；进程崩溃重启后会话可恢复 |
 | M0-3 ⚠️ | **进程占用与性能实测（D15 红线）**：Node 进程 RSS / 会话上下文增长曲线 / 首 token 延迟 / 冷启动（proot 拉起 → 可对话）| 预算表落档（11 §2 增补）：RSS ≤ 300MB 常态、冷启动 ≤ 10s（首启含 rootfs 下载另计）、对话中无卡顿掉帧 |
 | M0-4 ⚠️ | **App Runtime 验证**：WebView 沙箱加载线上现有 App（从 `/webos/api/apps` 拉 HTML + 文件 raw 端点 + `<base>` 素材），app-sdk 最小子集（storage.get/set + event 上报）经 WebMessagePort 桥跑通 | 线上 3 个真实 App（含一个带素材/图片的）在 Android 运行功能完整；storage 读写与网页端互通 |
-| M0-5 | 悬浮窗验证：透明 overlay + HTML 桌宠（共享 canvas 方案雏形）+ 点击穿透 hit-test | bongo-cat 级 2D 桌宠在其他 App 上层 60fps；点击本体响应、空白穿透 |
+| M0-5 | ⏸ **暂缓（用户拍板 2026-08-15）**：悬浮窗验证（透明 overlay + HTML 桌宠 + 点击穿透 hit-test）——悬浮窗桌宠（B 形态：浮在其他 App 上层）在用户明确要做之前**不动**；桌宠只做应用内（M1-4） | 恢复时按原验收：bongo-cat 级 2D 桌宠在其他 App 上层 60fps；点击本体响应、空白穿透 |
 | M0-6 | 设计走查：10-ui-design §1 tokens 落到 Compose 主题 | 双主题截图评审通过 |
 
 **M0 出口评审**：M0-2/M0-3 若不达标（pi 跑不动/内存超预算），回 02 §4 重审本地内核方案（可降级方向：更轻的 Node 构建、精简工具集、Bun 运行时），不进 M1；M0-4 若不达标（契约不兼容点 >3 处），回 02/03 修契约再进 M1。
@@ -23,7 +23,7 @@
 | M1-1 | 四大页面完整实现（对话/桌面/商店浏览/我的）按 10 篇规格；空态/错误/加载全套 | 10 §6 可用性清单逐条通过 |
 | M1-2 | **本地 AI 对话全能力**：harness 常驻（proot+Node+pi，agent/ 模块管理生命周期）+ BYOK 配置页（08 §6：DeepSeek/OpenAI 兼容/Anthropic + 测试连接 + 掩码）+ 附件图片（视觉）、系统 ASR 输入（08）、长按菜单、abort、busy/background_progress | 08 §6 验收全过；J3 旅程实测；**全程无服务端 AI 依赖**（断网可对话） |
 | M1-3 | App 管理：列表/安装/打开/版本时间线/回滚/删除（回收站）；apps_changed 实时刷新 | J4 全链路（建→改→新版本→回滚） |
-| M1-4 | 桌面：网格模式 + 长按编辑 + 壁纸 + 桌宠层（应用内） | J5 实测；50 图标流畅（11 §2） |
+| M1-4 | 桌面：网格模式 + 长按编辑 + 壁纸 + **桌宠层（应用内，A 形态唯一落点）** | J5 实测；50 图标流畅（11 §2）；应用内桌宠渲染走单共享 canvas WebView（非 overlay 悬浮窗，2026-08-15 用户拍板） |
 | M1-5 | 权限 Tier0：悬浮窗/无障碍/通知/截屏引导卡（J2）+ capability 上报端点（服务端 `webos/capability.ts`，REST） | 07 §5 用例 1、3 通过 |
 | M1-6 | 账号：邮箱验证码登录/注册/忘记密码（复用 `/api/auth/email/*`）+ 游客资产迁移 | J7 迁移用例（游客建 App → 登录 → 资产在） |
 | M1-7 | 文件服务第一阶段（服务端 `webos/files/`：manifest/blob/分块上传 + agent_fs 双写适配）+ 移动端同步（home/ 双向 + **本地会话日志加密同步**，02 §7） | 09 §6 用例 1、2、6 通过；线上回归无 413 |
@@ -38,7 +38,7 @@
 | M2-2 ⭐ | **App API 体系**（`webos/appApi.ts`：api.json 解析、vm 沙箱 handler、代理端点、pi 动态工具、文档页） | 04 §5 用例 A/B/C 全过；沙箱逃逸单测全红转绿 |
 | M2-3 | url-app + 外部 API 包（`webos/externalApps.ts`：白名单拦截、存储分区隔离、快照抓取） | 05 §4 用例全过 |
 | M2-4 | 联机房间 Phase 1（`webos/rooms.ts` + app-sdk channel 原语 + 计费 kind='room'） | 06 §6 用例全过 |
-| M2-5 | pet-layer 包类型 + overlay-runtime 完整版（多桌宠、桌面自由图标模式） | 10 桌宠 60fps（11 §2）；J5 自由模式可一键复原 |
+| M2-5 | ⏸ 拆分（用户拍板 2026-08-15）：**pet-layer 包类型（应用内桌宠包化）保留**，随 M1-4 桌宠层演进；**overlay-runtime 完整版（悬浮窗多桌宠、桌面自由图标模式）暂缓，用户明确要做前不动** | 恢复时按原验收：10 桌宠 60fps（11 §2）；J5 自由模式可一键复原 |
 | M2-6 | theme 包 + skill 包（包装现有 skills 机制进包流水线） | 主题应用/回退/分享链接安装全通 |
 | M2-7 | Shizuku Tier1 完整接入 + Broker 求交端侧化（07 §4） | 07 §5 用例 2 通过；降级链实测 |
 | M2-8 | proot 完整版：rootfs 按需下载/管理 + 运行器增强 + 工作区 bind（基础运行器已在 M1 随 harness 落地） | 07 §5 用例 4 通过 |

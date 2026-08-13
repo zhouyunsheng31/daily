@@ -65,6 +65,7 @@
 6. ⚠️ 安全记录：用户曾将 GitHub PAT 直接发在对话中，**该 token 已视为暴露，需在 GitHub 后台 revoke 并重新签发**；后续凭证只走环境变量/Secret。另已注册：手机 SSH key（daily-dev-phone，id 160050633）、服务器 GitHub deploy key（daily-server-mirror，id 160051375，只对 daily 仓库可写）。
 7. **UI/图标设计协作红线（2026-08-15 用户要求）**：正式 UI 设计与 App 图标设计**必须由用户主导**——AI 按用户指示执行（用户给方向 → AI 出候选 → 用户选定 → AI 落地），禁止 AI 自行拍板界面风格/配色/布局/图标。M0 占位界面/占位图标（技术验证载体）除外，不得对外宣称是最终设计。已同步写入根 AGENT.md。
 8. **真机输入注入红线（2026-08-15 事故）**：禁止对非被测应用（尤其 Operit 宿主）执行 input text/tap/keyevent 注入；测试前必须 `dumpsys window | grep mCurrentFocus` 确认前台是被测应用；输入法操作（ime set/force-stop IME）须用户许可。事故记录：误向 Operit 输入框注入文本 → 微信键盘（默认输入法 wetype）连接异常、用户无法拉起键盘 → 修复：`am force-stop com.tencent.wetype` + `ime set` 切换刷新。
+9. **桌宠范围（2026-08-15 用户拍板）**：暂只做**应用内桌宠**（M1-4 桌面 Tab 桌宠层，A 形态）；**悬浮窗桌宠（overlay-runtime，浮在其他 App 上层的 B 形态）整体暂缓**——M0-5 悬浮窗验证、M2-5 overlay-runtime 完整版在用户明确要做之前**不动**（M2-5 的 pet-layer 包类型保留）。已同步写入 AGENT.md 决策 10 + 12-roadmap + 02-architecture。
 
 ## 4.5 里程碑进度（2026-08-15 晚快照）
 
@@ -75,7 +76,7 @@
 | **M0-2 端侧 pi spike（D15 新）** | ✅ 真机验收通过 | **全链路真机跑通**：proot-static v5.3.0（GitHub proot-me）+ ubuntu-base 24.04.3 arm64 rootfs（含 node v24.18.0 + pi 0.79.10 SDK + harness，服务器 qemu 组装打包 155MB）+ Termux proot 方案弃用（execve ENOENT）。**验收达标**：① 10 轮本地对话 turns=10 done=10 errors=0（无事件丢失）② 零服务端 AI 依赖 ③ 进程崩溃重启后会话可恢复（SessionManager 文件模式 + open 恢复，真机验证 AI 答出上一轮姓名）。资源位置：手机 `/data/local/tmp/{proot-static,daily-rootfs/}`（spike 用，正式落 `files/`）；rootfs 构建源码 `/root/daily-rootfs-src/`（服务器）。**待办**：App 内接入真实 AgentChatSource（Koin 替换占位）+ BYOK Keystore 配置页（M1-2） |
 | **M0-3 进程占用与性能实测（D15 红线）** | ✅ 真机达标 | 魅族 Lucky 08 实测（perf-test.js，落档 perf-reports/m0-3-onside-pi-2026-08-15.md）：**冷启动 2.7s**（预算 ≤10s）、**首 token 均值 2.9s**（≤5s）、**RSS 稳定 140–142MB**（≤300MB，10 会话后）、12 轮上下文增长平坦无泄漏。附带修复：proot 下 `process.memoryUsage()` ENOENT（main.js status 防御 + `-b /proc:/proc`）；perf-test stdout/stderr 缓冲分离 |
 | **M0-4 App Runtime 验证** | ⏳ 部分完成（白屏待收尾） | AppRuntimeHost（WebView 沙箱 + base 注入 + Bootstrap JS）+ DailyJsBridge（storage 桥）+ AppsScreen/AppRunScreen 已实现；App 列表加载成功（5 个 App）；**系统桌面 WebView 白屏未解决**（postMessage 直连协议兼容，已加 bootstrap 兼容未验证）——D15 后暂停，切换到 M0-2 spike |
-| M0-5 悬浮窗验证 | ⬜ 未开始 | 桌宠 overlay + 点击穿透 |
+| M0-5 悬浮窗验证 | ⏸ 暂缓（2026-08-15 用户拍板） | 悬浮窗桌宠（B 形态）在用户明确要做之前**不动**；桌宠只做应用内（M1-4） |
 | M0-6 设计走查 | ⬜ 未开始 | 10-ui-design §1 tokens → Compose 主题（双主题截图评审） |
 | M1-1 四大页面完整实现 | ⬜ 未开始 | 按 10 篇规格 + 10 §6 可用性清单 |
 
@@ -94,6 +95,7 @@
 - 2026-08-15 ✅ **M0-2 对话链路完成**（D15 前版本，服务端 SSE 链路）：core（ChatEvent 契约镜像/SseSource/WebosApi/WebosRepository）+ app（SessionStore/PersistentCookieJar/ChatViewModel/ChatScreen 占位 UI）；Koin 三连修（ChatViewModel 未注册、CookieJar 接口绑定、koinViewModel 包路径）；真机验证：游客 99 积分、SSE 流式回复、thinking/tool chips/done 用量渲染、多轮上下文记忆
  - 2026-08-15 ✅ **M0-2 端侧 pi spike 真机验收通过**（D15 新路径，commit a0c48cb）：proot-static v5.3.0 + ubuntu-base 24.04.3 rootfs（qemu 组装，155MB）真机全链路；10 轮 turns=10 done=10 errors=0；崩溃重启会话恢复（AI 答出「阿芸」）；harness 事件映射对齐 webos.ts + 120ms 合并（事件量降 7 倍）；Kotlin agent 模块 + 桥客户端 + ChatViewModel 本地分支已编译（服务器构建绿）
  - 2026-08-15 ✅ **M0-3 性能实测达标**（D15 红线，commit 见下）：真机冷启动 2.7s / 首 token 均值 2.9s / RSS 稳定 140–142MB（10 会话后）/ 12 轮增长平坦；落档 perf-reports/m0-3-onside-pi-2026-08-15.md + 11 §2 预算表；修复 proot 下 memoryUsage ENOENT（-b /proc:/proc + status 防御）
+ - 2026-08-15：**桌宠范围拍板**：暂只做应用内桌宠（M1-4）；悬浮窗桌宠（overlay-runtime/M0-5/M2-5）整体暂缓，用户明确要做前不动（AGENT.md 决策 10 + 12-roadmap + 02-architecture 同步）
  - 下一步：**M0 出口评审**（M0-2/M0-3 均达标，端侧 pi 方案可行性确认）；待办：App 内接真实 AgentChatSource（M1-2）+ App Runtime 白屏收尾（M0-4）
 
 ## 6. 相关文档索引

@@ -51,7 +51,7 @@ client/android/
 ├── agent/               # ⭐ Agent Harness 宿主（M1）：Node 进程管理（proot 启动/生命周期/重启）、
 │                        #   stdio JSON-RPC 桥、BYOK 密钥注入、harness 更新（版本化 Node 运行时包）
 ├── app-runtime/         # WebView 沙箱：预热池、桥（WebMessagePort）、app-sdk JS shim 注入、URL 拦截白名单
-├── overlay-runtime/     # 悬浮窗管理器、pet-layer 引擎（共享 canvas WebView）、点击穿透 hit-test
+├── overlay-runtime/     # ⏸ 暂缓（2026-08-15 用户拍板）：悬浮窗管理器、pet-layer 悬浮窗引擎、点击穿透 hit-test——悬浮窗桌宠明确要做前不动；应用内桌宠层走 app/（M1-4）
 ├── capability/          # AccessibilityService、MediaProjection、通知监听、Shizuku 绑定、capability 采集上报
 ├── packages/            # 包管理器：安装/版本指针/校验/manifest 解析/缓存目录
 ├── sync/                # 离线缓存策略、文件同步（manifest diff）、备份导入导出
@@ -110,11 +110,11 @@ Kotlin Shell（app/）── Agent 桥客户端（core/）── stdio JSON-RPC 
 | Shell 特权内核 | Compose（写死） | app/ | 导航骨架/消息核心/权限 UI/安全回退不可挂载任何包（红线 2） |
 | Shell slot 层（M2，03 §5.1） | Compose + slot 挂载点 | app/ + packages/ | slot 包须声明语义锚点 + `ui.extend` 能力；每页 slot ≤4；mount/unmount 指针切换原子、失败回滚 |
 | App 界面 | WebView（预热池 ≤2，LRU） | app-runtime/ | 单 App 内存超 200MB 触发回收策略 |
-| pet-layer（2D 桌宠/漂浮物） | **单共享 overlay WebView + 单 canvas** | overlay-runtime/ | 同时存活 pet 窗口 ≤12；后台停 RAF |
-| pet-layer（3D，M3） | Filament / Live2D | overlay-runtime/ | 单独评审后引入 |
+| pet-layer（2D 桌宠/漂浮物，应用内，2026-08-15 拍板：暂不做悬浮窗形态） | **单共享 WebView + 单 canvas（应用内桌面 Tab 内渲染）** | app/（桌面页） | 同时存活 pet ≤12；后台停 RAF |
+| pet-layer（3D，M3） | Filament / Live2D | app/（桌面页）；overlay-runtime 暂缓 | 单独评审后引入 |
 | 主题/壁纸/布局 | Compose + design tokens | app/ | token 校验失败回退默认主题 |
 
-pet-layer 物理循环：默认在 WebView 内 RAF（AI 产物即 canvas 场景）；当场景声明 `physics: "native"`（M2）时由 overlay-runtime 的 Kotlin 协程驱动，每帧仅把 transform 批量注入 JS（`evaluateJavascript` 批量 diff，不走桥逐条消息）。
+pet-layer 物理循环：默认在 WebView 内 RAF（AI 产物即 canvas 场景）；当场景声明 `physics: "native"`（M2）时由应用内桌面页（app/）的 Kotlin 协程驱动，每帧仅把 transform 批量注入 JS（`evaluateJavascript` 批量 diff，不走桥逐条消息）。
 
 ## 6. 服务端配套改造与「单体拆分纪律」
 

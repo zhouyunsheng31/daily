@@ -56,9 +56,10 @@ Daily 正式立项 Android 原生端（后续鸿蒙/iOS），产品定位 **「�
 5. **权限两档**：Tier0 标准模式（悬浮窗+无障碍+MediaProjection+proot 全免 root）/ Tier1 Shizuku 增强；capability matrix 上报 bootstrap，工具多实现优雅降级，不满足只报 unavailable。
 6. **TTS/ASR/本地模型预留位**：Media Provider 抽象 + billing catalog kind 扩展（tts/asr/room/api）+ M1 先做系统 ASR 输入；不实现语音对话。
 7. **文件服务重构**（借 Android 做外科手术，不推倒重来）：统一 File Service（DB 元数据 files 表 + blob，路径语义不变）+ 分块上传/断点续传 + 移动端双向同步（LWW+conflict 副本）+ 云/本地备份（恢复走版本指针）；**webos.ts（409KB 单体）冻结——新端点一律进 `server/src/webos/` 新模块，触及即瘦身**。
-8. **渲染分级红线**：Shell 纯 Compose 零 WebView；App 界面 WebView（预热池≤2）；桌宠=单共享 overlay WebView 单 canvas（10 桌宠≠10 WebView）；3D 后置 Filament/Live2D。**性能预算写入 M1 验收**：冷启动<1s、60/120fps、10 桌宠稳 60fps、APK 基座<40MB。
+8. **渲染分级红线**：Shell 纯 Compose 零 WebView；App 界面 WebView（预热池≤2）；**桌宠（应用内桌面 Tab，2026-08-15 拍板）= 单共享 WebView 单 canvas（10 桌宠≠10 WebView）**；3D 后置 Filament/Live2D。**性能预算写入 M1 验收**：冷启动<1s、60/120fps、10 桌宠稳 60fps、APK 基座<40MB。
 9. **HTML-in-Canvas（2026 WICG 提案）只观察不集成**；首发渠道官网直发+F-Droid，Play 裁剪版后置。
-10. 图标设计 brief 在 docs/android/10-ui-design.md §4（生图 prompt 已备好，站长账号执行）。
+10. **桌宠范围（2026-08-15 用户拍板）**：暂只做**应用内桌宠**（M1-4 桌面 Tab 桌宠层，A 形态）；**悬浮窗桌宠（overlay-runtime，浮在其他 App 上层的 B 形态）整体暂缓**——M0-5 悬浮窗验证、M2-5 overlay-runtime 完整版在用户明确要做之前**不动**（M2-5 的 pet-layer 包类型保留）。禁止任何 AI 提前实现 overlay-runtime 桌宠功能。
+11. 图标设计 brief 在 docs/android/10-ui-design.md §4（生图 prompt 已备好，站长账号执行）。
 
 >路线图：M0 技术验证（⚠️WebView 沙箱跑通现有 App 契约 = 最大不确定性）→ M1 MVP（四大页面/权限 Tier0/文件服务一阶段/性能达标）→ M2（包体系+App API+url-app+房间+Shizuku+proot+TTS）→ M3（生态+鸿蒙/iOS 立项）。任务分解与验收标准见 docs/android/12-roadmap.md。**注意：工作区无现成 Android 工具链**——动手第一步是 docs/android/13-dev-toolchain.md（Windows 开发机装 Android Studio/SDK/JDK17、applicationId=`xyz.shadowshub.daily`、多模块脚手架、签名与 CI 骨架，附验收清单）。
 
