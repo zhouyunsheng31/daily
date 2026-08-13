@@ -13,6 +13,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -21,8 +24,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import xyz.shadowshub.daily.ui.apps.AppRunScreen
+import xyz.shadowshub.daily.ui.apps.AppsScreen
 import xyz.shadowshub.daily.ui.chat.ChatScreen
-import xyz.shadowshub.daily.ui.screens.DesktopScreen
 import xyz.shadowshub.daily.ui.screens.ProfileScreen
 import xyz.shadowshub.daily.ui.screens.StoreScreen
 
@@ -39,6 +43,18 @@ fun DailyApp() {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = backStackEntry?.destination
+
+    // M0-3：打开的 App（全屏运行页，覆盖主 UI）
+    var openApp by remember { mutableStateOf<Pair<String, String>?>(null) }
+
+    if (openApp != null) {
+        AppRunScreen(
+            appId = openApp!!.first,
+            appName = openApp!!.second,
+            onBack = { openApp = null },
+        )
+        return
+    }
 
     Scaffold(
         bottomBar = {
@@ -67,7 +83,7 @@ fun DailyApp() {
             modifier = Modifier.padding(innerPadding),
         ) {
             composable(DailyTab.Chat.route) { ChatScreen() }
-            composable(DailyTab.Desktop.route) { DesktopScreen() }
+            composable(DailyTab.Desktop.route) { AppsScreen(onOpen = { id, name -> openApp = id to name }) }
             composable(DailyTab.Store.route) { StoreScreen() }
             composable(DailyTab.Profile.route) { ProfileScreen() }
         }

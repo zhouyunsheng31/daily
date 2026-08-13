@@ -13,6 +13,7 @@ import xyz.shadowshub.core.network.WebosRepository
 import xyz.shadowshub.daily.BuildConfig
 import xyz.shadowshub.daily.data.PersistentCookieJar
 import xyz.shadowshub.daily.data.SessionStore
+import xyz.shadowshub.daily.ui.apps.AppsViewModel
 import xyz.shadowshub.daily.ui.chat.ChatViewModel
 import java.util.concurrent.TimeUnit
 
@@ -53,6 +54,10 @@ val appModule = module {
 
     viewModel {
         ChatViewModel(repository = get(), sessionStore = get())
+    }
+
+    viewModel {
+        AppsViewModel(api = get())
     }
 }
 
