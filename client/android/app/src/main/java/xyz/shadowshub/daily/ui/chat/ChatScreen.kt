@@ -39,7 +39,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import org.koin.compose.viewmodel.koinViewModel
 
 /**
@@ -173,8 +172,13 @@ private fun MessageBubble(msg: UiMessage) {
                 )
             }
             msg.toolChips.forEach { chip ->
+                val stateIcon = when (chip.state) {
+                    "ok" -> "✓"
+                    "fail" -> "✗"
+                    else -> "…"
+                }
                 Text(
-                    text = "🛠 ${chip.tool} ${when (chip.state) { "ok" -> "✓", "fail" -> "✗", else -> "…" }}",
+                    text = "🛠 ${chip.tool} $stateIcon",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.padding(bottom = 2.dp),
