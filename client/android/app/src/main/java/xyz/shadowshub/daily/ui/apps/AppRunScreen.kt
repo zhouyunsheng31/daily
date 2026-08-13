@@ -1,6 +1,6 @@
 package xyz.shadowshub.daily.ui.apps
 
-import android.webkit.WebView
+import android.app.Application
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -24,9 +24,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import kotlinx.coroutines.launch
-import org.koin.androidx.compose.get
+import org.koin.android.ext.android.getKoin
 import xyz.shadowshub.appruntime.AppRuntimeHost
 import xyz.shadowshub.core.network.AppDetail
 import xyz.shadowshub.core.network.WebosApi
@@ -38,7 +38,9 @@ import xyz.shadowshub.daily.BuildConfig
 @Composable
 fun AppRunScreen(appId: String, appName: String, onBack: () -> Unit) {
     val context = LocalContext.current
-    val api: WebosApi = get()
+    val api: WebosApi = remember {
+        (context.applicationContext as Application).getKoin().get()
+    }
     val scope = rememberCoroutineScope()
     val host = remember { AppRuntimeHost(context, api, scope, BuildConfig.API_BASE_URL) }
 

@@ -30,7 +30,7 @@ import org.koin.androidx.compose.koinViewModel
  */
 @Composable
 fun AppsScreen(
-    onOpen: (String) -> Unit,
+    onOpen: (String, String) -> Unit,
     viewModel: AppsViewModel = koinViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -52,7 +52,7 @@ fun AppsScreen(
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.fillMaxWidth().clickable { onOpen(app.id) },
+                        modifier = Modifier.fillMaxWidth().clickable { onOpen(app.id, app.name) },
                     ) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primaryContainer) {
