@@ -39,12 +39,32 @@
     var msg
     try { msg = JSON.parse(jsonStr) } catch (e) { return }
     if (!msg || msg.channel !== CHANNEL || msg.kind !== 'response') return
+    // 兼容 postMessage 直连模板（系统桌面/商店：window.parent.postMessage 协议）
+    var src = postPending[msg.requestId]
+    if (src) {
+      delete postPending[msg.requestId]
+      try { src.postMessage(msg, '*') } catch (e) { /* ignore */ }
+      return
+    }
     var entry = pending[msg.requestId]
     if (!entry) return
     delete pending[msg.requestId]
     if (msg.ok === true) entry.resolve(msg.data)
     else entry.reject(new Error(msg.error || 'runtime request failed'))
   }
+
+  // postMessage 直连兼容：系统桌面/商店模板向 window.parent.postMessage 发请求，
+  // 这里拦截并转发到 native 桥（响应经 __dailySdkDispatch 回传 e.source）
+  var postPending = {}
+  window.addEventListener('message', function (e) {
+    var m = e.data
+    if (!m || m.channel !== CHANNEL || m.kind !== 'request') return
+    if (!m.requestId || typeof m.method !== 'string') return
+    postPending[m.requestId] = e.source || window
+    var b = bridge()
+    if (!b) { delete postPending[m.requestId]; return }
+    try { b.postMessage(JSON.stringify(m)) } catch (err) { delete postPending[m.requestId] }
+  })
 
   // ---- localStorage polyfill（内存态 + SDK storage 桥持久化）----
   var storageLike = {
