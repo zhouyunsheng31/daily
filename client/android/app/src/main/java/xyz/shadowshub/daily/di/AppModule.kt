@@ -5,6 +5,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import okhttp3.OkHttpClient
+import org.koin.androidx.viewmodel.dsl.viewModel
 import org.koin.dsl.module
 import xyz.shadowshub.core.network.SseSource
 import xyz.shadowshub.core.network.WebosApi
@@ -12,6 +13,7 @@ import xyz.shadowshub.core.network.WebosRepository
 import xyz.shadowshub.daily.BuildConfig
 import xyz.shadowshub.daily.data.PersistentCookieJar
 import xyz.shadowshub.daily.data.SessionStore
+import xyz.shadowshub.daily.ui.chat.ChatViewModel
 import java.util.concurrent.TimeUnit
 
 /** Koin 依赖注入（M0-2：会话 + 对话链路） */
@@ -48,6 +50,10 @@ val appModule = module {
 
     single {
         WebosRepository(api = get(), scope = get())
+    }
+
+    viewModel {
+        ChatViewModel(repository = get(), sessionStore = get())
     }
 }
 
