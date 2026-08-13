@@ -45,7 +45,8 @@ fun DailyApp() {
     val currentDestination = backStackEntry?.destination
 
     // M0-3：打开的 App（全屏运行页，覆盖主 UI）
-    var openApp by remember { mutableStateOf<Pair<String, String>?>(null) }
+    // 测试期：启动自动打开系统桌面验证 WebView 渲染（验证后恢复 null）
+    var openApp by remember { mutableStateOf<Pair<String, String>?>("system.desktop" to "系统桌面") }
 
     if (openApp != null) {
         AppRunScreen(
