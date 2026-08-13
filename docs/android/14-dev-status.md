@@ -63,6 +63,7 @@
 4. `client/android/` 旧 LivingDashboard 工程（2026-07-29，Hilt/AGP8.2.2/单模块，196 个 .kt）**不删除，移入 `docs/android/assets/legacy-livingdashboard/` 存档**（其中 AI 对话/WS 实现有参考价值，且是自有代码可复用）。
 5. 签名纪律：debug 签名本地自动生成；release keystore 手机离线生成后进私有加密存储，绝不入库/对话/日志。
 6. ⚠️ 安全记录：用户曾将 GitHub PAT 直接发在对话中，**该 token 已视为暴露，需在 GitHub 后台 revoke 并重新签发**；后续凭证只走环境变量/Secret。另已注册：手机 SSH key（daily-dev-phone，id 160050633）、服务器 GitHub deploy key（daily-server-mirror，id 160051375，只对 daily 仓库可写）。
+7. **UI/图标设计协作红线（2026-08-15 用户要求）**：正式 UI 设计与 App 图标设计**必须由用户主导**——AI 按用户指示执行（用户给方向 → AI 出候选 → 用户选定 → AI 落地），禁止 AI 自行拍板界面风格/配色/布局/图标。M0 占位界面/占位图标（技术验证载体）除外，不得对外宣称是最终设计。已同步写入根 AGENT.md。
 
 ## 4.5 里程碑进度（2026-08-15 晚快照）
 

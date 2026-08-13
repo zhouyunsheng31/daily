@@ -60,7 +60,9 @@ Daily 正式立项 Android 原生端（后续鸿蒙/iOS），产品定位 **「�
 9. **HTML-in-Canvas（2026 WICG 提案）只观察不集成**；首发渠道官网直发+F-Droid，Play 裁剪版后置。
 10. 图标设计 brief 在 docs/android/10-ui-design.md §4（生图 prompt 已备好，站长账号执行）。
 
-路线图：M0 技术验证（⚠️WebView 沙箱跑通现有 App 契约 = 最大不确定性）→ M1 MVP（四大页面/权限 Tier0/文件服务一阶段/性能达标）→ M2（包体系+App API+url-app+房间+Shizuku+proot+TTS）→ M3（生态+鸿蒙/iOS 立项）。任务分解与验收标准见 docs/android/12-roadmap.md。**注意：工作区无现成 Android 工具链**——动手第一步是 docs/android/13-dev-toolchain.md（Windows 开发机装 Android Studio/SDK/JDK17、applicationId=`xyz.shadowshub.daily`、多模块脚手架、签名与 CI 骨架，附验收清单）。
+>路线图：M0 技术验证（⚠️WebView 沙箱跑通现有 App 契约 = 最大不确定性）→ M1 MVP（四大页面/权限 Tier0/文件服务一阶段/性能达标）→ M2（包体系+App API+url-app+房间+Shizuku+proot+TTS）→ M3（生态+鸿蒙/iOS 立项）。任务分解与验收标准见 docs/android/12-roadmap.md。**注意：工作区无现成 Android 工具链**——动手第一步是 docs/android/13-dev-toolchain.md（Windows 开发机装 Android Studio/SDK/JDK17、applicationId=`xyz.shadowshub.daily`、多模块脚手架、签名与 CI 骨架，附验收清单）。
+
+> **UI/图标设计协作红线（2026-08-15 用户明确要求）**：正式 UI 设计与 App 图标设计**必须由用户主导**——AI 只能按用户指示执行（如：用户给方向 → AI 出候选 → 用户选定 → AI 落地），**禁止 AI 自行拍板界面风格、配色、布局或图标设计**。M0 阶段的占位界面/占位图标（技术验证载体）除外，但不得对外宣称是最终设计。执行依据：docs/android/10-ui-design.md §4（图标 brief 仅当用户要求执行时才生图）。
 
 ## webOS 后端端点快速索引
 
