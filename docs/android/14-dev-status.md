@@ -64,9 +64,20 @@
 5. 签名纪律：debug 签名本地自动生成；release keystore 手机离线生成后进私有加密存储，绝不入库/对话/日志。
 6. ⚠️ 安全记录：用户曾将 GitHub PAT 直接发在对话中，**该 token 已视为暴露，需在 GitHub 后台 revoke 并重新签发**；后续凭证只走环境变量/Secret。另已注册：手机 SSH key（daily-dev-phone，id 160050633）、服务器 GitHub deploy key（daily-server-mirror，id 160051375，只对 daily 仓库可写）。
 
-## 5. 执行记录（时间线）
+## 4.5 里程碑进度（2026-08-15 晚快照）
 
-- 2026-08-15：README/12-roadmap 更新、新增 13-dev-toolchain（云构建主路径）
+| 里程碑 | 状态 | 说明 |
+|---|---|---|
+| **M0-1 工程脚手架** | ✅ 完成 | 9 模块 + 四 Tab 空壳 + 服务器构建管线 + 真机安装运行验证；CI workflow 已写但 GitHub 不可达暂挂起 |
+| **M0-2 对话链路** | ⏳ 下一步 | 游客鉴权 → bootstrap → chat/stream SSE 全事件渲染（含 thinking/tool chip/resume）；验收：真机 10 轮对话无事件丢失、断网 resume 正确 |
+| M0-3 App Runtime 验证 | ⬜ 未开始 | ⚠️ 全方案最大不确定性：WebView 沙箱加载线上 App + WebMessagePort 桥 |
+| M0-4 悬浮窗验证 | ⬜ 未开始 | 桌宠 overlay + 点击穿透 |
+| M0-5 设计走查 | ⬜ 未开始 | 10-ui-design §1 tokens → Compose 主题（双主题截图评审） |
+| M1-1 四大页面完整实现 | ⬜ 未开始 | 按 10 篇规格 + 10 §6 可用性清单 |
+
+**当前构建方式**：`bash deploy/android-build.sh --install`（手机打包 → 香港服务器 x86_64 构建 2m58s → APK 拉回安装）。
+
+## 5. 执行记录（时间线）
 - 2026-08-15：拿到脚手架 zip（/sdcard/workspace_42e234d4.zip）并解压存档
 - 2026-08-15：确认 GitHub 仓库 zhouyunsheng31/daily（private，无 Actions）
 - 2026-08-15：安装 git、本地仓库初始化 + 基线 commit（37ffe68 → 重建 5b94ade）、旧 LivingDashboard 存档
