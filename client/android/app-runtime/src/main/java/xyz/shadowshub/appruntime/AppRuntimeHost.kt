@@ -46,6 +46,12 @@ class AppRuntimeHost(
 
             override fun onPageFinished(view: WebView, url: String?) {
                 android.util.Log.d("AppRuntime", "pageFinished: $url")
+                // 内部自检：DOM 状态 + SDK 是否注入（logcat 验证，不依赖截图）
+                view.evaluateJavascript(
+                    "(function(){var b=document.body;var d=document.documentElement;return JSON.stringify({title:document.title,bodyLen:b?b.innerHTML.length:-1,docLen:d?d.outerHTML.length:-1,hasSDK:!!window.DailyWebOs,hasBridge:typeof window.dailyBridge!=='undefined'});})()"
+                ) { r ->
+                    android.util.Log.d("AppRuntime", "pageState: $r")
+                }
                 super.onPageFinished(view, url)
             }
 
