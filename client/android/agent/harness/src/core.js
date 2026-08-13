@@ -102,9 +102,21 @@ function createConversationManager(services, opts) {
     if (inflight.has(conversationId)) return inflight.get(conversationId)
     const creating = (async () => {
       const start = Date.now()
-      // 每会话独立 SessionManager.inMemory（同 server webosSessions 模式）：
-      // 共享实例会让不同会话上下文串扰（会话 B 看到 A 的内容），独立实例 = 天然并行隔离。
-      const sessionManager = SessionManager.inMemory(services.cwd)
+      // 每会话独立 SessionManager（文件持久化模式）：
+      // 1. 独立实例 = 不同会话上下文天然隔离（同 server webosSessions 的隔离动机）
+      // 2. create(cwd, sessionDir) 落盘会话历史 → 进程崩溃重启后用同一 sessionDir 重建，
+      //    createAgentSession 的 buildSessionContext() 自动恢复上下文（M0-2 验收项）。
+      const sessionDir = path.join(services.agentDir, 'sessions', encodeURIComponent(conversationId))
+      fs.mkdirSync(sessionDir, { recursive: true })
+      // 恢复优先：会话目录已有历史文件（进程崩溃/重启前写过）→ open 加载，
+      // createAgentSession 的 buildSessionContext() 恢复上下文（M0-2 验收项）。
+      // 无历史 → create 新建（会话文件在 prompt 后落盘，文件名含时间戳）。
+      const files = fs.readdirSync(sessionDir).filter((f) => f.endsWith('.jsonl')).sort()
+      const existing = files.length ? path.join(sessionDir, files[files.length - 1]) : null
+      const sessionManager = existing
+        ? SessionManager.open(existing, sessionDir, services.cwd)
+        : SessionManager.create(services.cwd, sessionDir)
+      if (existing) console.error(`[harness] session restored conv=${conversationId} file=${files[files.length - 1]}`)
       const { session } = await createAgentSession({
         cwd: services.cwd,
         agentDir: services.agentDir,

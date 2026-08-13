@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import xyz.shadowshub.core.agent.AgentChatSource
 import xyz.shadowshub.core.chat.ChatEvent
 import xyz.shadowshub.core.chat.ChatMessage
 import xyz.shadowshub.core.chat.ChatStreamRequest
@@ -45,6 +46,7 @@ data class ChatUiState(
 class ChatViewModel(
     private val repository: WebosRepository,
     private val sessionStore: SessionStore,
+    private val agentSource: AgentChatSource? = null,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ChatUiState())
@@ -84,7 +86,7 @@ class ChatViewModel(
             streaming = true,
             error = null,
         )
-        startStream(resume = false)
+        if (agentSource != null) startLocalTurn() else startStream(resume = false)
     }
 
     /** 停止当前流（取消 SSE；服务端任务继续后台运行，可 resume 恢复） */
@@ -104,6 +106,43 @@ class ChatViewModel(
         if (_state.value.streaming) return
         _state.value = _state.value.copy(error = null, connected = true)
         startStream(resume = true)
+    }
+
+    /** 本地 Agent 回合（D15 端侧 pi）：事件词汇与 SSE 完全一致，无断网 resume 概念 */
+    private fun startLocalTurn() {
+        streamJob?.cancel()
+        streamJob = viewModelScope.launch {
+            val src = agentSource ?: return@launch
+            var done = false
+            runCatching {
+                src.turn(conversationId, lastUserContent ?: "", thinkingLevel).collect { event ->
+                    when (event) {
+                        is ChatEvent.Delta -> appendDelta(event.content)
+                        is ChatEvent.Thinking -> appendThinking(event.content)
+                        is ChatEvent.ToolStart -> updateLastToolChip(event.tool, "running")
+                        is ChatEvent.ToolUpdate -> { /* 占位：忽略过程增量 */ }
+                        is ChatEvent.ToolEnd -> updateLastToolChip(event.tool, if (event.ok) "ok" else "fail")
+                        is ChatEvent.AppCreated -> { /* M1 处理 */ }
+                        is ChatEvent.InteractiveHtml -> { /* M1 处理 */ }
+                        is ChatEvent.BusyWaiting -> _state.value = _state.value.copy(busyWaiting = true, busyMessage = event.message)
+                        is ChatEvent.BackgroundProgress -> { /* M1 处理 */ }
+                        is ChatEvent.Done -> {
+                            done = true
+                            // 本地 BYOK 无平台计费：显示 tokens 用量
+                            finishStream(event.usage?.let { "${it.totalTokens} tokens" })
+                        }
+                        is ChatEvent.Error -> {
+                            failStream("${event.code}: ${event.message}")
+                        }
+                        is ChatEvent.NoTask -> finishStream(null)
+                        is ChatEvent.KeepAlive -> _state.value = _state.value.copy(connected = true)
+                        else -> { /* 未知事件忽略 */ }
+                    }
+                }
+            }.onFailure { e ->
+                if (!done) failStream("本地 Agent 错误: ${e.message}")
+            }
+        }
     }
 
     private fun startStream(resume: Boolean) {

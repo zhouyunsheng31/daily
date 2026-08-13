@@ -33,6 +33,7 @@ dependencyResolutionManagement {
 rootProject.name = "Daily"
 include(":app")
 include(":core")
+include(":agent")
 include(":app-runtime")
 include(":overlay-runtime")
 include(":capability")

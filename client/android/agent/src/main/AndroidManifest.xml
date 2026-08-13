@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Agent Harness 宿主模块（M0-2/M1）：Node 进程管理，无 UI 组件 -->
+</manifest>

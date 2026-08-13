@@ -57,6 +57,7 @@ android {
 dependencies {
     implementation(project(":core"))
     implementation(project(":app-runtime"))
+    implementation(project(":agent"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
