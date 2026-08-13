@@ -1,6 +1,9 @@
 package xyz.shadowshub.core.chat
 
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
 
 /**
  * webOS chat/stream SSE 事件（契约镜像，与 shared/webos-contracts 的 WebOsChatEvent 对齐）。
