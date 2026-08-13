@@ -72,7 +72,7 @@
 |---|---|---|
 | **M0-1 工程脚手架** | ✅ 完成 | 9 模块 + 四 Tab 空壳 + 服务器构建管线 + 真机安装运行验证；CI workflow 已写但 GitHub 不可达暂挂起 |
 | **M0-2 对话链路** | ✅ 完成（⚠️ D15 前实现） | 游客鉴权 + bootstrap + chat/stream SSE 全事件渲染（delta/thinking/tool chips/done 用量）；真机多轮对话验证通过（AI 记忆上下文）；断网自动 resume + 手动恢复按钮已实现。**D15（端侧 AI 唯一路径）拍板后，M0-2 已重定义为「端侧 pi spike」**（12-roadmap 新 M0-2/M0-3）；本实现保留作 PWA 维护模式资产，Android 对话改走本地 harness |
-| **M0-2 端侧 pi spike（D15 新）** | ✅ 本机 proot 验证通过 | harness 四文件（core.js/main.js/smoke.js/bridge.schema.json）+ BYOK 冒烟 + stdio 桥全链路通过：DeepSeek V4 Flash 经 opencode.ai OpenAI 兼容端点流式对话、thinking_delta（reasoning_content）+ text_delta 完整、**多轮上下文记忆（第二轮答出「阿芸」）**；性能实测 RSS 134MB（≤300MB）、init 8.4s（≤10s，本机 proot）；已修：注释 `*/` SyntaxError、ESM-only 包动态 import、SessionManager.inMemory 每会话独立（防上下文串扰）、getSession 竞态去重 + 同会话排队。**待办：真机集成（agent 模块 Kotlin 进程管理）** |
+| **M0-2 端侧 pi spike（D15 新）** | ✅ 真机验收通过 | **全链路真机跑通**：proot-static v5.3.0（GitHub proot-me）+ ubuntu-base 24.04.3 arm64 rootfs（含 node v24.18.0 + pi 0.79.10 SDK + harness，服务器 qemu 组装打包 155MB）+ Termux proot 方案弃用（execve ENOENT）。**验收达标**：① 10 轮本地对话 turns=10 done=10 errors=0（无事件丢失）② 零服务端 AI 依赖 ③ 进程崩溃重启后会话可恢复（SessionManager 文件模式 + open 恢复，真机验证 AI 答出上一轮姓名）。资源位置：手机 `/data/local/tmp/{proot-static,daily-rootfs/}`（spike 用，正式落 `files/`）；rootfs 构建源码 `/root/daily-rootfs-src/`（服务器）。**待办**：App 内接入真实 AgentChatSource（Koin 替换占位）+ BYOK Keystore 配置页（M1-2） |
 | M0-3 App Runtime 验证 | ⬜ 未开始 | ⚠️ 全方案最大不确定性：WebView 沙箱加载线上 App + WebMessagePort 桥 |
 | M0-4 悬浮窗验证 | ⬜ 未开始 | 桌宠 overlay + 点击穿透 |
 | M0-5 设计走查 | ⬜ 未开始 | 10-ui-design §1 tokens → Compose 主题（双主题截图评审） |
@@ -91,8 +91,8 @@
 - 2026-08-15 ✅ **服务器构建打通（最终主路径）**：手机 proot 本地构建受限于 ARM64 aapt2 兼容（AGP9 不认 `aapt2FromMavenOverride` 校验、transforms 缓存完整性保护），改用 **香港服务器（x86_64, 2h4g）中转构建**：手机打包（2MB）→ scp 服务器（2.3s）→ 服务器装 JDK17 + cmdline-tools + platforms-35 + build-tools-35/36 + Gradle9.1（腾讯云）→ `gradle :app:assembleDebug --no-daemon --max-workers=1 -Xmx1536m` **2m58s 构建成功**（官方 x86_64 aapt2 零兼容问题）→ APK 拉回手机（20MB, SHA256 b644d0e1...）→ `pm install` 成功 → 启动截图验证**四 Tab 空壳运行**（对话/桌面/商店/我的）
 - 2026-08-15：一键构建脚本 `deploy/android-build.sh`（打包→上传→服务器构建[自动移除 ARM64 hack + 限内存防 OOM]→拉回→可选安装）
 - 2026-08-15 ✅ **M0-2 对话链路完成**（D15 前版本，服务端 SSE 链路）：core（ChatEvent 契约镜像/SseSource/WebosApi/WebosRepository）+ app（SessionStore/PersistentCookieJar/ChatViewModel/ChatScreen 占位 UI）；Koin 三连修（ChatViewModel 未注册、CookieJar 接口绑定、koinViewModel 包路径）；真机验证：游客 99 积分、SSE 流式回复、thinking/tool chips/done 用量渲染、多轮上下文记忆
- - 2026-08-15 ✅ **M0-2 端侧 pi spike 本机验证通过**（D15 新路径，commit 817f8e0）：harness 四文件 + BYOK（opencode.ai 端点 + DeepSeek V4 Flash）冒烟 + stdio 桥全链路；修 4 处（注释 `*/` SyntaxError / ESM-only 动态 import / SessionManager.inMemory 每会话独立 / getSession 竞态 + 同会话排队）；实测 RSS 134MB、init 8.4s、多轮上下文记忆通过
- - 下一步：**M0-3 真机集成**（agent 模块 Kotlin 进程管理：proot 内启动 harness → stdin/stdout 管道 → 桥消息映射 ChatViewModel）；原 M0-3 App Runtime 验证（WebView 沙箱 + WebMessagePort 桥，白屏待收尾）继续排队
+ - 2026-08-15 ✅ **M0-2 端侧 pi spike 真机验收通过**（D15 新路径，commit a0c48cb）：proot-static v5.3.0 + ubuntu-base 24.04.3 rootfs（qemu 组装，155MB）真机全链路；10 轮 turns=10 done=10 errors=0；崩溃重启会话恢复（AI 答出「阿芸」）；harness 事件映射对齐 webos.ts + 120ms 合并（事件量降 7 倍）；Kotlin agent 模块 + 桥客户端 + ChatViewModel 本地分支已编译（服务器构建绿）
+ - 下一步：**M0-3 进程占用与性能实测**（12-roadmap：Node RSS / 会话上下文增长曲线 / 首 token 延迟 / 冷启动，预算表落档 11 §2）；App 内接入真实 AgentChatSource（rootfs 落 `files/` + Koin 替换占位）排入 M1-2
 
 ## 6. 相关文档索引
 
