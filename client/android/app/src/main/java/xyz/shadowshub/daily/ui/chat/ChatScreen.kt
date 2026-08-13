@@ -39,7 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import org.koin.compose.viewmodel.koinViewModel
+import org.koin.androidx.compose.koinViewModel
 
 /**
  * 对话主页（M0-2 占位实现：跑通链路的最小 UI，非最终设计——正式 UI 由用户主导，见 AGENT.md 红线）。
