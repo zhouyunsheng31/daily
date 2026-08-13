@@ -211,8 +211,18 @@ async function main() {
       }
 
       case 'status': {
-        const mem = process.memoryUsage()
-        send({ jsonrpc: '2.0', id, result: { pid: process.pid, sessions: manager.count(), rss: mem.rss, heapUsed: mem.heapUsed } })
+        let mem = null
+        try { mem = process.memoryUsage() } catch { /* proot 下 uv_resident_set_memory 可能不可用 */ }
+        send({
+          jsonrpc: '2.0',
+          id,
+          result: {
+            pid: process.pid,
+            sessions: manager.count(),
+            rss: mem ? mem.rss : null,
+            heapUsed: mem ? mem.heapUsed : null,
+          },
+        })
         break
       }
 
