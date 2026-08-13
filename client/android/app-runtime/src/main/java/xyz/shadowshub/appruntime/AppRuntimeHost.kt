@@ -43,6 +43,22 @@ class AppRuntimeHost(
                 // 仅放行平台域（raw 素材端点 + 平台页面）；其余阻断（M0-3 简单策略）
                 return !isAllowedUrl(url)
             }
+
+            override fun onPageFinished(view: WebView, url: String?) {
+                android.util.Log.d("AppRuntime", "pageFinished: $url")
+                super.onPageFinished(view, url)
+            }
+
+            override fun onReceivedError(view: WebView, request: WebResourceRequest?, error: android.webkit.WebResourceError?) {
+                android.util.Log.e("AppRuntime", "loadError: ${request?.url} code=${error?.errorCode} desc=${error?.description}")
+                super.onReceivedError(view, request, error)
+            }
+        }
+        webView.webChromeClient = object : android.webkit.WebChromeClient() {
+            override fun onConsoleMessage(msg: android.webkit.ConsoleMessage): Boolean {
+                android.util.Log.d("AppRuntime", "console[${msg.messageLevel()}]: ${msg.message()} @${msg.lineNumber()}")
+                return true
+            }
         }
         return webView
     }
