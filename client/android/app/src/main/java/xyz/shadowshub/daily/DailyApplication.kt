@@ -4,10 +4,11 @@ import android.app.Application
 import org.koin.android.ext.koin.androidContext
 import org.koin.android.ext.koin.androidLogger
 import org.koin.core.context.startKoin
+import xyz.shadowshub.daily.di.appModule
 
 /**
  * Daily Android Shell 入口。
- * M0-1 仅初始化 Koin 空模块；M0-2 起注册 core 网络/SSE 模块。
+ * M0-2：注册 appModule（会话存储/CookieJar/OkHttp/SSE/API/Repository）。
  */
 class DailyApplication : Application() {
 
@@ -16,7 +17,7 @@ class DailyApplication : Application() {
         startKoin {
             androidLogger()
             androidContext(this@DailyApplication)
-            modules(emptyList())
+            modules(appModule)
         }
     }
 }

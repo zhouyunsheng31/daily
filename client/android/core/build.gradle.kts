@@ -22,11 +22,14 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     // 契约 DTO
     implementation(libs.kotlinx.serialization.json)
-    // 网络（M0-2 起实现 ApiClient/SSE；OkHttp4.12 稳定版 + okhttp-sse）
+    // 协程（Flow/callbackFlow）
+    implementation(libs.kotlinx.coroutines.core)
+    // 网络（M0-2 已实现 ApiClient/SSE；OkHttp4.12 稳定版 + okhttp-sse）
     implementation(libs.okhttp)
     implementation(libs.okhttp.sse)
     // DI
     implementation(libs.koin.core)
 
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.core)
 }

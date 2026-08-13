@@ -28,9 +28,6 @@ private fun Placeholder(title: String, subtitle: String) {
 }
 
 @Composable
-fun ChatScreen() = Placeholder("对话", "AI 助手即系统主页（M1-1 实现）")
-
-@Composable
 fun DesktopScreen() = Placeholder("桌面", "你的第二个桌面（M1-4 实现）")
 
 @Composable
