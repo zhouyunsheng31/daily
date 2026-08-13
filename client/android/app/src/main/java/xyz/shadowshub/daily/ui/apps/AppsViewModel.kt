@@ -29,7 +29,8 @@ class AppsViewModel(private val api: WebosApi) : ViewModel() {
     fun refresh() {
         viewModelScope.launch {
             _state.value = _state.value.copy(loading = true, error = null)
-            val apps = api.listApps()
+            // distinctBy：线上 buildBootstrap 偶发重复返回同一 App（system.desktop），防御去重
+            val apps = api.listApps().distinctBy { it.id }
             if (apps.isEmpty()) {
                 _state.value = _state.value.copy(loading = false, error = "没有可运行的 App（可先让 AI 创建一个）")
             } else {
