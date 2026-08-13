@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://daily.shadowshub.xyz/agent-bridge-contract/bridge.schema.json",
+  "title": "Daily Agent Bridge Contract (stdio JSON-RPC)",
+  "description": "Kotlin Shell ↔ 端侧 pi harness 的本地桥协议（单一事实源）。事件词汇对齐 shared/webos-contracts WebOsChatEvent。",
+  "definitions": {
+    "Request": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "method"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "type": "integer" },
+        "method": {
+          "enum": ["ping", "session.turn", "session.abort", "session.dispose", "status"]
+        },
+        "params": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "Response": {
+      "type": "object",
+      "required": ["jsonrpc", "id"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "type": "integer" },
+        "result": { "type": "object", "additionalProperties": true },
+        "error": {
+          "type": "object",
+          "properties": {
+            "code": { "type": "integer" },
+            "message": { "type": "string" }
+          },
+          "required": ["code", "message"]
+        }
+      },
+      "oneOf": [{ "required": ["result"] }, { "required": ["error"] }]
+    },
+    "EventNotification": {
+      "type": "object",
+      "required": ["jsonrpc", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "method": { "const": "event" },
+        "params": {
+          "type": "object",
+          "required": ["conversationId", "event"],
+          "properties": {
+            "conversationId": { "type": "string", "maxLength": 128 },
+            "event": {
+              "type": "object",
+              "required": ["type"],
+              "properties": {
+                "type": {
+                  "enum": [
+                    "start", "delta", "thinking", "tool_start", "tool_update",
+                    "tool_end", "app_created", "app_updated", "interactive_html",
+                    "busy_waiting", "background_progress", "done", "error", "keep_alive"
+                  ]
+                },
+                "content": { "type": "string" },
+                "tool": { "type": "string" },
+                "ok": { "type": "boolean" },
+                "code": { "type": "string" },
+                "message": { "type": "string" },
+                "usage": { "type": ["object", "null"] }
+              },
+              "additionalProperties": true
+            }
+          }
+        }
+      }
+    }
+  },
+  "anyOf": [
+    { "$ref": "#/definitions/Request" },
+    { "$ref": "#/definitions/Response" },
+    { "$ref": "#/definitions/EventNotification" }
+  ]
+}

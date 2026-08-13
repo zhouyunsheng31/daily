@@ -1,0 +1,17 @@
+{
+  "name": "daily-agent-harness",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Daily Android 端侧 pi 内核 harness（stdio JSON-RPC 桥，BYOK）",
+  "main": "src/main.js",
+  "scripts": {
+    "smoke": "node src/smoke.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.79.10",
+    "@earendil-works/pi-ai": "^0.79.10"
+  }
+}
