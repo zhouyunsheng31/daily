@@ -71,7 +71,7 @@
 | 里程碑 | 状态 | 说明 |
 |---|---|---|
 | **M0-1 工程脚手架** | ✅ 完成 | 9 模块 + 四 Tab 空壳 + 服务器构建管线 + 真机安装运行验证；CI workflow 已写但 GitHub 不可达暂挂起 |
-| **M0-2 对话链路** | ✅ 完成 | 游客鉴权 + bootstrap + chat/stream SSE 全事件渲染（delta/thinking/tool chips/done 用量）；真机多轮对话验证通过（AI 记忆上下文）；断网自动 resume + 手动恢复按钮已实现 |
+| **M0-2 对话链路** | ✅ 完成（⚠️ D15 前实现） | 游客鉴权 + bootstrap + chat/stream SSE 全事件渲染（delta/thinking/tool chips/done 用量）；真机多轮对话验证通过（AI 记忆上下文）；断网自动 resume + 手动恢复按钮已实现。**D15（端侧 AI 唯一路径）拍板后，M0-2 已重定义为「端侧 pi spike」**（12-roadmap 新 M0-2/M0-3）；本实现保留作 PWA 维护模式资产，Android 对话改走本地 harness |
 | M0-3 App Runtime 验证 | ⬜ 未开始 | ⚠️ 全方案最大不确定性：WebView 沙箱加载线上 App + WebMessagePort 桥 |
 | M0-4 悬浮窗验证 | ⬜ 未开始 | 桌宠 overlay + 点击穿透 |
 | M0-5 设计走查 | ⬜ 未开始 | 10-ui-design §1 tokens → Compose 主题（双主题截图评审） |
@@ -89,12 +89,12 @@
 - 2026-08-15：`setup_android_env.sh` 后台执行中（JDK17 已装，cmdline-tools/SDK 下载中，手机网络 ~130KB/s 较慢）
 - 2026-08-15 ✅ **服务器构建打通（最终主路径）**：手机 proot 本地构建受限于 ARM64 aapt2 兼容（AGP9 不认 `aapt2FromMavenOverride` 校验、transforms 缓存完整性保护），改用 **香港服务器（x86_64, 2h4g）中转构建**：手机打包（2MB）→ scp 服务器（2.3s）→ 服务器装 JDK17 + cmdline-tools + platforms-35 + build-tools-35/36 + Gradle9.1（腾讯云）→ `gradle :app:assembleDebug --no-daemon --max-workers=1 -Xmx1536m` **2m58s 构建成功**（官方 x86_64 aapt2 零兼容问题）→ APK 拉回手机（20MB, SHA256 b644d0e1...）→ `pm install` 成功 → 启动截图验证**四 Tab 空壳运行**（对话/桌面/商店/我的）
 - 2026-08-15：一键构建脚本 `deploy/android-build.sh`（打包→上传→服务器构建[自动移除 ARM64 hack + 限内存防 OOM]→拉回→可选安装）
-- 2026-08-15 ✅ **M0-2 对话链路完成**：core（ChatEvent 契约镜像/SseSource/WebosApi/WebosRepository）+ app（SessionStore/PersistentCookieJar/ChatViewModel/ChatScreen 占位 UI）；Koin 三连修（ChatViewModel 未注册、CookieJar 接口绑定、koinViewModel 包路径）；真机验证：游客 99 积分、SSE 流式回复、thinking/tool chips/done 用量渲染、多轮上下文记忆
-- 下一步：M0-3 App Runtime 验证（WebView 沙箱加载线上 App + WebMessagePort 桥，全方案最大不确定性）
+- 2026-08-15 ✅ **M0-2 对话链路完成**（D15 前版本，服务端 SSE 链路）：core（ChatEvent 契约镜像/SseSource/WebosApi/WebosRepository）+ app（SessionStore/PersistentCookieJar/ChatViewModel/ChatScreen 占位 UI）；Koin 三连修（ChatViewModel 未注册、CookieJar 接口绑定、koinViewModel 包路径）；真机验证：游客 99 积分、SSE 流式回复、thinking/tool chips/done 用量渲染、多轮上下文记忆
+- 下一步：按 12-roadmap 新 M0-2/M0-3 执行**端侧 pi spike**（D15：proot + Node + pi SDK 本地对话 + 进程占用实测）；原 M0-3 App Runtime 验证（WebView 沙箱 + WebMessagePort 桥）继续排队
 
 ## 6. 相关文档索引
 
-- 总索引/决策：`docs/android/README.md`（D1–D14）
+- 总索引/决策：`docs/android/README.md`（D1–D17，含 D15 端侧 AI / D16 sub-agent 包化 / D17 AI 开发包）
 - 工具链与云构建：`docs/android/13-dev-toolchain.md`
 - 路线图：`docs/android/12-roadmap.md`（M0-1 完成定义 §11）
 - 工程结构：`docs/android/02-architecture.md`

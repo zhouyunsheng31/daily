@@ -64,6 +64,7 @@ nginx 侧：`client_max_body_size` 与分块大小对齐（默认 chunk 4MB）�
 
 - 本地镜像位置：应用私有目录 `files/workspace/`（proot bind 源，07 §3.5）。
 - 同步范围默认 `home/`（用户文件）；`apps/` 由包管理器按版本下载（不进双向同步，避免与版本机制打架）。
+- **会话日志同步（D15，02 §7）**：本地 AI 会话日志/记忆按 `agent/sessions/` 走同一 manifest 协议**加密**同步到服务端用户域（换机恢复、管理端 trace 排查）；同步为后台行为、设置页可关闭（隐私）。**同步 ≠ 对话链路依赖**——离线时本地会话完整可用，恢复后仅做 LWW 合并（同会话以 updatedAt 为准，不双写）。
 - 离线：读走本地镜像秒开；写操作入队，网络恢复自动重放（WorkManager 约束：有网 + 低电量不跑大文件）。
 
 ## 4. 备份
@@ -75,14 +76,14 @@ nginx 侧：`client_max_body_size` 与分块大小对齐（默认 chunk 4MB）�
 | 本地导出 | SAF 导出同一格式的加密归档（用户自选目录，换机/离线场景） | 用户自持 |
 | 恢复 | 导入归档 → 校验 → **以新版本指针落库**（App/桌面回滚到备份点，文件恢复快照）→ 可再回滚 | — |
 
-红线：归档不含任何 Provider 密钥（DEEPSEEK/CHATST 等永不出服务端）；用户 secrets（05 的外部 API 密钥）加密后随归档，口令=账号会话派生。
+红线：归档不含任何 Provider 密钥（DEEPSEEK/CHATST 等永不出服务端）；用户 secrets（05 的外部 API 密钥）加密后随归档，口令=账号会话派生；**端侧 BYOK 模型密钥（08 §6.2）永不入任何归档**（仅存 Android Keystore，不上传、不导出）。
 
 ## 5. 与单体拆分的衔接（落地顺序）
 
 1. 新建 `server/src/webos/files/`（File Service）与 `server/src/webos/backup.ts`——纯新增，零风险。
 2. agent_fs 双写适配——行为不变 + 回归用例（现有工作区冒烟脚本 + Playwright 手册流程）。
 3. 从 webos.ts 抽出 workspace/files 相关路由进新模块（触及即瘦身纪律的第一次执行）。
-4. 全部新域（packages/appApi/rooms/deviceWs/media）只进 `webos/` 新模块（02 §6.2）。
+4. 全部新域（packages/appApi/rooms/capability/media）只进 `webos/` 新模块（02 §6.2）。
 
 ## 6. 验收用例
 

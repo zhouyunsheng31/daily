@@ -44,6 +44,7 @@ PUT /webos/api/device/capabilities
 
 - `AccessibilityService`（`canPerformGestures`，API 26+ 满足 minSdk）：`dispatchGesture` 点击/滑动、`AccessibilityNodeInfo` 遍历读屏、`TYPE_WINDOW_STATE_CHANGED` 感知前台 App。
 - 节点树 dump 做体积压缩（深度/文本长度截断）后进 AI 上下文；读屏属于敏感能力，能力词 `device.screen.read`/`device.ui.automate` 独立授权。
+- **AI 探索纪律（2026-08 用户拍板，UI 可变的前提）**：UI 界面不固定（用户可改 slot 包/主题），AI 操作或验证任何界面时**禁止硬编码坐标与结构**——必须走「语义锚点（`semantics`/`testTag`）→ 无障碍树 dump → 截屏（视觉）」的探索链，操作后才可缓存锚点（会话内有效，UI 版本变更即失效）。
 - 厂商通道：小米/华为等需额外"自启动/后台弹出界面"权限——引导卡内置按厂商跳转的 deep link 表（接 `device` 上报的 manufacturer）。
 
 ### 3.3 MediaProjection（截屏）
@@ -58,23 +59,26 @@ PUT /webos/api/device/capabilities
 - 执行模型：经 Shizuku 的 `newProcess` 跑 shell 命令；输出 128KB 截断（对齐 RikkaHub 防爆上下文标准）。
 - 激活教学（J2）：图文三步（装 Shizuku → 无线调试/root 启动 → 回 App 检测），提供"复制无线调试配对步骤"。
 
-### 3.5 proot Linux（M2，按需下载）
+### 3.5 proot Linux（M1 基础版随 harness 落地，M2 完整版）
 
 - APK 内置 proot 二进制（arm64）；rootfs（Ubuntu 24.04 base，~200MB）**按需下载**（对齐 APK <40MB 红线）。
+- **M1**：基础运行器随 Agent Harness 落地（02 §4）——Node ≥22 运行 pi 内核，proot 是本地 AI 的宿主（D15），非可选功能。
+- **M2**：完整版——rootfs 按需下载/管理、多实例、工作区 bind。
 - 运行器语义对齐 RikkaHub 已验证方案：`--root-id --link2symlink --kill-on-exit -r <rootfs> -w <cwd> -b <工作区挂载>`，stdout/stderr 各 128KB 截断，超时强杀，daemon 线程防泄漏（自行实现，不抄代码）。
-- 工作区挂载策略：服务端文件经 09 同步落在应用私有目录后 bind 进 proot——**AI 在终端里看到的工作区与云端一致**。
+- 工作区挂载策略：服务端文件经 09 同步落在应用私有目录后 bind 进 proot——**AI 在终端里看到的工作区与云端一致**（09 同步为后台行为，离线时用本地工作区）。
 
-## 4. Broker 求交流程（服务端，每次设备工具调用）
+## 4. Broker 求交流程（端侧，每次设备/工具调用；服务端数据工具同规则）
 
 ```
 tool.requires ⊆ 包能力声明(manifest)          ① 包声明
             ∩ 用户授权（设置页开关，可按 本次/会话/永久 粒度）② 用户
             ∩ capability matrix（设备真实状态）               ③ 设备
-            ∩ 平台策略（管理端全局开关）                      ④ 平台
-  → 全过才经 WSS 下发 tool_call；任一失败返回结构化 unavailable（含引导动作）
+            ∩ 平台策略（管理端全局开关，随同步下发）          ④ 平台
+  → 全过才放行本地执行；任一失败返回结构化 unavailable（含引导动作）
 ```
 
-审计：每次调用记录 userKey/device/tool/params 摘要/成败/耗时（管理端 trace 可查，沿用 08-13 决策标准）。
+- Android 端设备工具在**本地**执行（02 §4.2，Agent Harness 内直接调用），Broker 位于 harness 工具执行链（求交逻辑与服务端同源实现，07 与 03 §6 词汇表一致）。
+- 审计：每次调用记录 userKey/device/tool/params 摘要/成败/耗时（本地 execution log，09 同步后管理端 trace 可查，沿用 08-13 决策标准）。
 
 ## 5. 验收用例
 

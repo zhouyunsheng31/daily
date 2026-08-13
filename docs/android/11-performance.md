@@ -22,6 +22,8 @@
 | 热启动 | < 400ms | 同上 |
 | 对话列表滑动 | P95 帧 < 16.6ms（120Hz 屏 < 8.3ms） | `FrameTimingMetric`（Macrobenchmark） |
 | SSE 流式渲染 | delta→上屏 < 50ms，无掉帧尖峰 | 埋点 + JankStats |
+| 端侧 pi 进程（D15，M0-3 实测入表） | **RSS 常态 ≤ 300MB**（含会话上下文，10 会话内）；首 token 延迟 ≤ 5s（中端机、用户 Key 网络正常） | `dumpsys meminfo` / 进程 RSS 埋点 + harness 内自报；M0-3 数据落档 perf-reports/ |
+| 本地 AI 冷启动（D15） | proot 拉起 → 可对话 ≤ 10s（首启 rootfs 下载另计，需引导进度） | 埋点：harness ready 事件 |
 | 桌宠场景（10 只） | 稳 60fps；内存增量 < 150MB | gfxinfo + 内存 Profiler 场景脚本 |
 | App 打开（已预热） | < 300ms 首屏 | 埋点（webview attach → onPageFinished 关键资源） |
 | 后台驻留 8h | 电量增量 < 3%；无 ANR | Battery Historian + Play Vitals 类指标 |

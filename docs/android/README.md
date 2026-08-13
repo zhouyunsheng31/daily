@@ -1,6 +1,6 @@
 # Daily Android 端 · 开工总索引（README）
 
-> 版本：v1.0（2026-08-15 定稿） · 状态：**已拍板，进入执行准备**
+> 版本：v1.1（决策增补 D15–D17：端侧 AI 唯一路径 + sub-agent 包化 + AI 开发包能力） · 状态：**已拍板，进入执行准备**
 > 读者约定：本文档集面向**没有参与过前期讨论的工程师/AI**。读完本 README + 按顺序读完各分篇，即可独立开工，不需要任何对话上下文。
 
 ---
@@ -15,13 +15,13 @@ Daily 是一个 **AI-native 网页操作系统（webOS）**：AI 助手即系统
 
 前期调研与决策推导过程见 [`../android-app-plan.md`](../android-app-plan.md)（含 Operit / RikkaHub / pi 三个开源项目的一手源码考察结论）。**本文档集是执行规范，与那份方案不一致时以本文档集为准。**
 
-## 2. 已拍板决策清单（D1–D14，禁止推翻，变更需用户确认）
+## 2. 已拍板决策清单（D1–D17，禁止推翻，变更需用户确认）
 
 | # | 决策 | 分篇 |
 |---|---|---|
-| D1 | **路线 C**：Kotlin + Jetpack Compose 原生 Shell + WebView 沙箱跑 HTML App + 服务端 pi 内核。**否决** Capacitor 套壳与 Flutter/RN 跨端重写 | 02 |
-| D2 | Agent 内核继续用 **pi**，且保持**服务端托管**；客户端只依赖 Agent Bridge 协议（SSE + 设备工具 WS 通道），可换内核 | 02 |
-| D3 | **一切皆包**：app / pet-layer / api / skill / theme / toolpkg / mcp / workflow / model-pack / url-app 统一一条流水线（校验→不可变版本→安装→权限求交→审计→回滚） | 03 |
+| D1 | **路线 C**：Kotlin + Jetpack Compose 原生 Shell + WebView 沙箱跑 HTML App + **端侧 pi 内核**（proot + Node）。**否决** Capacitor 套壳与 Flutter/RN 跨端重写 | 02 |
+| D2 | Agent 内核用 **pi 且跑在端侧**（proot Ubuntu + Node ≥22，SDK 嵌入、单进程多会话）；客户端经**本地 Agent 桥**（stdio/JSON-RPC）与内核通信；**无云端 AI 兜底** | 02、15 |
+| D3 | **一切皆包**：app / pet-layer / api / skill / theme / toolpkg / mcp / workflow / model-pack / url-app / **provider** / **subagent** 统一一条流水线（校验→不可变版本→安装→权限求交→审计→回滚）；**系统默认包可覆盖**——内置工具/模型/媒体 provider 都是默认包，AI/用户装包即替换（不写死代码） | 03 |
 | D4 | **App API 体系为高优先级**（M2 核心项，排在 toolpkg 之前）：App = UI + 数据 + API；API 声明自动生成服务端代理 + pi 工具 + 文档页；API 包可上架市场 | 04 |
 | D5 | 支持**外部 API 接入做 App**、支持**外部网页（含实时连自有服务器的动态站点）做 App**（url-app 包类型） | 05 |
 | D6 | 联机先走**服务器中继房间**（Realtime Room + channel 原语），WebRTC 真 P2P 后置 | 06 |
@@ -32,7 +32,10 @@ Daily 是一个 **AI-native 网页操作系统（webOS）**：AI 助手即系统
 | D11 | **性能预算写入 M1 验收红线**：冷启动 <1s、滑动 60/120fps、10 桌宠稳 60fps、基座 APK <40MB | 11 |
 | D12 | 首发渠道**官网直发 + F-Droid**；Google Play 裁剪变体后置（无障碍+全文件+装包权限组合在 Play 审核敏感） | 12 |
 | D13 | HTML-in-Canvas（2026 WICG 提案）**只观察不集成**；架构不为其预留任何东西 | 11 |
-| D14 | AI 生成 App 唯一路径保持「**文件夹即 App**」（agent_fs_mkdir + agent_fs_write，系统自动注册建版本），推广到全部包类型 | 03 |
+| D14 | AI 生成包唯一路径保持「**文件夹即包**」（agent_fs_mkdir + agent_fs_write，系统自动注册建版本），推广到全部包类型 | 03 |
+| D15 | **端侧 AI 为唯一路径，不要云端 AI 兜底**：AI 为用户服务、用户主导——模型/密钥由用户配置（BYOK 端侧加密、直连），平台不托管模型密钥、不参与对话链路计费；离线可用。服务端 pi 仅保留给现有 PWA/桌面维护模式 | 02、08、15 |
+| D16 | **sub-agent 做成包**（新包类型 `subagent`，M2）：以 pi 官方 subagent 示例为蓝本；执行器双档（**in-process 默认** + 子进程可选）+ 全局并发池限流；dsh 的 in-process provider / guard 防重 / spill 截断仅作**后置参考**，不引入 dsh | 15 |
+| D17 | **AI 可开发任意类型包**（D14 泛化）：AI 不仅能建 App，还能创建/修改 subagent / skill / toolpkg / workflow / theme / api 等全部包类型，支持「一键素材工作流」（AI 一条指令 → 调研→设计→生图→打包 → 产出全套素材资产为版本化包） | 15 |
 
 ## 3. 文档地图与阅读顺序
 
@@ -52,6 +55,8 @@ Daily 是一个 **AI-native 网页操作系统（webOS）**：AI 助手即系统
 | 11 | [11-performance.md](11-performance.md) | 性能预算、工程实践、测量方法 | 客户端 |
 | 12 | [12-roadmap.md](12-roadmap.md) | M0–M3 任务分解与验收标准 | 全员 |
 | 13 | [13-dev-toolchain.md](13-dev-toolchain.md) | **开发工具链与脚手架（动手前第一件事）**：Android Studio/SDK/Gradle 安装、多模块初始化、签名与凭证、CI | 客户端（第一个读） |
+| 14 | [14-dev-status.md](14-dev-status.md) | 开发状态快照、已拍板执行决策、里程碑进度 | 全员 |
+| 15 | [15-subagent.md](15-subagent.md) | **sub-agent 与 AI 开发包**：subagent 包类型、执行器双档、并发池、AI 开发任意包机制、一键素材工作流、harness/前端分离开发 | 全员 |
 
 ## 4. 现有代码库速览（动手前必须知道的事实）
 
@@ -75,8 +80,8 @@ daily/                              # 仓库根（本文档集在 docs/android/�
 
 ## 5. 红线清单（违反 = 返工）
 
-1. **密钥不出服务端**：`DEEPSEEK_API_KEY`/`CHATST_IMAGE_API_KEY` 等禁止进 APK、`VITE_*`、日志、Git。
-2. **AI 不得改写 Shell 源码**：一切个性化走包/数据/版本（design tokens、壁纸、布局 JSON），保留安全回退。
+1. **平台密钥不出服务端**：`DEEPSEEK_API_KEY`/`CHATST_IMAGE_API_KEY` 等禁止进 APK、`VITE_*`、日志、Git；**用户自带 Key（BYOK）只存端侧加密**（Android Keystore / EncryptedSharedPreferences），不上传服务端、不入归档。
+2. **AI 不得改写 Shell 特权内核**：导航骨架/消息核心/权限 UI/安全回退不可改；一切个性化走包/数据/版本（design tokens、壁纸、布局 JSON、UI slot 包，见 03 §5.1），保留安全回退。
 3. **能力不满足只报 unavailable**，禁止伪造成功（支付/邮箱/权限能力同纪律）。
 4. **版本不可变**：任何修改产新版本，指针切换，保留审计链。
 5. **权限求交**：平台安全策略 ∩ 用户授权 ∩ Agent 工具权限 ∩ 包能力声明，四者交集才放行。
@@ -86,8 +91,8 @@ daily/                              # 仓库根（本文档集在 docs/android/�
 
 ## 6. 总验收（M1 完成时必须全部成立）
 
-- [ ] Android 端可完成：游客进入 → 对话 → AI 建 App → 桌面运行 App → AI 改 App（新版本）→ 回滚，全链路。
-- [ ] 性能预算（11-performance §2）实测达标（中端机：骁龙 7 系/天玑 8000 级）。
+- [ ] Android 端可完成：进入 → 配置模型 Key（BYOK）→ 本地 AI 对话 → AI 建 App → 桌面运行 App → AI 改 App（新版本）→ 回滚，全链路（对话走端侧 pi，**不依赖服务端 AI**）。
+- [ ] 性能预算（11-performance §2）实测达标（中端机：骁龙 7 系/天玑 8000 级），其中端侧 pi 进程内存占用纳入预算表（11 §2 增补）。
 - [ ] Tier0 权限引导完成率埋点可见；无 Shizuku 设备可完整使用对话/App/桌宠/文件同步。
-- [ ] 与网页端数据实时互通（同账号双端 App 列表/聊天/桌面布局一致）。
+- [ ] 与网页端数据互通：AI 会话记录、App 列表、桌面布局经 09 同步协议双向同步（对话本身各自独立，本地会话优先）。
 - [ ] 崩溃率 < 0.5%，ANR < 0.1%（Firebase Crashlytics 或自建上报）。

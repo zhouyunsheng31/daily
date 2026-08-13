@@ -47,10 +47,10 @@ Daily 正从“可持久化的个人生活管理面板”演进为一个**移动
 
 Daily 正式立项 Android 原生端（后续鸿蒙/iOS），产品定位 **「你的第二个桌面——更轻量，也更个性化」**。**执行规范文档集 = `docs/android/`（README + 12 分篇），无上下文的 AI 接手时从 `docs/android/README.md` 读起**；调研推导存档 = `docs/android-app-plan.md`（含 Operit/RikkaHub/pi 源码考察）。
 
-已拍板决策（D1–D14，详见 docs/android/README.md §2）摘要：
+已拍板决策（D1–D17，详见 docs/android/README.md §2）摘要：
 
-1. **路线 C**：Kotlin + Jetpack Compose 原生 Shell + WebView 沙箱跑 HTML App + 服务端 pi 内核不变；否决 Capacitor 套壳与 Flutter/RN。工程根 `client/android/`（多模块）。
-2. **一切皆包**：app/pet-layer/api/skill/theme/toolpkg/mcp/workflow/model-pack/url-app 统一流水线（不可变版本+回滚+审计+权限四交集）；**App API 体系为高优先级**（api.json 声明 → 服务端 vm 沙箱代理 + pi 动态工具 + 文档页 + API 包市场；解决"AI 不知道 App 内数据"与"双端异构 UI 数据互通"）。
+1. **路线 C**：Kotlin + Jetpack Compose 原生 Shell + WebView 沙箱跑 HTML App + **端侧 pi 内核**（proot Ubuntu + Node ≥22，SDK 嵌入单进程多会话）；**D15：无云端 AI 兜底，对话 LLM 走端侧 BYOK（用户自带 Key，仅存 Android Keystore，平台不托管不计费）**；否决 Capacitor 套壳与 Flutter/RN。工程根 `client/android/`（多模块；harness 与前端分离开发，契约 = `shared/agent-bridge-contract` 本地桥 JSON-RPC）。服务端 pi 仅服务 PWA/桌面维护模式。
+2. **一切皆包**：app/pet-layer/api/skill/theme/toolpkg/mcp/workflow/model-pack/url-app/**provider**/**subagent** 统一流水线（不可变版本+回滚+审计+权限四交集）；**系统默认包可覆盖**——内置工具/模型/媒体 provider/UI 扩展都是默认包（AI/用户装包即替换，不改代码；Shell 特权内核例外，AI 改 UI 走 slot 包 + `ui.extend` 能力 + 语义锚点 + 无障碍树探索纪律）；**App API 体系为高优先级**（api.json 声明 → 服务端 vm 沙箱代理 + pi 动态工具 + 文档页 + API 包市场；解决"AI 不知道 App 内数据"与"双端异构 UI 数据互通"）。**D16：sub-agent 包化**（in-process 执行器默认 + 子进程可选 + 全局并发池，pi 官方示例为蓝本，dsh 仅后置参考）；**D17：AI 可开发任意类型包**（文件夹即包泛化 + 校验反馈回路，支持一键素材工作流）。
 3. **外部接入**：外部 API 经 api 包服务端代理（域名白名单 + secrets 托管）；外部网页做 url-app（端侧 WebView 直连 live 模式 / 服务端 snapshot 模式，存储分区隔离）。
 4. **联机**：服务器中继房间（channel 原语 `sdk.channel`）先行，WebRTC P2P 后置。
 5. **权限两档**：Tier0 标准模式（悬浮窗+无障碍+MediaProjection+proot 全免 root）/ Tier1 Shizuku 增强；capability matrix 上报 bootstrap，工具多实现优雅降级，不满足只报 unavailable。
