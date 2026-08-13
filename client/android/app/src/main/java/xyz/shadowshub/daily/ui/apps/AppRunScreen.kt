@@ -49,7 +49,11 @@ fun AppRunScreen(appId: String, appName: String, onBack: () -> Unit) {
 
     LaunchedEffect(appId) {
         val d = api.appDetail(appId)
-        if (d?.activeHtml != null) detail = d else error = "App 无可用版本或加载失败"
+        if (d?.activeHtml != null) {
+            detail = d
+        } else {
+            error = "App 无可用版本或加载失败 [appId=$appId, html=${d?.activeHtml?.length ?: "null"}]"
+        }
     }
 
     Column(Modifier.fillMaxSize()) {
