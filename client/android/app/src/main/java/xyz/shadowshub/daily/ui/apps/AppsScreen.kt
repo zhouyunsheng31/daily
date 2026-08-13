@@ -48,7 +48,7 @@ fun AppsScreen(
                 TextButton(onClick = { viewModel.refresh() }) { Text("重试") }
             }
             else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                items(state.apps, key = { it.id }) { app ->
+                items(state.apps, key = { "${it.id}-${it.name}" }) { app ->
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant,
