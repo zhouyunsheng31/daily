@@ -162,7 +162,13 @@ Phase 14「AI 基础设施解放」阶段性版本：Skill CLI + Docker 化部�
 
 - 生图全链路实测通过：openai_draw 文生图（4 图标候选 + 4 页 UI）✅；ChatST `/v1/images/edits` 图生图（3 张优化候选，基于当前图标参考图）✅；PIL 去背景透明 PNG ✅；APK 内 XML 图标定位与备份 ✅。
 
-### M1-1 收尾：返回机制 + 图标用回 E1 生成图 + 卡顿根治 + 对话页按稿重做（当日追加）
+### 桌面图标点击失效修复（当日追加）
+
+- **现象**：桌面（WebView）所有 App 图标点不开（用户反馈 + 实测无 `bridge req: apps.open`）。
+- **根因**：M1-1 收尾为做"右滑让渡"加的全屏 Compose `pointerInput` 覆盖层（`detectHorizontalDragGestures`）——**Compose hit test 命中后事件不转发给 Android 子 View**，覆盖层不 consume 点击时事件被丢弃，WebView 永远收不到触摸 → 图标全部点不开。
+- **修复**：删除覆盖层，改为 **WebView 自身 `OnTouchListener`**（不 consume，`false` 返回），仅检测"右滑累计 >80dp 且横向主导"时回调 `onSwipeToChat`——点击/纵向滚动完全透传给 WebView。
+- **验证（真机）**：点市场图标 → `bridge req: apps.open ok=true` → `appDetail(system.store) detail=true` → `pageState title="市场"` ✅；返回→桌面→右滑→对话页 ✅；图标点击恢复 ✅。
+- **坑记档**：16-playbook §5 坑索引加"Compose 全屏 pointerInput 覆盖层会吞掉下层 AndroidView（WebView）全部触摸"。本条目后续并入正式修复记录。
 
 - **返回机制**：`AppRunScreen` 加 `BackHandler`（系统返回 = 关闭当前 App 回桌面，不再直接退出 Daily）；`DailyApp` 加 `BackHandler`（对话页返回 → 回桌面，桌面页返回才退出）。真机验证：对话页按返回 → 回桌面 ✅（未退出）。
 - **图标用回 E1 生成图原图**：launcher 图标 foreground 从矢量重绘版改为 **E1 PNG 原图**（各密度 mipmap-*/ic_launcher_foreground.png，E1 1254px 缩放）；保留矢量 background + monochrome；真机确认 Launcher 图标 = 深色底 + 发光蓝球 + 光晕（E1 原貌）✅。

@@ -1,8 +1,8 @@
 package xyz.shadowshub.daily.ui.desktop
 
 import android.app.Application
+import android.view.MotionEvent
 import android.webkit.WebView
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -18,10 +18,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlin.math.abs
 import org.koin.android.ext.android.getKoin
 import xyz.shadowshub.appruntime.AppRuntimeHost
 import xyz.shadowshub.core.network.AppDetail
@@ -73,6 +74,7 @@ fun DesktopHostScreen(
     }
 
     val detail = savedDetail.value
+    val density = LocalDensity.current.density
 
     Box(Modifier.fillMaxSize()) {
         when {
@@ -90,6 +92,33 @@ fun DesktopHostScreen(
                         // 关键：延迟到 WebView 完成首次布局后再加载（M0-4 白屏根因，勿删）
                         wv.post { host.loadApp(wv, detail!!) }
                     }
+                    // 右滑让渡：WebView 自身 OnTouchListener（不 consume，点击/滚动不受影响）
+                    // ⚠️ 不能再用全屏 Compose pointerInput 覆盖层——命中后 Compose 事件不转发给
+                    // Android 子 View，会吞掉 WebView 全部点击（2026-08-16 图标打不开根因）
+                    val wv = savedWebView.value!!
+                    var downX = 0f
+                    var downY = 0f
+                    var swipeTriggered = false
+                    wv.setOnTouchListener { _, event ->
+                        when (event.actionMasked) {
+                            MotionEvent.ACTION_DOWN -> {
+                                downX = event.x
+                                downY = event.y
+                                swipeTriggered = false
+                            }
+                            MotionEvent.ACTION_MOVE -> {
+                                val dx = event.x - downX
+                                val dy = event.y - downY
+                                val slopPx = 80f * density
+                                if (!swipeTriggered && dx > slopPx && abs(dx) > abs(dy) * 1.2f) {
+                                    swipeTriggered = true
+                                    onSwipeToChat()
+                                }
+                            }
+                        }
+                        false // 不消费：WebView 正常处理点击/滚动
+                    }
+                    wv
                 },
                 update = {},
                 // 不销毁：复用实例（进程内常驻单 WebView，避免 Pager 来回切换反复重载卡顿）
@@ -97,28 +126,5 @@ fun DesktopHostScreen(
             )
             else -> Text("加载中…", modifier = Modifier.align(Alignment.Center))
         }
-
-        // 右滑让渡层（仅消费"横向右滑"，其余放行 WebView）
-        Box(
-            Modifier
-                .matchParentSize()
-                .pointerInput(Unit) {
-                    var triggered = false
-                    var totalDx = 0f
-                    detectHorizontalDragGestures(
-                        onDragEnd = { triggered = false },
-                        onDragCancel = { triggered = false },
-                    ) { change, dragAmount ->
-                        totalDx += dragAmount
-                        if (!triggered && totalDx > 80f) { // 右滑累计超过阈值 → 切对话页
-                            triggered = true
-                            change.consume()
-                            onSwipeToChat()
-                        } else {
-                            change.consume()
-                        }
-                    }
-                },
-        )
     }
 }
