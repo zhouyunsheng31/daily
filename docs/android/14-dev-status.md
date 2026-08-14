@@ -77,7 +77,7 @@
 | **M0-3 进程占用与性能实测（D15 红线）** | ✅ 真机达标 | 魅族 Lucky 08 实测（perf-test.js，落档 perf-reports/m0-3-onside-pi-2026-08-15.md）：**冷启动 2.7s**（预算 ≤10s）、**首 token 均值 2.9s**（≤5s）、**RSS 稳定 140–142MB**（≤300MB，10 会话后）、12 轮上下文增长平坦无泄漏。附带修复：proot 下 `process.memoryUsage()` ENOENT（main.js status 防御 + `-b /proc:/proc`）；perf-test stdout/stderr 缓冲分离 |
 | M0-4 App Runtime 验证 | ✅ 完成（2026-08-16 白屏修复） | AppRuntimeHost（WebView 沙箱 + base 注入 + Bootstrap JS）+ DailyJsBridge（storage 桥）+ AppsScreen/AppRunScreen 已实现；**桌面 WebView 白屏已修复**（三处根因：①启动即崩 = Koin `single<AgentChatSource?> { null }` 非法 null single → 改 getOrNull；②启动即请求 `apps.list` 等 postMessage 直连桌面方法未实现 → DailyJsBridge 补齐 apps.list/apps.open/system.navigate（镜像 PWA runtime.ts handleDesktopRequest）+ DailyApp 宿主联动；③视觉白屏 = AndroidView factory 时机 WebView 未布局 viewport vh=0 → 显式 MATCH_PARENT layoutParams + `wv.post {}` 延迟加载）。真机验证：桌面完整渲染（时钟/图标网格/指示器/Dock）+ 顶栏 insets + apps 列表按 id 去重（dataLen 510→345）；bootstrap apps.list 双份 builtin+user 是服务端结构，客户端去重即可 |
 | M0-5 悬浮窗验证 | ⏸ 暂缓（2026-08-15 用户拍板） | 悬浮窗桌宠（B 形态）在用户明确要做之前**不动**；桌宠只做应用内（M1-4） |
-| M0-6 设计走查 | ⬜ 未开始 | 10-ui-design §1 tokens → Compose 主题（双主题截图评审） |
+| M0-6 设计走查 | 🔶 并入 M1-1 | 10-ui-design §0 用户方向 v1 已立（D18 方案 A）；骨架成型后双主题截图评审（用户主导） |
 | M1-1 四大页面完整实现 | ⬜ 未开始 | 按 10 篇规格 + 10 §6 可用性清单 |
 
 **当前构建方式**：`bash deploy/android-build.sh --install`（手机打包 → 香港服务器 x86_64 构建 2m58s → APK 拉回安装）。
@@ -98,7 +98,9 @@
  - 2026-08-15：**桌宠范围拍板**：暂只做应用内桌宠（M1-4）；悬浮窗桌宠（overlay-runtime/M0-5/M2-5）整体暂缓，用户明确要做前不动（AGENT.md 决策 10 + 12-roadmap + 02-architecture 同步）
  - 2026-08-15：**桌宠内容 100% AI 包化拍板**：宿主只做容器（M1-4 挂载点 + 默认包 + pet-layer 最小加载提前）；桌宠形象/动画/行为/素材全部走 AI 生成的 pet-layer 包（03-package-system 执行引擎表、12-roadmap M1-4/M2-5 同步）
   - 2026-08-16 ✅ **M0-4 白屏修复完成**（真机全链路验证）：①Koin 崩溃——`single<AgentChatSource?> { null }` 的 null value 在 SingleInstanceFactory.getValue 直接抛 IllegalStateException → 删占位注册改 `getOrNull()`；②DailyJsBridge 补齐桌面 postMessage 直连方法 apps.list/apps.open/system.navigate（PWA runtime.ts handleDesktopRequest 镜像；未实现方法明确 respond(false) 不伪造），DailyApp 宿主回调联动（daily.ai→Chat Tab、system.store→Store Tab、普通 App→替换运行页；navigate 同理）；③WebView 视口 0 高白屏——AndroidView factory 时机 View 未 attach/测量，loadDataWithBaseURL 以 vh=0 布局后不 relayout → createWebView 显式 MATCH_PARENT layoutParams + `wv.post { loadApp }` 延迟到首次布局后；④AppRunScreen statusBarsPadding 修顶栏与状态栏重叠；⑤WebosApi.listApps 按 id 去重（bootstrap 返回 BUILTIN_APPS + 用户 state.apps 双份 system.*）。AppSummary 补 source/installed 字段。诊断手段沉淀：pageState 自检 JSON（vw/vh/bg/pages/pgH）+ bridge req/resp 日志 + AppRuntime tag。**注意：构建脚本超时后远端 gradle 会继续跑，重试前先 `pkill -9 -f gradle` 清残留（勿用含"gradle"字样的命令名自匹配）**；服务器后台构建模板：nohup + /tmp/build.log + build.done 标记 + 轮询
-  - 下一步：**M0 出口评审**（M0-2/M0-3/M0-4 均达标）；待办：App 内接真实 AgentChatSource（M1-2）+ M0-6 设计走查（需用户主导 UI）
+  - 2026-08-16：**UI 方向拍板（D18）+ 方案 A 选定**：沉浸式启动器（去 Tab 栏/顶栏、edge-to-edge）、桌面多页/边缘翻页/叠放建文件夹、对话页⇄桌面横滑（方案 A：对话页最左）；10-ui-design §0/§2 重写、README D18、12-roadmap M1-1/M1-4 验收同步。
+  - 2026-08-16：**文档基建完成（弱 AI 可执行化）**：新建 16-execution-playbook.md（构建 SOP/真机调试 SOP/协议速查/坑索引——M0-4 会话全部实操知识沉淀）+ 17-m1-task-cards.md（M1 Lite 五卡：M1-1 沉浸骨架 / M1-2 端侧 AI / M1-3 App 管理 / M1-4 启动器 / M1-5 权限，含验收/文件/步骤/坑/📐需用户定点）；AGENT.md 立「文档与变更纪律」（当天记 CHANGELOG、坑进 16、状态进 14、任务按 17 卡执行）；README §3 地图加 16/17。
+  - 下一步：**M1 Lite 开工，按 17-m1-task-cards 逐卡执行**（首卡 M1-1 沉浸式宿主骨架）；卡内 📐 标记点按 UI 红线问用户
 
 ## 6. 相关文档索引
 

@@ -60,6 +60,15 @@ Daily 正式立项 Android 原生端（后续鸿蒙/iOS），产品定位 **「�
 9. **HTML-in-Canvas（2026 WICG 提案）只观察不集成**；首发渠道官网直发+F-Droid，Play 裁剪版后置。
 10. **桌宠范围（2026-08-15 用户拍板）**：暂只做**应用内桌宠**（M1-4 桌面 Tab 桌宠层，A 形态）；**悬浮窗桌宠（overlay-runtime，浮在其他 App 上层的 B 形态）整体暂缓**——M0-5 悬浮窗验证、M2-5 overlay-runtime 完整版在用户明确要做之前**不动**（M2-5 的 pet-layer 包类型保留）。禁止任何 AI 提前实现 overlay-runtime 桌宠功能。**桌宠内容 100% AI 包化（D3/D17）**：宿主只做一次性容器——桌面页共享 canvas WebView 挂载点 + 平台默认极简桌宠（默认包）+ **pet-layer 最小包加载提前到 M1-4**（包声明 kind=pet-layer → 加载进桌宠层）；桌宠形象/动画/行为/素材全部由 AI 生成的 pet-layer 包提供，装包即替换、可回滚，不改 Shell 代码。
 11. 图标设计 brief 在 docs/android/10-ui-design.md §4（生图 prompt 已备好，站长账号执行）。
+12. **D18 沉浸式启动器方向（2026-08-16 用户拍板，方案 A 已选定）**：去掉底部 Tab 栏/顶栏"应用感"，edge-to-edge 全沉浸；桌面 = 手机启动器体验（多页、拖图标边缘翻页、叠放建文件夹）；横滑页面序列 [AI 对话页（宿主）| 桌面页 1..N（HTML）]；商店/我的/设置 = 桌面图标。详见 docs/android/10-ui-design.md §0/§2 + README.md D18。
+
+### 文档与变更纪律（2026-08-16 用户确立，所有执行 AI 必须遵守）
+
+1. **当天完成的功能/修复当天记 CHANGELOG.md**（`### YYYY-MM-DD：标题` + Added/Fixed/验证小节），禁止事后补记堆叠。
+2. **踩到新坑/新排障手段 → 当次会话追加进 `docs/android/16-execution-playbook.md`** 对应小节（构建/调试/协议/坑索引），不要只留在对话里。
+3. **里程碑状态变化 → 更新 `docs/android/14-dev-status.md`**（§4.5 表格 + §5 时间线）。
+4. **M1 任务执行前必读 `docs/android/16-execution-playbook.md`，按 `docs/android/17-m1-task-cards.md` 逐卡执行**；卡内标「📐需用户定」的点必须停下问用户，不得自行拍板 UI。
+5. 新建分篇文档 → README.md §3 文档地图加行；用户拍板新决策 → README.md §2 决策清单加 D 行并同步相关分篇。
 
 >路线图：M0 技术验证（⚠️WebView 沙箱跑通现有 App 契约 = 最大不确定性）→ M1 MVP（四大页面/权限 Tier0/文件服务一阶段/性能达标）→ M2（包体系+App API+url-app+房间+Shizuku+proot+TTS）→ M3（生态+鸿蒙/iOS 立项）。任务分解与验收标准见 docs/android/12-roadmap.md。**注意：工作区无现成 Android 工具链**——动手第一步是 docs/android/13-dev-toolchain.md（Windows 开发机装 Android Studio/SDK/JDK17、applicationId=`xyz.shadowshub.daily`、多模块脚手架、签名与 CI 骨架，附验收清单）。
 

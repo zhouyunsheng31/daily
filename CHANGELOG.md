@@ -140,6 +140,31 @@ Phase 14「AI 基础设施解放」阶段性版本：Skill CLI + Docker 化部�
 
 > 2026-08-14：AGENT.md 精简，将历史改动记录从 AGENT.md 迁移至此。此后所有功能上线/修复/决策记录统一写在本文件，AGENT.md 只保留项目概述与可复用技巧。
 
+## 2026-08-16：Android M0-4 白屏修复 + D18 沉浸式方向 + 文档基建
+
+### Fixed（Android · client/android）
+
+- **M0-4 系统桌面 WebView 白屏**（真机全链路验证通过，commit `fb24fd8`）：
+  - Koin 启动崩溃：`single<AgentChatSource?> { null }` 非法（null value 抛 IllegalStateException）→ 删占位注册改 `getOrNull()`。
+  - 桥方法缺失白屏：DailyJsBridge 补齐桌面 postMessage 直连方法 `apps.list/apps.open/system.navigate`（镜像 PWA runtime.ts `handleDesktopRequest`；未实现方法明确 respond(false)）+ DailyApp 宿主导航联动。
+  - 视觉白屏（DOM 渲染但像素全白）：AndroidView factory 时机 WebView 未布局（pageState `vh:0`）→ 显式 MATCH_PARENT layoutParams + `wv.post { loadApp }` 延迟加载。
+  - 附带：AppRunScreen statusBarsPadding（顶栏不再与状态栏重叠）；WebosApi.listApps 按 id 去重（bootstrap 返回 builtin+user 双份 system.*）。
+
+### Changed（文档 · docs/android，commit `9c42d16` + `82818fc`）
+
+- **D18 沉浸式启动器方向**（用户拍板，方案 A 已选定）：edge-to-edge 全沉浸、桌面启动器体验（多页/边缘翻页/叠放建文件夹）、横滑页面序列 [对话页（宿主）| 桌面页 1..N（HTML）]；10-ui-design §0（用户方向最高优先级）+ §2 信息架构 v2 重写；12-roadmap M1-1/M1-4 验收同步。
+
+### Added（文档基建 · 弱 AI 可执行化）
+
+- **`docs/android/16-execution-playbook.md`**：构建 SOP（超时残留清理/服务器后台构建模板）、真机调试 SOP（导航命令链铁律/pageState 字段判读/像素验证/输入注入红线）、协议速查（桌面桥方法表/服务端 API 坑/JWT 生成）、常见坑索引（8 条历史根因）。
+- **`docs/android/17-m1-task-cards.md`**：M1 Lite 五张任务执行卡（M1-1 沉浸骨架 / M1-2 端侧 AI+BYOK / M1-3 App 管理 / M1-4 启动器+手势让渡 / M1-5 权限引导），每卡含前置阅读/验收清单/涉及文件/实施步骤/已知坑/📐需用户定点。
+- **AGENT.md「文档与变更纪律」**：当天功能当天记 CHANGELOG；坑进 16；状态进 14；任务按 17 卡执行、📐点必须问用户。
+
+### 验证
+
+- 真机（魅族 Lucky 08）：桌面完整渲染（时钟/4 图标去重/页指示/Dock/渐变壁纸）；pageState `vh:754, hasSDK:true, hasBridge:true`；bridge `apps.list ok=true`（345B）。
+- 文档：README §3 地图收录 16/17；14-dev-status 里程碑表 M0-4 ✅ / M0-6 并入 M1-1。
+
 ## 2026-08-14：删除 create_webos_app 工具 + 支持中文文件夹名（已部署验证）
 
 > 用户决策：① 删除 AI 工具 `create_webos_app`（保留 REST `POST /webos/api/apps`，日后可单独做「粘贴 HTML 生成 App」入口）；② 支持 AI 中文文件夹名（文件夹即 App）。

@@ -58,6 +58,8 @@ Daily 是一个 **AI-native 网页操作系统（webOS）**：AI 助手即系统
 | 13 | [13-dev-toolchain.md](13-dev-toolchain.md) | **开发工具链与脚手架（动手前第一件事）**：Android Studio/SDK/Gradle 安装、多模块初始化、签名与凭证、CI | 客户端（第一个读） |
 | 14 | [14-dev-status.md](14-dev-status.md) | 开发状态快照、已拍板执行决策、里程碑进度 | 全员 |
 | 15 | [15-subagent.md](15-subagent.md) | **sub-agent 与 AI 开发包**：subagent 包类型、执行器双档、并发池、AI 开发任意包机制、一键素材工作流、harness/前端分离开发 | 全员 |
+| 16 | [16-execution-playbook.md](16-execution-playbook.md) | **执行手册**：构建 SOP（超时/残留清理/后台构建）、真机调试 SOP（导航命令链/日志判读/像素验证）、协议速查（桥方法/服务端 API）、常见坑索引 | **执行 AI（开工前必读）** |
+| 17 | [17-m1-task-cards.md](17-m1-task-cards.md) | **M1 Lite 任务执行卡**：M1-1~M1-5 逐卡（前置阅读/验收/涉及文件/步骤/坑/需用户定点） | M1 执行 AI |
 
 ## 4. 现有代码库速览（动手前必须知道的事实）
 
