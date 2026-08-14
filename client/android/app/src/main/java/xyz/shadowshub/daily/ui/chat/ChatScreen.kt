@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -56,7 +58,7 @@ fun ChatScreen(viewModel: ChatViewModel = koinViewModel()) {
         if (last > 0) listState.animateScrollToItem(last - 1)
     }
 
-    Column(modifier = Modifier.fillMaxSize().imePadding()) {
+    Column(modifier = Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
         // 顶部状态条
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
@@ -121,9 +123,9 @@ fun ChatScreen(viewModel: ChatViewModel = koinViewModel()) {
             }
         }
 
-        // 输入栏
+        // 输入栏（去 Scaffold 后自行适配手势条 inset）
         Row(
-            modifier = Modifier.fillMaxWidth().padding(8.dp),
+            modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             OutlinedTextField(

@@ -1,70 +1,53 @@
 package xyz.shadowshub.daily.ui
 
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Chat
-import androidx.compose.material.icons.filled.DesktopWindows
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Storefront
-import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.navigation.NavDestination.Companion.hierarchy
-import androidx.navigation.NavGraph.Companion.findStartDestination
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.launch
 import xyz.shadowshub.daily.ui.apps.AppRunScreen
-import xyz.shadowshub.daily.ui.apps.AppsScreen
 import xyz.shadowshub.daily.ui.chat.ChatScreen
-import xyz.shadowshub.daily.ui.screens.ProfileScreen
-import xyz.shadowshub.daily.ui.screens.StoreScreen
+import xyz.shadowshub.daily.ui.desktop.DesktopHostScreen
 
-/** 底部四大主 Tab（10-ui-design §3：对话/桌面/商店/我的）。 */
-enum class DailyTab(val route: String, val label: String, val icon: ImageVector) {
-    Chat("chat", "对话", Icons.Filled.Chat),
-    Desktop("desktop", "桌面", Icons.Filled.DesktopWindows),
-    Store("store", "商店", Icons.Filled.Storefront),
-    Profile("profile", "我的", Icons.Filled.Person),
-}
-
+/**
+ * 沉浸式宿主骨架（M1-1 · D18 方案 A 横滑导航，替代旧 4 Tab）。
+ *
+ * 页面序列：[ 💬 AI 对话页（宿主 Compose）| 🖥 桌面页 1..N（HTML WebView）]
+ * - 初始页 = 桌面（index 1）；桌面继续右滑 → 露出对话页（负一屏）
+ * - App 运行页（AppRunScreen）= 全屏覆盖层（无顶栏，沉浸）
+ * - 无底部 Tab 栏 / 无 Scaffold 顶栏；壁纸透底（MainActivity enableEdgeToEdge）
+ * - M1-1 降级：桌面页 WebView 拦截横滑，桌面→对话用顶部按钮（M1-4 做手势让渡）
+ */
 @Composable
 fun DailyApp() {
-    val navController = rememberNavController()
-    val backStackEntry by navController.currentBackStackEntryAsState()
-    val currentDestination = backStackEntry?.destination
+    val pagerState = rememberPagerState(pageCount = { 2 })
+    val scope = rememberCoroutineScope()
 
-    // M0-3：打开的 App（全屏运行页，覆盖主 UI）
+    // 打开的 App（全屏运行页，覆盖主 UI）
     var openApp by remember { mutableStateOf<Pair<String, String>?>(null) }
 
-    /** App 运行页里的 apps.open（桌面图标点击）→ 宿主分发：
-     *  系统入口映射主 Tab；普通 App 替换运行页（单层，与 PWA setView 同构） */
+    /** App 运行页/桌面里的 apps.open（图标点击）→ 宿主分发：
+     *  daily.ai → 对话页（Pager page 0）；其余 → 全屏运行页 */
     val handleOpenApp: (String, String) -> Unit = { id, name ->
         when (id) {
-            "daily.ai" -> { openApp = null; navController.navigate(DailyTab.Chat.route) { launchSingleTop = true } }
-            "system.store" -> { openApp = null; navController.navigate(DailyTab.Store.route) { launchSingleTop = true } }
+            "daily.ai" -> {
+                openApp = null
+                scope.launch { pagerState.animateScrollToPage(0) }
+            }
             else -> { openApp = id to name }
         }
     }
 
-    /** App 运行页里的 system.navigate → 关闭运行页 + 切主 Tab */
+    /** system.navigate → 关闭运行页 + 切 Pager 页（assistant→对话，其余→桌面） */
     val handleNavigate: (String) -> Unit = { view ->
         openApp = null
-        val route = when (view) {
-            "assistant" -> DailyTab.Chat.route
-            else -> DailyTab.Desktop.route
-        }
-        navController.navigate(route) { launchSingleTop = true }
+        scope.launch { pagerState.animateScrollToPage(if (view == "assistant") 0 else 1) }
     }
 
     if (openApp != null) {
@@ -78,36 +61,17 @@ fun DailyApp() {
         return
     }
 
-    Scaffold(
-        bottomBar = {
-            NavigationBar {
-                DailyTab.entries.forEach { tab ->
-                    val selected = currentDestination?.hierarchy?.any { it.route == tab.route } == true
-                    NavigationBarItem(
-                        selected = selected,
-                        onClick = {
-                            navController.navigate(tab.route) {
-                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
-                        icon = { Icon(tab.icon, contentDescription = tab.label) },
-                        label = { Text(tab.label) },
-                    )
-                }
-            }
-        },
-    ) { innerPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = DailyTab.Chat.route,
-            modifier = Modifier.padding(innerPadding),
-        ) {
-            composable(DailyTab.Chat.route) { ChatScreen() }
-            composable(DailyTab.Desktop.route) { AppsScreen(onOpen = handleOpenApp) }
-            composable(DailyTab.Store.route) { StoreScreen() }
-            composable(DailyTab.Profile.route) { ProfileScreen() }
+    // 初始页 = 桌面（index 1）
+    LaunchedEffect(Unit) { pagerState.scrollToPage(1) }
+
+    HorizontalPager(state = pagerState, modifier = Modifier) { page ->
+        when (page) {
+            0 -> ChatScreen()
+            1 -> DesktopHostScreen(
+                onOpenApp = handleOpenApp,
+                onNavigate = handleNavigate,
+                onChat = { scope.launch { pagerState.animateScrollToPage(0) } },
+            )
         }
     }
 }

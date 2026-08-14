@@ -116,6 +116,9 @@ screencap -p /data/local/tmp/shot.png
 
 - **截图 / uiautomator dump 必须在导航命令链内**——单独执行时拍到的可能是 Operit 悬浮层（表现为"纯白/无关界面"，曾误导排障多轮）。
 - **输入注入红线**（根 AGENT.md）：只允许对**被测应用**注入（input tap/text/keyevent），注入前必须 `dumpsys window | grep mCurrentFocus` 确认前台窗口属于被测应用；**严禁向 Operit 宿主注入**；输入法操作（ime set/force-stop IME）须用户许可。
+- **操作完成后必须切回 Operit 宿主**（2026-08-16 用户要求，根 AGENT.md 导航纪律）：验证/采集结束后执行
+  `CMD=$(cmd package resolve-activity --brief com.ai.assistance.operit | tail -1); am start -n $CMD`
+  确认 `dumpsys window | grep mCurrentFocus` 回到 Operit 再结束——**禁止把手机留在被测应用界面**。
 - `am start` 可能返回 "delivered to currently running top-most instance"——说明 App 已在前台，正常。
 
 ### 3.2 屏幕坐标
