@@ -140,7 +140,44 @@ Phase 14「AI 基础设施解放」阶段性版本：Skill CLI + Docker 化部�
 
 > 2026-08-14：AGENT.md 精简，将历史改动记录从 AGENT.md 迁移至此。此后所有功能上线/修复/决策记录统一写在本文件，AGENT.md 只保留项目概述与可复用技巧。
 
-## 2026-08-16：Android M0-4 白屏修复 + D18 沉浸式方向 + 文档基建
+## 2026-08-16：UI 探索启动（图标 E1 定稿 + 全套 UI 稿）+ D19 组合式包 + D20 系统包化
+
+### Added
+
+- **`ui-exploration/` 目录（项目根）**：UI 探索专属工作区——生图脚本 `gen-image.sh`（文生图）/ `img2img.py`（图生图 edits）/ `strip-bg.py`（色度键去背景），模型 gpt-image-2-super（ChatST 网关，key 从 `server/.env` 读取不落盘、不入 Git）+ `generated/` 资产 + `current-xml-icon/`（现 XML 图标备份）。
+- **App 图标定稿 = E1**（深蓝 #0F172A + 亮蓝光点 #4F8CFF + 白色高光，基于现 Android 占位图标图生图优化 + 去背景透明版）；原 XML 版保留在 `ui-exploration/current-xml-icon/` 备后续使用。
+- **全套 UI 探索稿 4 页**（对话主页 / 沉浸桌面启动器 / 个人中心 / 设置页）：统一设计语言「清亮通透的手机 OS + 平面化优化」——暖白底（#f8f7f3→浅灰蓝渐变）+ 毛玻璃半透明卡片 + 扁平圆角图标 + 亮蓝 #4F8CFF 点缀 + 大留白细阴影；M0-6 设计走查素材。
+- **openai_draw 包接入服务器 ChatST 生图 API**（`OPENAI_API_KEY` / `OPENAI_API_BASE_URL` / `OPENAI_IMAGE_MODEL` 环境变量已配置）。
+
+### Changed（拍板决策）
+
+- **D19 组合式包**（用户拍板）：一个包内什么都能装（skill / MCP / 工具 / tokens / 资源 / 子包），**嵌套 ≤3 层**，包 = 自包含能力单元；manifest v2（`contents` + `children`）；新类型 `bundle` = 纯组合容器。03 分篇 §1/§2/§3 更新。
+- **D20 系统包化 · 全 API 开放**（用户拍板）：除**安全 UI 例外**（权限弹窗/授权页不可被 AI 篡改，防骗授权）外，系统所有内容开放 API 并打包——系统大包 `com.daily.system`（bundle）内含 UI / 文件 / 桌面 / 商店 / 对话 / 桌宠等子包，**UI 只是其中一个子包**；每个子包 = 工具（API 封装）+ skill（操作手册）+ 资源。**红线 2 更新**（特权内核 → 安全 UI 例外；导航/消息核心受控可改、默认 UI 包常驻可回退）。
+
+### Docs
+
+- 同步更新：`docs/android/README.md`（决策清单 D19/D20 + 红线 2）、`03-package-system.md`（§1 要点 / §2 manifest v2 / §3 bundle / §4.1 安全边界 / §5.1 UI 开放 / §6 能力词 ui.layout·ui.component·ui.theme）、`12-roadmap.md`（M2-6 组合式包、M2-14 改 UI 开放 API、新增 M2-15 系统包化）、`10-ui-design.md`（§2.1 UI 包化边界）、根 `AGENT.md`（决策摘要）。
+
+### Validation
+
+- 生图全链路实测通过：openai_draw 文生图（4 图标候选 + 4 页 UI）✅；ChatST `/v1/images/edits` 图生图（3 张优化候选，基于当前图标参考图）✅；PIL 去背景透明 PNG ✅；APK 内 XML 图标定位与备份 ✅。
+
+### M1-1 沉浸式宿主骨架完成（当日追加）
+
+- **DailyApp 重写**：4 Tab + Scaffold → `HorizontalPager` 两页（page0=ChatScreen / page1=DesktopHostScreen），初始页=桌面；无底部 Tab 栏/无 Scaffold 顶栏；`openApp` 覆盖层保留（AppRunScreen 全屏沉浸）。
+- **新增 DesktopHostScreen**：沉浸 WebView 宿主固定加载 `system.desktop`（复用 AppRuntimeHost + `wv.post` 延迟加载，M0-4 白屏修复保留）；透传 apps.open/system.navigate；顶部低调"返回对话"按钮（M1-1 降级，M1-4 手势让渡后移除）。
+- **AppRunScreen 沉浸化**：删 Surface 顶栏 + statusBarsPadding，全屏 edge-to-edge，返回=系统手势；顶部 12dp 热区为 M1-3 预留。
+- **ChatScreen insets 适配**：statusBarsPadding + navigationBarsPadding（去 Scaffold 后自行管理）。
+- **依赖**：`libs.versions.toml` + `app/build.gradle.kts` 显式加 `androidx.compose.foundation`（Pager 需要）。
+- **验证（真机）**：初始=桌面（时钟/4 图标/Dock/页指示点渲染正常，pageState vh=855 hasSDK/hasBridge=true）；无底部 Tab 栏；顶部按钮切对话页（"Daily AI"出现）；横滑对话→桌面成功；桌面点「市场」→ AppRunScreen 全屏沉浸运行 system.store（无顶栏，title=市场，storage.list ok）。**发现**：system.files 无 HTML 版本（服务端缺默认模板，appDetail detail=false，点开报错——待补）。
+- **纪律**：AGENT.md 新增「真机操作导航纪律」（操作前导航至被测应用 + 操作后切回 Operit），同步 16-playbook §3.1。
+
+- **E1 → Adaptive Icon 三件套（矢量重绘）**：`ic_launcher_background.xml`（深蓝→靛蓝对角渐变 #0F172A→#1B2C5F）+ `ic_launcher_foreground.xml`（柔光晕径向渐变 + 光点主体 #4F8CFF 系 + 白色高光小圆，构图按 E1 PNG 1254px 像素采样）+ `ic_launcher_monochrome.xml`（环状光点，Android 13+ 主题图标）；`ic_launcher.xml` / `ic_launcher_round.xml` 引用 monochrome。
+- **Design Tokens → 共享契约**：`shared/webos-contracts/index.ts` 新增 `WebOsDesignTokens` / `WebOsDesignTokenColor` / `WebOsDesignTokenShape` / `WebOsDesignTokenBlur` / `WebOsDesignTokenMotion` 类型 + `WEBOS_DEFAULT_DESIGN_TOKENS`（v1 清亮通透：primary #4F8CFF / background #F8F7F3 / surface #FFFFFF / shape 12-20-28 / blur 24-40 / motion 150-300ms emphasized / wallpaper 渐变）——theme 包校验失败的安全回退基线（红线 2）。
+- **Compose 品牌主题**：`client/android/.../ui/theme/Theme.kt` 重写——浅色「清亮通透」（暖白底 + 亮蓝主色 + 亮蓝用户气泡）与深色「深蓝沉浸」（#0F172A 底 + 亮化 primary #7FB0FF）双主题；`dynamicColor` 默认关（品牌色优先，theme 包接入后为用户主题留位）。
+- **验证**：server `tsc --noEmit` 通过；服务器 Gradle `:app:assembleDebug` 构建成功（app-debug.apk 20.9MB，sha256 e01668da...）；真机安装 + 启动正常（mCurrentFocus=MainActivity）；图标资源 XML 全部 aapt 可编译。
+
+
 
 ### Fixed（Android · client/android）
 

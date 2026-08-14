@@ -289,3 +289,100 @@ export interface WebOsWorkspaceListing {
   workspaceBytes: number
   workspaceLimitBytes: number
 }
+
+// ============================================================================
+// UI Design Tokens（2026-08-16 UI 探索定稿 ·「清亮通透 + 平面化」）
+// ----------------------------------------------------------------------------
+// 单一事实源：Shell / Android Compose 主题 / theme 包（D20 UI 子包）共用。
+// theme 包 = 覆盖本结构的 JSON（校验失败回退 WEBOS_DEFAULT_DESIGN_TOKENS）。
+// 色值来源：client/shell-web/src/styles.css :root（webOS 既有）+ E1 图标主色。
+// ============================================================================
+
+export interface WebOsDesignTokenColor {
+  /** 主色（亮蓝，E1 光点 #4F8CFF）——按钮/气泡/高亮 */
+  primary: string
+  /** 深靛蓝（既有 --blue #315BD6）——次级强调/链接/选中 */
+  accent: string
+  /** 卡片/毛玻璃面 */
+  surface: string
+  /** 弱面（按压态/分组底） */
+  surfaceVariant: string
+  /** 页面底（暖白） */
+  background: string
+  /** 页面底渐变端（浅灰蓝） */
+  backgroundGradientEnd: string
+  /** 主文字（墨） */
+  onBackground: string
+  /** 卡片上文字 */
+  onSurface: string
+  /** 辅助文字 */
+  onSurfaceVariant: string
+  /** 弱文字/占位 */
+  muted: string
+  /** 用户气泡 */
+  chatBubbleUser: string
+  /** AI 气泡（白/玻璃） */
+  chatBubbleAI: string
+  /** 辅助色（墨绿，桌面图标族） */
+  green: string
+  /** 琥珀（商店图标族） */
+  amber: string
+  /** 危险/删除 */
+  red: string
+  /** 分割线 */
+  border: string
+}
+
+export interface WebOsDesignTokenShape {
+  radiusSm: number
+  radiusMd: number
+  radiusLg: number
+}
+
+export interface WebOsDesignTokenBlur {
+  /** 面板/卡片毛玻璃 */
+  panel: number
+  /** 弹层/托盘 */
+  overlay: number
+}
+
+export interface WebOsDesignTokenMotion {
+  durationShort: number
+  durationMed: number
+  /** 缓动曲线标识（emphasized / standard 等，消费方映射） */
+  easing: string
+}
+
+export interface WebOsDesignTokens {
+  color: WebOsDesignTokenColor
+  shape: WebOsDesignTokenShape
+  blur: WebOsDesignTokenBlur
+  motion: WebOsDesignTokenMotion
+  wallpaper: { type: 'gradient' | 'image' | 'live'; value: string }
+}
+
+/** 默认设计令牌（v1 · 清亮通透）：theme 包校验失败 / 卸载覆盖包时的安全回退（红线 2） */
+export const WEBOS_DEFAULT_DESIGN_TOKENS: WebOsDesignTokens = {
+  color: {
+    primary: '#4F8CFF',
+    accent: '#315BD6',
+    surface: '#FFFFFF',
+    surfaceVariant: '#F1F3F8',
+    background: '#F8F7F3',
+    backgroundGradientEnd: '#E6EAF2',
+    onBackground: '#171918',
+    onSurface: '#171918',
+    onSurfaceVariant: '#424740',
+    muted: '#71756F',
+    chatBubbleUser: '#4F8CFF',
+    chatBubbleAI: '#FFFFFF',
+    green: '#376B53',
+    amber: '#A06D25',
+    red: '#A54B49',
+    border: 'rgba(23,25,24,0.10)',
+  },
+  shape: { radiusSm: 12, radiusMd: 20, radiusLg: 28 },
+  blur: { panel: 24, overlay: 40 },
+  motion: { durationShort: 150, durationMed: 300, easing: 'emphasized' },
+  wallpaper: { type: 'gradient', value: 'linear-gradient(160deg,#F8F7F3 0%,#E6EAF2 100%)' },
+}

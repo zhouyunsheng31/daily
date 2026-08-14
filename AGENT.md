@@ -50,7 +50,7 @@ Daily 正式立项 Android 原生端（后续鸿蒙/iOS），产品定位 **「�
 已拍板决策（D1–D17，详见 docs/android/README.md §2）摘要：
 
 1. **路线 C**：Kotlin + Jetpack Compose 原生 Shell + WebView 沙箱跑 HTML App + **端侧 pi 内核**（proot Ubuntu + Node ≥22，SDK 嵌入单进程多会话）；**D15：无云端 AI 兜底，对话 LLM 走端侧 BYOK（用户自带 Key，仅存 Android Keystore，平台不托管不计费）**；否决 Capacitor 套壳与 Flutter/RN。工程根 `client/android/`（多模块；harness 与前端分离开发，契约 = `shared/agent-bridge-contract` 本地桥 JSON-RPC）。服务端 pi 仅服务 PWA/桌面维护模式。
-2. **一切皆包**：app/pet-layer/api/skill/theme/toolpkg/mcp/workflow/model-pack/url-app/**provider**/**subagent** 统一流水线（不可变版本+回滚+审计+权限四交集）；**系统默认包可覆盖**——内置工具/模型/媒体 provider/UI 扩展都是默认包（AI/用户装包即替换，不改代码；Shell 特权内核例外，AI 改 UI 走 slot 包 + `ui.extend` 能力 + 语义锚点 + 无障碍树探索纪律）；**App API 体系为高优先级**（api.json 声明 → 服务端 vm 沙箱代理 + pi 动态工具 + 文档页 + API 包市场；解决"AI 不知道 App 内数据"与"双端异构 UI 数据互通"）。**D16：sub-agent 包化**（in-process 执行器默认 + 子进程可选 + 全局并发池，pi 官方示例为蓝本，dsh 仅后置参考）；**D17：AI 可开发任意类型包**（文件夹即包泛化 + 校验反馈回路，支持一键素材工作流）。
+2. **一切皆包 · 组合式包（D3+D19）**：app/pet-layer/api/skill/theme/toolpkg/mcp/workflow/model-pack/url-app/**provider**/**subagent**/**bundle** 统一流水线（不可变版本+回滚+审计+权限四交集）；**一个包内什么都能装**（skill/MCP/工具/tokens/资源/子包，嵌套 ≤3 层），包 = 自包含能力单元；**系统默认包可覆盖**——内置工具/模型/媒体 provider/UI 扩展都是默认包（AI/用户装包即替换，不改代码）；**系统包化（D20）**：除安全 UI（权限弹窗/授权页）外所有系统内容开放 API 并打包，系统大包 `com.daily.system` 内含 UI/文件/桌面/商店/对话/桌宠等子包，**UI 只是其中一个子包**，AI 改 UI = 装/改 UI 子包（工具+skill），全程版本化可回滚；**App API 体系为高优先级**（api.json 声明 → 服务端 vm 沙箱代理 + pi 动态工具 + 文档页 + API 包市场；解决"AI 不知道 App 内数据"与"双端异构 UI 数据互通"）。**D16：sub-agent 包化**（in-process 执行器默认 + 子进程可选 + 全局并发池，pi 官方示例为蓝本，dsh 仅后置参考）；**D17：AI 可开发任意类型包**（文件夹即包泛化 + 校验反馈回路，支持一键素材工作流）。
 3. **外部接入**：外部 API 经 api 包服务端代理（域名白名单 + secrets 托管）；外部网页做 url-app（端侧 WebView 直连 live 模式 / 服务端 snapshot 模式，存储分区隔离）。
 4. **联机**：服务器中继房间（channel 原语 `sdk.channel`）先行，WebRTC P2P 后置。
 5. **权限两档**：Tier0 标准模式（悬浮窗+无障碍+MediaProjection+proot 全免 root）/ Tier1 Shizuku 增强；capability matrix 上报 bootstrap，工具多实现优雅降级，不满足只报 unavailable。
@@ -75,6 +75,8 @@ Daily 正式立项 Android 原生端（后续鸿蒙/iOS），产品定位 **「�
 > **UI/图标设计协作红线（2026-08-15 用户明确要求）**：正式 UI 设计与 App 图标设计**必须由用户主导**——AI 只能按用户指示执行（如：用户给方向 → AI 出候选 → 用户选定 → AI 落地），**禁止 AI 自行拍板界面风格、配色、布局或图标设计**。M0 阶段的占位界面/占位图标（技术验证载体）除外，但不得对外宣称是最终设计。执行依据：docs/android/10-ui-design.md §4（图标 brief 仅当用户要求执行时才生图）。
 
 > **真机输入注入红线（2026-08-15 事故教训，用户明确要求）**：禁止对**非被测应用**（尤其 Operit 宿主）执行 `input text` / `input tap` / `input keyevent` 注入；测试前必须先 `dumpsys window | grep mCurrentFocus` 确认前台窗口属于被测应用；输入法操作（`ime set` / force-stop IME）须用户许可。事故：误向 Operit 输入框注入文本导致微信键盘（默认输入法 wetype）连接异常、用户无法拉起键盘，修复：force-stop wetype + ime 切换刷新。
+
+> **真机操作导航纪律（2026-08-16 用户要求）**：每次要操作应用（输入/点击/滑动/截图/验证）前，**必须先导航至该应用**（`am start -n` / `am force-stop` + 启动，并用 `dumpsys window | grep mCurrentFocus` 确认前台窗口属于被测应用）；**操作完成后必须切回 Operit 宿主**（`cmd package resolve-activity --brief com.ai.assistance.operit` 查入口后 `am start -n`），不留脏前台状态。禁止在未确认前台窗口的情况下直接注入；禁止操作结束后把手机留在被测应用界面。
 
 ## webOS 后端端点快速索引
 

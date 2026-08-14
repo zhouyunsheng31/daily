@@ -39,7 +39,7 @@
 | M2-3 | url-app + 外部 API 包（`webos/externalApps.ts`：白名单拦截、存储分区隔离、快照抓取） | 05 §4 用例全过 |
 | M2-4 | 联机房间 Phase 1（`webos/rooms.ts` + app-sdk channel 原语 + 计费 kind='room'） | 06 §6 用例全过 |
 | M2-5 | ⏸ 拆分（用户拍板 2026-08-15）：**pet-layer 包类型完整版（多桌宠管理、行为参数、`physics: native` 下沉）保留**——最小加载已在 M1-4 提前；**overlay-runtime 完整版（悬浮窗多桌宠、桌面自由图标模式）暂缓，用户明确要做前不动** | 恢复时按原验收：10 桌宠 60fps（11 §2）；J5 自由模式可一键复原 |
-| M2-6 | theme 包 + skill 包（包装现有 skills 机制进包流水线） | 主题应用/回退/分享链接安装全通 |
+| M2-6 | **theme 包 + skill 包 + bundle 组合式包（D19）**：包装现有 skills 机制进包流水线；一个包可含 skill/mcp/tools/tokens/assets/子包（嵌套 ≤3 层），包 = 自包含能力单元 | 主题应用/回退/分享链接安装全通；bundle 安装解析子包闭包；组合包内 skill 随包注入 AI |
 | M2-7 | Shizuku Tier1 完整接入 + Broker 求交端侧化（07 §4） | 07 §5 用例 2 通过；降级链实测 |
 | M2-8 | proot 完整版：rootfs 按需下载/管理 + 运行器增强 + 工作区 bind（基础运行器已在 M1 随 harness 落地） | 07 §5 用例 4 通过 |
 | M2-9 | TTS Provider 首个接入（本地系统 TTS 或第三方 BYOK）+ 消息朗读 | 08 §5 M2 验收 |
@@ -47,7 +47,8 @@
 | M2-11 ⭐ | **sub-agent 包**：subagent 包类型（agent.md 定义）+ in-process 执行器（single/parallel/chain）+ 全局并发池 + 结果截断/spill | 15 §4 验收全过：parallel 3 任务并行回流、并发池上限生效、abort 传播 |
 | M2-12 ⭐ | **AI 开发包（D17）**：文件夹即包泛化到全部类型 + **包校验反馈回路**（写→校验→人话错误回流→修正闭环，03 §4.1）+ 一键素材工作流（workflow 包执行 + 生图 + 产物版本化） | 15 §5 用例 A（全套素材资产）产出并版本化；AI 改 subagent 包 → 新版本 → 回滚；AI 写错包 3 次内靠校验反馈自行修正（无需用户干预） |
 | M2-13 ⭐ | **能力包化（D3 系统默认包可覆盖）**：`provider` 包类型（llm/vision/image/video/tts/asr/audio 声明 + 适配参数，08 §6/§7）+ toolpkg 双层注册（内置工具 = 默认包，同名按包优先级覆盖，会话创建聚合） | AI 装 provider 包换识图/生图模型零代码改动；AI 装 toolpkg 覆盖内置工具；切换/回滚全通；DeepSeek 适配（08 §7）随 provider 包声明携带 |
-| M2-14 ⭐ | **UI slot 层（03 §5.1）**：特权内核拒绝挂载 + slot 挂载点 + `ui.extend` 能力求交 + 语义锚点 + 探索纪律（07 §3.2） | AI 创建 slot 包改对话页气泡样式；mount/unmount 原子化、失败回滚到默认 slot；特权内核挂载尝试被拒且审计可查；AI 经探索链操作被改过的 UI 成功 |
+| M2-14 ⭐ | **UI 开放 API（D20，03 §5.1 更新替代旧 UI slot 层）**：除**安全 UI 例外**（权限弹窗/授权页，防骗授权，不可挂载）外系统 UI 全部 API 化——默认 UI 子包 `com.daily.system.ui`（工具：ui.layout/ui.component/ui.slot.mount/ui.theme + skill：操作手册 + tokens/assets）+ `ui.extend`/`ui.layout`/`ui.component`/`ui.theme` 能力求交 + 语义锚点 + 探索纪律（07 §3.2）；导航/消息核心不再写死，但默认包常驻、卸载/回滚即恢复（安全回退） | AI 改输入栏位置/换语音输入框/调布局全部走包完成且可回滚；权限弹窗挂载尝试被拒且审计可查；卸载 UI 覆盖包回到默认 UI |
+| M2-15 ⭐ | **系统包化（D20）**：系统大包 `com.daily.system`（bundle）= UI/文件/桌面/商店/对话/桌宠等子包集合，每个子包 = 工具（API 封装）+ skill（操作手册）+ 资源；除安全 UI 外全部系统内容有对应公开 API 与包 | AI 一条指令可查询/调用任意系统能力（经包内 skill 引导）；UI 子包与其他子包同流水线；系统包版本回滚整体可逆 |
 
 ## M3 生态与多终端（后续规划，启动前重新评审）
 

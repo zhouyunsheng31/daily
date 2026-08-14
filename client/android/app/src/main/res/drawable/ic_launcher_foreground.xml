@@ -1,14 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Daily App 图标 · 前景层（2026-08-16 UI 探索定稿 E1 矢量重绘）
+  "一颗安静的 AI 光点"：柔光晕 + 蓝色光点主体（#4F8CFF 系）+ 白色高光小圆（右下）
+  构图基准 = 图生图 E1（icon-E1-glow-polish.png，1254px 采样）：
+    光晕中心 (54,54) r≈30；光点主体中心 (54,54) r≈19；白点 (55,64) r≈3.2
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- 占位前景：AI 光点（M1 换正式品牌图标） -->
+
+    <!-- ① 柔光晕：径向渐变（#4F8CFF 60% → 透明） -->
     <path
-        android:fillColor="#4F8CFF"
-        android:pathData="M54,34a20,20 0 1,0 0.001,0z" />
+        android:pathData="M54,24a30,30 0 1,0 0.001,0z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="54"
+                android:centerY="54"
+                android:gradientRadius="30"
+                android:startColor="#594F8CFF"
+                android:centerColor="#1A4F8CFF"
+                android:endColor="#004F8CFF" />
+        </aapt:attr>
+    </path>
+
+    <!-- ② 光点主体：径向渐变（亮蓝 → 主体 #4F8CFF → 深蓝边缘） -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,46a8,8 0 1,0 0.001,0z" />
+        android:pathData="M54,35a19,19 0 1,0 0.001,0z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="51.5"
+                android:centerY="51.5"
+                android:gradientRadius="19"
+                android:startColor="#8FB8FF"
+                android:centerColor="#4F8CFF"
+                android:endColor="#2E5FBE" />
+        </aapt:attr>
+    </path>
+
+    <!-- ③ 白色高光小圆（右下，呼应 E1 构图） -->
+    <path
+        android:pathData="M55,60.8a3.2,3.2 0 1,0 0.001,0z"
+        android:fillColor="#FFFFFF" />
 </vector>

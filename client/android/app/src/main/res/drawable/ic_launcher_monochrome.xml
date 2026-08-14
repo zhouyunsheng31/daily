@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Daily App 图标 · monochrome 层（Android 13+ 主题图标）
+  单色光点轮廓（与前景同构，纯轮廓风格）
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 光点实心圆（主题图标 tint 自动套用） -->
+    <path
+        android:pathData="M54,35a19,19 0 1,0 0.001,0z"
+        android:fillColor="#FFFFFFFF" />
+    <!-- 中心镂空（环状光点：外圆-内圆） -->
+    <path
+        android:pathData="M54,41.5a12.5,12.5 0 1,0 0.001,0z"
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="5" />
+</vector>
