@@ -45,14 +45,35 @@ fun DailyApp() {
     val currentDestination = backStackEntry?.destination
 
     // M0-3：打开的 App（全屏运行页，覆盖主 UI）
-    // 测试期：启动自动打开系统桌面验证 WebView 渲染（验证后恢复 null）
-    var openApp by remember { mutableStateOf<Pair<String, String>?>("system.desktop" to "系统桌面") }
+    var openApp by remember { mutableStateOf<Pair<String, String>?>(null) }
+
+    /** App 运行页里的 apps.open（桌面图标点击）→ 宿主分发：
+     *  系统入口映射主 Tab；普通 App 替换运行页（单层，与 PWA setView 同构） */
+    val handleOpenApp: (String, String) -> Unit = { id, name ->
+        when (id) {
+            "daily.ai" -> { openApp = null; navController.navigate(DailyTab.Chat.route) { launchSingleTop = true } }
+            "system.store" -> { openApp = null; navController.navigate(DailyTab.Store.route) { launchSingleTop = true } }
+            else -> { openApp = id to name }
+        }
+    }
+
+    /** App 运行页里的 system.navigate → 关闭运行页 + 切主 Tab */
+    val handleNavigate: (String) -> Unit = { view ->
+        openApp = null
+        val route = when (view) {
+            "assistant" -> DailyTab.Chat.route
+            else -> DailyTab.Desktop.route
+        }
+        navController.navigate(route) { launchSingleTop = true }
+    }
 
     if (openApp != null) {
         AppRunScreen(
             appId = openApp!!.first,
             appName = openApp!!.second,
             onBack = { openApp = null },
+            onOpenApp = handleOpenApp,
+            onNavigate = handleNavigate,
         )
         return
     }
@@ -84,7 +105,7 @@ fun DailyApp() {
             modifier = Modifier.padding(innerPadding),
         ) {
             composable(DailyTab.Chat.route) { ChatScreen() }
-            composable(DailyTab.Desktop.route) { AppsScreen(onOpen = { id, name -> openApp = id to name }) }
+            composable(DailyTab.Desktop.route) { AppsScreen(onOpen = handleOpenApp) }
             composable(DailyTab.Store.route) { StoreScreen() }
             composable(DailyTab.Profile.route) { ProfileScreen() }
         }

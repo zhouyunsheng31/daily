@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.foundation.layout.statusBarsPadding
 import org.koin.android.ext.android.getKoin
 import xyz.shadowshub.appruntime.AppRuntimeHost
 import xyz.shadowshub.core.network.AppDetail
@@ -34,21 +35,29 @@ import xyz.shadowshub.daily.BuildConfig
 
 /**
  * App 运行页（M0-3）：WebView 沙箱全屏运行 + 返回。
+ * M0-4：桌面 App 可经 apps.open 打开其他 App / system.navigate 切主 Tab（onOpenApp/onNavigate 由宿主注入）。
  */
 @Composable
-fun AppRunScreen(appId: String, appName: String, onBack: () -> Unit) {
+fun AppRunScreen(
+    appId: String,
+    appName: String,
+    onBack: () -> Unit,
+    onOpenApp: (id: String, name: String) -> Unit = { _, _ -> },
+    onNavigate: (view: String) -> Unit = {},
+) {
     val context = LocalContext.current
     val api: WebosApi = remember {
         (context.applicationContext as Application).getKoin().get()
     }
     val scope = rememberCoroutineScope()
-    val host = remember { AppRuntimeHost(context, api, scope, BuildConfig.API_BASE_URL) }
+    val host = remember { AppRuntimeHost(context, api, scope, BuildConfig.API_BASE_URL, onOpenApp, onNavigate) }
 
     var detail by remember { mutableStateOf<AppDetail?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(appId) {
         val d = api.appDetail(appId)
+        android.util.Log.d("AppRuntime", "appDetail($appId): detail=${d != null}, versions=${d?.versions?.size}, activeVersionId=${d?.activeVersionId}, activeHtmlLen=${d?.activeHtml?.length}")
         if (d?.activeHtml != null) {
             detail = d
         } else {
@@ -56,14 +65,14 @@ fun AppRunScreen(appId: String, appName: String, onBack: () -> Unit) {
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().statusBarsPadding()) {
         // 顶栏
         Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                 }
-                Text(appName, style = MaterialTheme.typography.titleMedium)
+                Text(appName.ifBlank { detail?.name ?: appId }, style = MaterialTheme.typography.titleMedium)
             }
         }
 
@@ -77,7 +86,11 @@ fun AppRunScreen(appId: String, appName: String, onBack: () -> Unit) {
                 detail != null -> AndroidView(
                     factory = { ctx ->
                         host.createWebView().also { wv ->
-                            host.loadApp(wv, detail!!)
+                            // 关键：延迟到 WebView 完成首次布局后再加载内容。
+                            // factory 时机 View 尚未 attach/测量，此时 loadDataWithBaseURL
+                            // 会以 viewport 高度 0 布局页面且后续不自动 relayout → 白屏
+                            // （2026-08-16 真机定位：vw=389 vh=0，CSS 已生效但不可见）。
+                            wv.post { host.loadApp(wv, detail!!) }
                         }
                     },
                     update = {},

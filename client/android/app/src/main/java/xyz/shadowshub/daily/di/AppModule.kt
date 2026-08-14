@@ -7,7 +7,6 @@ import kotlinx.coroutines.SupervisorJob
 import okhttp3.OkHttpClient
 import org.koin.androidx.viewmodel.dsl.viewModel
 import org.koin.dsl.module
-import xyz.shadowshub.core.agent.AgentChatSource
 import xyz.shadowshub.core.network.SseSource
 import xyz.shadowshub.core.network.WebosApi
 import xyz.shadowshub.core.network.WebosRepository
@@ -54,11 +53,12 @@ val appModule = module {
     }
 
     viewModel {
-        ChatViewModel(repository = get(), sessionStore = get(), agentSource = get())
+        // 占位（D15 端侧 pi）：harness 就绪后改为真实 AgentChatSource 组合并用 get() 获取；
+        // getOrNull 无注册时返回 null → ChatViewModel 走 SSE 分支。
+        // 注意：不能用 single<AgentChatSource?> { null }——Koin single 的 value 为 null 时
+        // SingleInstanceFactory.getValue 直接抛 IllegalStateException（2026-08-16 真机崩溃定位）。
+        ChatViewModel(repository = get(), sessionStore = get(), agentSource = getOrNull())
     }
-    // 占位（D15 端侧 pi）：端侧 harness 就绪（proot + rootfs + Node 部署）后替换为真实组合
-    // （HarnessProcessManager + AgentBridgeClient + AgentChatSource）；未就绪时本地对话分支不启用，走 SSE。
-    single<AgentChatSource?> { null }
 
     viewModel {
         AppsViewModel(api = get())

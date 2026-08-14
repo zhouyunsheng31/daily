@@ -22,11 +22,20 @@ class AppRuntimeHost(
     private val api: WebosApi,
     private val scope: CoroutineScope,
     private val baseUrl: String = "https://shadowshub.xyz",
+    /** 桌面 apps.open → 宿主导航打开 App（M0-4 白屏修复，透传给 DailyJsBridge） */
+    private val onOpenApp: (appId: String, name: String) -> Unit = { _, _ -> },
+    /** 桌面 system.navigate → 宿主切换主 Tab */
+    private val onNavigate: (view: String) -> Unit = {},
 ) {
 
     @SuppressLint("SetJavaScriptEnabled")
     fun createWebView(): WebView {
         val webView = WebView(context)
+        // 显式 MATCH_PARENT：避免 WebView 在无 layoutParams 时测量为 0 高（viewport vh=0 白屏根因）
+        webView.layoutParams = android.view.ViewGroup.LayoutParams(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+        )
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -48,7 +57,7 @@ class AppRuntimeHost(
                 android.util.Log.d("AppRuntime", "pageFinished: $url")
                 // 内部自检：DOM 状态 + SDK 是否注入（logcat 验证，不依赖截图）
                 view.evaluateJavascript(
-                    "(function(){var b=document.body;var d=document.documentElement;return JSON.stringify({title:document.title,bodyLen:b?b.innerHTML.length:-1,docLen:d?d.outerHTML.length:-1,hasSDK:!!window.DailyWebOs,hasBridge:typeof window.dailyBridge!=='undefined'});})()"
+                    "(function(){var b=document.body;var d=document.documentElement;var pg=document.getElementById('pages');return JSON.stringify({title:document.title,bodyLen:b?b.innerHTML.length:-1,docLen:d?d.outerHTML.length:-1,hasSDK:!!window.DailyWebOs,hasBridge:typeof window.dailyBridge!=='undefined',vw:window.innerWidth,vh:window.innerHeight,bg:b?getComputedStyle(b).backgroundColor:'?',disp:b?getComputedStyle(b).display:'?',pages:pg?pg.children.length:-1,pgH:pg?pg.offsetHeight:-1});})()"
                 ) { r ->
                     android.util.Log.d("AppRuntime", "pageState: $r")
                 }
@@ -71,7 +80,12 @@ class AppRuntimeHost(
 
     /** 加载 App：注入 base + bootstrap，用 loadDataWithBaseURL 以空 base 加载（相对素材走 base href） */
     fun loadApp(webView: WebView, detail: AppDetail, onLoaded: (() -> Unit)? = null) {
-        val html = detail.activeHtml ?: return
+        val html = detail.activeHtml
+        if (html == null) {
+            android.util.Log.e("AppRuntime", "loadApp(${detail.id}): activeHtml 为 null，versions=${detail.versions.map { it.id + ":len=" + (it.html?.length ?: -1) }}，activeVersionId=${detail.activeVersionId}")
+            return
+        }
+        android.util.Log.d("AppRuntime", "loadApp(${detail.id}): htmlLen=${html.length}")
         val bootstrap = readBootstrap()
         val contextJson = """{"app":{"id":"${detail.id}","name":"${escapeJson(detail.name)}"},"capabilities":["app.storage.private"],"sdkVersion":"0.1.0"}"""
         val baseTag = "<base href=\"$baseUrl/webos/api/apps/${detail.id}/files/raw?scope=app&amp;path=\">"
@@ -85,6 +99,8 @@ class AppRuntimeHost(
                 api = api,
                 scope = scope,
                 onResponse = { json -> postToJs(webView, json) },
+                onOpenApp = onOpenApp,
+                onNavigate = onNavigate,
             ),
             "dailyBridge",
         )

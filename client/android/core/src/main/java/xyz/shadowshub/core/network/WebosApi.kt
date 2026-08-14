@@ -74,14 +74,21 @@ class WebosApi(
                 if (!resp.isSuccessful) return@withContext emptyList()
                 val root = json.parseToJsonElement(resp.body?.string() ?: "{}") as? JsonObject ?: return@withContext emptyList()
                 val arr = root["apps"] as? JsonArray ?: return@withContext emptyList()
+                // 按 id 去重：bootstrap = BUILTIN_APPS + 用户 state.apps，同一 system.* 可能出现两次
+                // （后出现的用户版优先——版本/名称更新）
+                val byId = LinkedHashMap<String, AppSummary>()
                 arr.mapNotNull { el ->
                     val o = el as? JsonObject ?: return@mapNotNull null
-                    AppSummary(
-                        id = o["id"]?.jsonPrimitive?.content ?: return@mapNotNull null,
+                    val id = o["id"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    byId[id] = AppSummary(
+                        id = id,
                         name = o["name"]?.jsonPrimitive?.content ?: "",
                         icon = o["icon"]?.jsonPrimitive?.contentOrNull,
+                        source = o["source"]?.jsonPrimitive?.contentOrNull ?: "local",
+                        installed = o["installed"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true,
                     )
                 }
+                byId.values.toList()
             }
         } catch (_: Exception) { emptyList() }
     }
