@@ -110,7 +110,7 @@ Kotlin Shell（app/）── Agent 桥客户端（core/）── stdio JSON-RPC 
 | Shell 特权内核 | Compose（写死） | app/ | 导航骨架/消息核心/权限 UI/安全回退不可挂载任何包（红线 2） |
 | Shell slot 层（M2，03 §5.1） | Compose + slot 挂载点 | app/ + packages/ | slot 包须声明语义锚点 + `ui.extend` 能力；每页 slot ≤4；mount/unmount 指针切换原子、失败回滚 |
 | App 界面 | WebView（预热池 ≤2，LRU） | app-runtime/ | 单 App 内存超 200MB 触发回收策略 |
-| pet-layer（2D 桌宠/漂浮物，应用内，2026-08-15 拍板：暂不做悬浮窗形态） | **单共享 WebView + 单 canvas（应用内桌面 Tab 内渲染）** | app/（桌面页） | 同时存活 pet ≤12；后台停 RAF |
+| pet-layer（2D 桌宠/漂浮物，应用内，2026-08-15 拍板：暂不做悬浮窗形态） | **单共享 WebView + 单 canvas（应用内桌面 Tab 内渲染）**；**内容 100% AI 包化**：宿主只提供容器（挂载点 + 默认包），形象/行为/素材走 pet-layer 包（装包替换、可回滚，D3 默认包可覆盖） | app/（桌面页） | 同时存活 pet ≤12；后台停 RAF |
 | pet-layer（3D，M3） | Filament / Live2D | app/（桌面页）；overlay-runtime 暂缓 | 单独评审后引入 |
 | 主题/壁纸/布局 | Compose + design tokens | app/ | token 校验失败回退默认主题 |
 

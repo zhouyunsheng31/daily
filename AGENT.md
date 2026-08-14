@@ -58,7 +58,7 @@ Daily 正式立项 Android 原生端（后续鸿蒙/iOS），产品定位 **「�
 7. **文件服务重构**（借 Android 做外科手术，不推倒重来）：统一 File Service（DB 元数据 files 表 + blob，路径语义不变）+ 分块上传/断点续传 + 移动端双向同步（LWW+conflict 副本）+ 云/本地备份（恢复走版本指针）；**webos.ts（409KB 单体）冻结——新端点一律进 `server/src/webos/` 新模块，触及即瘦身**。
 8. **渲染分级红线**：Shell 纯 Compose 零 WebView；App 界面 WebView（预热池≤2）；**桌宠（应用内桌面 Tab，2026-08-15 拍板）= 单共享 WebView 单 canvas（10 桌宠≠10 WebView）**；3D 后置 Filament/Live2D。**性能预算写入 M1 验收**：冷启动<1s、60/120fps、10 桌宠稳 60fps、APK 基座<40MB。
 9. **HTML-in-Canvas（2026 WICG 提案）只观察不集成**；首发渠道官网直发+F-Droid，Play 裁剪版后置。
-10. **桌宠范围（2026-08-15 用户拍板）**：暂只做**应用内桌宠**（M1-4 桌面 Tab 桌宠层，A 形态）；**悬浮窗桌宠（overlay-runtime，浮在其他 App 上层的 B 形态）整体暂缓**——M0-5 悬浮窗验证、M2-5 overlay-runtime 完整版在用户明确要做之前**不动**（M2-5 的 pet-layer 包类型保留）。禁止任何 AI 提前实现 overlay-runtime 桌宠功能。
+10. **桌宠范围（2026-08-15 用户拍板）**：暂只做**应用内桌宠**（M1-4 桌面 Tab 桌宠层，A 形态）；**悬浮窗桌宠（overlay-runtime，浮在其他 App 上层的 B 形态）整体暂缓**——M0-5 悬浮窗验证、M2-5 overlay-runtime 完整版在用户明确要做之前**不动**（M2-5 的 pet-layer 包类型保留）。禁止任何 AI 提前实现 overlay-runtime 桌宠功能。**桌宠内容 100% AI 包化（D3/D17）**：宿主只做一次性容器——桌面页共享 canvas WebView 挂载点 + 平台默认极简桌宠（默认包）+ **pet-layer 最小包加载提前到 M1-4**（包声明 kind=pet-layer → 加载进桌宠层）；桌宠形象/动画/行为/素材全部由 AI 生成的 pet-layer 包提供，装包即替换、可回滚，不改 Shell 代码。
 11. 图标设计 brief 在 docs/android/10-ui-design.md §4（生图 prompt 已备好，站长账号执行）。
 
 >路线图：M0 技术验证（⚠️WebView 沙箱跑通现有 App 契约 = 最大不确定性）→ M1 MVP（四大页面/权限 Tier0/文件服务一阶段/性能达标）→ M2（包体系+App API+url-app+房间+Shizuku+proot+TTS）→ M3（生态+鸿蒙/iOS 立项）。任务分解与验收标准见 docs/android/12-roadmap.md。**注意：工作区无现成 Android 工具链**——动手第一步是 docs/android/13-dev-toolchain.md（Windows 开发机装 Android Studio/SDK/JDK17、applicationId=`xyz.shadowshub.daily`、多模块脚手架、签名与 CI 骨架，附验收清单）。

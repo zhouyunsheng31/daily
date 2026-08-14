@@ -38,7 +38,7 @@
 | type | 内容物 | 执行/消费方 | 首支持 |
 |---|---|---|---|
 | `app` | HTML/JS/CSS 静态包（index.html 入口） | WebView 沙箱（PWA=iframe / Android=WebView） | 已有，M1 平移 |
-| `pet-layer` | 场景 HTML（canvas/lottie）+ 行为参数 + 素材 | Android overlay-runtime（悬浮透明窗） | M2 |
+| `pet-layer` | 场景 HTML（canvas/lottie）+ 行为参数 + 素材 | Android **桌面页桌宠层（应用内共享 canvas WebView，2026-08-15 拍板）；overlay-runtime 悬浮窗形态暂缓** | **M1-4 最小加载（挂载点 + 默认包）**；M2-5 完整版（多桌宠管理/行为参数） |
 | `api` | api.json（端点声明集） | 服务端代理 + pi 工具生成器 + 文档页（见 04） | **M2 核心** |
 | `skill` | SKILL.md + references | 注入 pi skills（用户级 skills/ 目录，现有机制） | M2（包装现有能力） |
 | `theme` | design tokens + 壁纸 + 模糊/动画参数 | Shell 主题引擎（校验后应用，可回退） | M2 |

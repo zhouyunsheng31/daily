@@ -65,7 +65,7 @@
 6. ⚠️ 安全记录：用户曾将 GitHub PAT 直接发在对话中，**该 token 已视为暴露，需在 GitHub 后台 revoke 并重新签发**；后续凭证只走环境变量/Secret。另已注册：手机 SSH key（daily-dev-phone，id 160050633）、服务器 GitHub deploy key（daily-server-mirror，id 160051375，只对 daily 仓库可写）。
 7. **UI/图标设计协作红线（2026-08-15 用户要求）**：正式 UI 设计与 App 图标设计**必须由用户主导**——AI 按用户指示执行（用户给方向 → AI 出候选 → 用户选定 → AI 落地），禁止 AI 自行拍板界面风格/配色/布局/图标。M0 占位界面/占位图标（技术验证载体）除外，不得对外宣称是最终设计。已同步写入根 AGENT.md。
 8. **真机输入注入红线（2026-08-15 事故）**：禁止对非被测应用（尤其 Operit 宿主）执行 input text/tap/keyevent 注入；测试前必须 `dumpsys window | grep mCurrentFocus` 确认前台是被测应用；输入法操作（ime set/force-stop IME）须用户许可。事故记录：误向 Operit 输入框注入文本 → 微信键盘（默认输入法 wetype）连接异常、用户无法拉起键盘 → 修复：`am force-stop com.tencent.wetype` + `ime set` 切换刷新。
-9. **桌宠范围（2026-08-15 用户拍板）**：暂只做**应用内桌宠**（M1-4 桌面 Tab 桌宠层，A 形态）；**悬浮窗桌宠（overlay-runtime，浮在其他 App 上层的 B 形态）整体暂缓**——M0-5 悬浮窗验证、M2-5 overlay-runtime 完整版在用户明确要做之前**不动**（M2-5 的 pet-layer 包类型保留）。已同步写入 AGENT.md 决策 10 + 12-roadmap + 02-architecture。
+9. **桌宠范围（2026-08-15 用户拍板）**：暂只做**应用内桌宠**（M1-4 桌面 Tab 桌宠层，A 形态）；**悬浮窗桌宠（overlay-runtime，浮在其他 App 上层的 B 形态）整体暂缓**——M0-5 悬浮窗验证、M2-5 overlay-runtime 完整版在用户明确要做之前**不动**（M2-5 的 pet-layer 包类型保留）。已同步写入 AGENT.md 决策 10 + 12-roadmap + 02-architecture。**补充（同日）**：桌宠内容 **100% AI 包化**——宿主只做一次性容器（桌面页共享 canvas WebView 挂载点 + 默认极简桌宠（默认包）+ pet-layer 最小包加载提前到 M1-4），形象/动画/行为/素材全部由 AI 生成的 pet-layer 包提供；M2-5 只保留完整版（多桌宠管理/行为参数/native physics）。
 
 ## 4.5 里程碑进度（2026-08-15 晚快照）
 
@@ -96,6 +96,7 @@
  - 2026-08-15 ✅ **M0-2 端侧 pi spike 真机验收通过**（D15 新路径，commit a0c48cb）：proot-static v5.3.0 + ubuntu-base 24.04.3 rootfs（qemu 组装，155MB）真机全链路；10 轮 turns=10 done=10 errors=0；崩溃重启会话恢复（AI 答出「阿芸」）；harness 事件映射对齐 webos.ts + 120ms 合并（事件量降 7 倍）；Kotlin agent 模块 + 桥客户端 + ChatViewModel 本地分支已编译（服务器构建绿）
  - 2026-08-15 ✅ **M0-3 性能实测达标**（D15 红线，commit 见下）：真机冷启动 2.7s / 首 token 均值 2.9s / RSS 稳定 140–142MB（10 会话后）/ 12 轮增长平坦；落档 perf-reports/m0-3-onside-pi-2026-08-15.md + 11 §2 预算表；修复 proot 下 memoryUsage ENOENT（-b /proc:/proc + status 防御）
  - 2026-08-15：**桌宠范围拍板**：暂只做应用内桌宠（M1-4）；悬浮窗桌宠（overlay-runtime/M0-5/M2-5）整体暂缓，用户明确要做前不动（AGENT.md 决策 10 + 12-roadmap + 02-architecture 同步）
+ - 2026-08-15：**桌宠内容 100% AI 包化拍板**：宿主只做容器（M1-4 挂载点 + 默认包 + pet-layer 最小加载提前）；桌宠形象/动画/行为/素材全部走 AI 生成的 pet-layer 包（03-package-system 执行引擎表、12-roadmap M1-4/M2-5 同步）
  - 下一步：**M0 出口评审**（M0-2/M0-3 均达标，端侧 pi 方案可行性确认）；待办：App 内接真实 AgentChatSource（M1-2）+ App Runtime 白屏收尾（M0-4）
 
 ## 6. 相关文档索引
