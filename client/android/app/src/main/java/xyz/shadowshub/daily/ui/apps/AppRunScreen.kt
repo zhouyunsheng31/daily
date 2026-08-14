@@ -24,6 +24,7 @@ import xyz.shadowshub.appruntime.AppRuntimeHost
 import xyz.shadowshub.core.network.AppDetail
 import xyz.shadowshub.core.network.WebosApi
 import xyz.shadowshub.daily.BuildConfig
+import xyz.shadowshub.daily.ui.theme.LoadingView
 
 /**
  * App 运行页（M1-1 沉浸化）：
@@ -78,7 +79,7 @@ fun AppRunScreen(
                 update = {},
                 onRelease = { AppRuntimeHost.destroy(it) },
             )
-            else -> Text("加载中…", modifier = Modifier.align(Alignment.Center))
+            else -> LoadingView()
         }
     }
 }

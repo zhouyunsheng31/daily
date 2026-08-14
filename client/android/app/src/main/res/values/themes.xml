@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Daily" parent="android:Theme.Material.Light.NoActionBar" />
+    <!--
+      Daily 主题：NoActionBar + 深蓝启动背景（#0F172A，与 E1 图标同族）——
+      冷启动/加载期不白屏，从系统 splash 到 App 内容保持深蓝过渡。
+    -->
+    <style name="Theme.Daily" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#0F172A</item>
+        <item name="android:colorAccent">#4F8CFF</item>
+    </style>
 </resources>

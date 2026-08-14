@@ -28,6 +28,7 @@ import xyz.shadowshub.appruntime.AppRuntimeHost
 import xyz.shadowshub.core.network.AppDetail
 import xyz.shadowshub.core.network.WebosApi
 import xyz.shadowshub.daily.BuildConfig
+import xyz.shadowshub.daily.ui.theme.LoadingView
 
 /** 系统桌面 App 固定 id（桌面层 = HTML App，AI 可改、版本化回滚，D3/D18） */
 private const val SYSTEM_DESKTOP_ID = "system.desktop"
@@ -124,7 +125,7 @@ fun DesktopHostScreen(
                 // 不销毁：复用实例（进程内常驻单 WebView，避免 Pager 来回切换反复重载卡顿）
                 onRelease = {},
             )
-            else -> Text("加载中…", modifier = Modifier.align(Alignment.Center))
+            else -> LoadingView()
         }
     }
 }

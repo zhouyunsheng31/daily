@@ -36,6 +36,8 @@ class AppRuntimeHost(
             android.view.ViewGroup.LayoutParams.MATCH_PARENT,
             android.view.ViewGroup.LayoutParams.MATCH_PARENT,
         )
+        // 加载期深蓝背景（页面渲染完成后由页面自身背景覆盖）：避免冷启动白屏闪烁
+        webView.setBackgroundColor(0xFF0F172A.toInt())
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true

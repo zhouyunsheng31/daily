@@ -162,7 +162,12 @@ Phase 14「AI 基础设施解放」阶段性版本：Skill CLI + Docker 化部�
 
 - 生图全链路实测通过：openai_draw 文生图（4 图标候选 + 4 页 UI）✅；ChatST `/v1/images/edits` 图生图（3 张优化候选，基于当前图标参考图）✅；PIL 去背景透明 PNG ✅；APK 内 XML 图标定位与备份 ✅。
 
-### 桌面图标点击失效修复（当日追加）
+### 键盘弹窗 + 桌面点击随机失败 + 启动加载体验修复（当日追加）
+
+- **键盘弹起输入框飞高**：Manifest `MainActivity` 显式 `windowSoftInputMode="adjustResize"`（此前默认 adjustPan 与 Compose `imePadding` 叠加导致双倍上移）；edge-to-edge + adjustResize + imePadding 为标准组合。真机验证受 Operit 悬浮窗干扰，交互效果留用户实测确认。
+- **桌面点击随机失败（点击动画但打不开）**：根因 = HorizontalPager 在 down 后参与触摸竞争（横向 slop 判定），手指小位移时拦截事件序列，WebView 只收到 down（CSS :active 动画）收不到 up（JS 不触发）。修复：`userScrollEnabled = currentPage == 0`——桌面页 Pager 禁滑，触摸完整交给 WebView（翻页走 WebView OnTouchListener 右滑让渡）；对话页保留 Pager 滑动。验证：市场图标点击恢复（apps.open ok → title=市场）。
+- **启动加载体验**：① 新增 `LoadingView`（E1 logo + "Daily" + spinner），替换桌面/App 运行页的"加载中…"文本；② `themes.xml` windowBackground=#0F172A（冷启动不白屏）；③ AppRuntimeHost WebView `setBackgroundColor(深蓝)`（页面渲染前不闪白）；④ Pager `initialPage=1` 直接以桌面为第一帧（消除先闪对话页再跳转）。验证：冷启动 → logo+Daily 加载页 → 桌面 ✅。
+- **坑记档**：16-playbook §5 加"Pager 与 WebView 触摸竞争"条目（桌面页禁 Pager 滑动的设计原因）。
 
 - **现象**：桌面（WebView）所有 App 图标点不开（用户反馈 + 实测无 `bridge req: apps.open`）。
 - **根因**：M1-1 收尾为做"右滑让渡"加的全屏 Compose `pointerInput` 覆盖层（`detectHorizontalDragGestures`）——**Compose hit test 命中后事件不转发给 Android 子 View**，覆盖层不 consume 点击时事件被丢弃，WebView 永远收不到触摸 → 图标全部点不开。

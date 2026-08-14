@@ -5,7 +5,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,7 +29,8 @@ import xyz.shadowshub.daily.ui.desktop.DesktopHostScreen
  */
 @Composable
 fun DailyApp() {
-    val pagerState = rememberPagerState(pageCount = { 2 })
+    // 初始页 = 桌面（index 1）：直接以桌面为第一帧，避免冷启动先闪对话页再跳转
+    val pagerState = rememberPagerState(initialPage = 1, pageCount = { 2 })
     val scope = rememberCoroutineScope()
 
     // 桌面 WebView 实例提升到宿主级：跨 Pager 页面切换保持（避免来回滑动反复重载卡顿）
@@ -71,14 +71,23 @@ fun DailyApp() {
     }
 
     // 初始页 = 桌面（index 1）
-    LaunchedEffect(Unit) { pagerState.scrollToPage(1) }
+    // （initialPage=1 已保证第一帧在桌面，无需 scrollToPage）
 
     // 系统返回语义：对话页（page 0）返回 → 回桌面；桌面页返回 → 默认退出 Daily
     BackHandler(enabled = pagerState.currentPage == 0) {
         scope.launch { pagerState.animateScrollToPage(1) }
     }
 
-    HorizontalPager(state = pagerState, modifier = Modifier) { page ->
+    HorizontalPager(
+        state = pagerState,
+        // 关键（2026-08-16 桌面点击随机失败根因修复）：桌面页（page 1）禁用 Pager 滑动——
+        // Pager 会在 down 后参与触摸竞争（横向 slop 判定），手指有小位移时拦截事件序列，
+        // WebView 只收到 down（点击动画）收不到 up（JS 不触发）→ 图标点不开。
+        // 桌面页的翻页完全交给 WebView OnTouchListener 的右滑让渡（onSwipeToChat）；
+        // 对话页（page 0）保留 Pager 滑动（对话→桌面）。
+        userScrollEnabled = pagerState.currentPage == 0,
+        modifier = Modifier,
+    ) { page ->
         when (page) {
             0 -> ChatScreen()
             1 -> DesktopHostScreen(
