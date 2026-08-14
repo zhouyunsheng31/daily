@@ -1,6 +1,7 @@
 package xyz.shadowshub.daily.ui.apps
 
 import android.app.Application
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -59,6 +60,8 @@ fun AppRunScreen(
     }
 
     Box(Modifier.fillMaxSize()) {
+        // 系统返回 = 关闭当前 App（不退出 Daily）——M1-1 收尾：BackHandler 拦截
+        BackHandler { onBack() }
         when {
             error != null -> Text(
                 error!!,

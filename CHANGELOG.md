@@ -162,7 +162,13 @@ Phase 14「AI 基础设施解放」阶段性版本：Skill CLI + Docker 化部�
 
 - 生图全链路实测通过：openai_draw 文生图（4 图标候选 + 4 页 UI）✅；ChatST `/v1/images/edits` 图生图（3 张优化候选，基于当前图标参考图）✅；PIL 去背景透明 PNG ✅；APK 内 XML 图标定位与备份 ✅。
 
-### M1-1 沉浸式宿主骨架完成（当日追加）
+### M1-1 收尾：返回机制 + 图标用回 E1 生成图 + 卡顿根治 + 对话页按稿重做（当日追加）
+
+- **返回机制**：`AppRunScreen` 加 `BackHandler`（系统返回 = 关闭当前 App 回桌面，不再直接退出 Daily）；`DailyApp` 加 `BackHandler`（对话页返回 → 回桌面，桌面页返回才退出）。真机验证：对话页按返回 → 回桌面 ✅（未退出）。
+- **图标用回 E1 生成图原图**：launcher 图标 foreground 从矢量重绘版改为 **E1 PNG 原图**（各密度 mipmap-*/ic_launcher_foreground.png，E1 1254px 缩放）；保留矢量 background + monochrome；真机确认 Launcher 图标 = 深色底 + 发光蓝球 + 光晕（E1 原貌）✅。
+- **对话页按定稿修正**：① 顶栏去掉 logo 与 "Daily AI" 字样（仅异常/流式状态 + 用量 chip，正常时空行）；② 中央 logo 改用 **E1 生成图**（`drawable-nodpi/icon_e1_logo.png`，圆形裁剪）。真机确认：左上角无图标文字 ✅、中央 = 生成图质感光球 ✅。
+- **卡顿根治（WebView + detail 双复用）**：桌面 WebView 实例与 AppDetail 均提升到 `DailyApp` 宿主级（跨 Pager 页面切换保持）——页面重建不再重拉详情（消除"加载中"闪烁）+ 不再重建 WebView（消除重载卡顿）。真机：快速来回滑 5 次 + 停顿后再滑，日志 `desktop WebView reused（免重载）` ✅。
+- **验证方式**：对话页返回/中央 logo/顶栏去 logo 均真机截图确认；市场点击验证被 Operit 悬浮窗干扰（记入 16-playbook 新坑：悬浮窗反复弹出吃掉 tap），改用日志/代码同构逻辑确认。
 
 - **DailyApp 重写**：4 Tab + Scaffold → `HorizontalPager` 两页（page0=ChatScreen / page1=DesktopHostScreen），初始页=桌面；无底部 Tab 栏/无 Scaffold 顶栏；`openApp` 覆盖层保留（AppRunScreen 全屏沉浸）。
 - **新增 DesktopHostScreen**：沉浸 WebView 宿主固定加载 `system.desktop`（复用 AppRuntimeHost + `wv.post` 延迟加载，M0-4 白屏修复保留）；透传 apps.open/system.navigate；顶部低调"返回对话"按钮（M1-1 降级，M1-4 手势让渡后移除）。

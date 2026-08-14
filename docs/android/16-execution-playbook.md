@@ -119,6 +119,7 @@ screencap -p /data/local/tmp/shot.png
 - **操作完成后必须切回 Operit 宿主**（2026-08-16 用户要求，根 AGENT.md 导航纪律）：验证/采集结束后执行
   `CMD=$(cmd package resolve-activity --brief com.ai.assistance.operit | tail -1); am start -n $CMD`
   确认 `dumpsys window | grep mCurrentFocus` 回到 Operit 再结束——**禁止把手机留在被测应用界面**。
+- **Operit 悬浮窗会反复弹出并吃掉点击**（2026-08-16 新坑）：每次工具执行后 Operit 悬浮面板可能被顶到前台（16 §3.1 铁律根源），它会**拦截被其覆盖区域的 tap**（表现为：焦点确认是被测 App、但点击桌面图标无效果——point 落在悬浮窗上）。对策：① tap 后必须验证效果（logcat pageState / 截图），无效即重新导航再点；② 用户手动关闭悬浮窗后可短暂获得干净点击区，但下次工具执行可能再弹出；③ 无法绕过时改用"非坐标"验证路径（如状态/日志级验证），不要反复盲点。
 - `am start` 可能返回 "delivered to currently running top-most instance"——说明 App 已在前台，正常。
 
 ### 3.2 屏幕坐标

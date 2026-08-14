@@ -78,7 +78,7 @@
 | M0-4 App Runtime 验证 | ✅ 完成（2026-08-16 白屏修复） | AppRuntimeHost（WebView 沙箱 + base 注入 + Bootstrap JS）+ DailyJsBridge（storage 桥）+ AppsScreen/AppRunScreen 已实现；**桌面 WebView 白屏已修复**（三处根因：①启动即崩 = Koin `single<AgentChatSource?> { null }` 非法 null single → 改 getOrNull；②启动即请求 `apps.list` 等 postMessage 直连桌面方法未实现 → DailyJsBridge 补齐 apps.list/apps.open/system.navigate（镜像 PWA runtime.ts handleDesktopRequest）+ DailyApp 宿主联动；③视觉白屏 = AndroidView factory 时机 WebView 未布局 viewport vh=0 → 显式 MATCH_PARENT layoutParams + `wv.post {}` 延迟加载）。真机验证：桌面完整渲染（时钟/图标网格/指示器/Dock）+ 顶栏 insets + apps 列表按 id 去重（dataLen 510→345）；bootstrap apps.list 双份 builtin+user 是服务端结构，客户端去重即可 |
 | M0-5 悬浮窗验证 | ⏸ 暂缓（2026-08-15 用户拍板） | 悬浮窗桌宠（B 形态）在用户明确要做之前**不动**；桌宠只做应用内（M1-4） |
 | M0-6 设计走查 | 🔶 并入 M1-1 | 10-ui-design §0 用户方向 v1 已立（D18 方案 A）；骨架成型后双主题截图评审（用户主导） |
-| **M1-1 四大页面完整实现** | ✅ 完成（2026-08-16，沉浸式骨架 + UI 基础） | 骨架：HorizontalPager 两页（对话⇄桌面，初始=桌面）、无 Tab 栏/顶栏、edge-to-edge、AppRunScreen 沉浸化、桌面 WebView 宿主；UI 基础：E1 Adaptive Icon + design tokens 契约 + Compose 双主题。**遗留**：① system.files 无 HTML 版本（服务端缺默认模板，点开报错，待补——M1-3 或服务端补模板）；② 桌面→对话手势让渡降级为顶部按钮（M1-4 做）；③ M0-6 双主题截图评审待用户主导 |
+| **M1-1 四大页面完整实现** | ✅ 完成（2026-08-16，沉浸骨架 + 收尾） | 骨架：HorizontalPager 两页（对话⇄桌面，初始=桌面）、无 Tab/顶栏、edge-to-edge、AppRunScreen 沉浸化、桌面 WebView 宿主（实例+detail 宿主级复用防卡顿）、返回机制（App/对话页 BackHandler）、右滑让渡（替代旧箭头）、对话页按定稿 UI 重做、图标=E1 生成图原图。**遗留**：① system.files 无 HTML 版本（服务端缺默认模板，待补）；② HTML App 模板内顶栏（市场页‹返回）沉浸化——拟 Android 注入 immersive 标志 + 模板适配；③ M0-6 双主题截图评审待用户主导；④ 对话页建议卡文案待用户定 |
 
 **当前构建方式**：`bash deploy/android-build.sh --install`（手机打包 → 香港服务器 x86_64 构建 2m58s → APK 拉回安装）。
 
