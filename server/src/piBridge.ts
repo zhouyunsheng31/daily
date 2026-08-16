@@ -1701,7 +1701,31 @@ async function createSession(panelId: string, apiConfig?: ApiConfigPayload): Pro
   // - modelEnv 含 / → 直接 split
   // - modelEnv 不含 / → 根据 endpoint 域名推断 provider（stepfun/deepseek/openai/anthropic）
   // - endpoint 也为空 → 默认 stepfun
+  // 【安全修复 2026-08-16（H8）】：客户端 apiConfig.endpoint 此前可指向任意地址
+  // （SSRF），且会改写全局 process.env.PI_API_ENDPOINT 污染其他会话。现在：
+  // - endpoint 只允许 https + 白名单域名（stepfun/deepseek/openai/anthropic）
+  // - 不再改写全局 env（改为仅本次会话局部使用）
   const endpoint = apiConfig?.endpoint || aiSettings.endpoint || process.env.PI_API_ENDPOINT
+  const ALLOWED_ENDPOINT_HOSTS = new Set([
+    'api.stepfun.com', 'api.deepseek.com', 'api.openai.com', 'api.anthropic.com',
+  ])
+  const sanitizeEndpoint = (raw: string | undefined): string | undefined => {
+    if (!raw || typeof raw !== 'string') return undefined
+    const trimmed = raw.trim()
+    if (!/^https:\/\//.test(trimmed)) return undefined // 只允许 https
+    try {
+      const u = new URL(trimmed)
+      const host = u.hostname.toLowerCase()
+      // 拒绝 IP 字面量 / localhost / 内网
+      if (host === 'localhost' || /^[\d.]+$/.test(host) || host.includes(':')) return undefined
+      // 【回归审查修正】：精确域名或 .域名 后缀（防 evilstepfun.com 绕过）
+      if (![...ALLOWED_ENDPOINT_HOSTS].some((allowed) => host === allowed || host.endsWith('.' + allowed))) return undefined
+      return trimmed
+    } catch {
+      return undefined
+    }
+  }
+  const effectiveEndpoint = sanitizeEndpoint(endpoint)
   let providerName: string
   let modelName: string
   if (modelEnv.includes('/')) {
@@ -1710,8 +1734,8 @@ async function createSession(panelId: string, apiConfig?: ApiConfigPayload): Pro
     modelName = parts.slice(1).join('/')
   } else {
     modelName = modelEnv
-    if (endpoint) {
-      const lower = endpoint.toLowerCase()
+    if (effectiveEndpoint) {
+      const lower = effectiveEndpoint.toLowerCase()
       if (lower.includes('stepfun.com')) providerName = 'stepfun'
       else if (lower.includes('deepseek.com')) providerName = 'deepseek'
       else if (lower.includes('openai.com')) providerName = 'openai'
@@ -1731,9 +1755,12 @@ async function createSession(panelId: string, apiConfig?: ApiConfigPayload): Pro
     authStorage.setRuntimeApiKey('stepfun', process.env.VITE_STEPFUN_API_KEY)
   }
 
-  // 自定义 endpoint 优先级：apiConfig.endpoint > aiSettings.endpoint > env
-  if (endpoint) {
-    process.env.PI_API_ENDPOINT = endpoint
+  // 自定义 endpoint：仅本次会话临时生效（H8 修复——不再永久改写全局 process.env，
+  // 会话结束/异常后恢复原值，杜绝 apiConfig.endpoint 污染其他会话）
+  const sessionEndpoint = effectiveEndpoint
+  const prevEndpointEnv = process.env.PI_API_ENDPOINT
+  if (sessionEndpoint) {
+    process.env.PI_API_ENDPOINT = sessionEndpoint
   }
 
   const modelRegistry = ModelRegistry.create(authStorage)
@@ -1780,17 +1807,27 @@ async function createSession(panelId: string, apiConfig?: ApiConfigPayload): Pro
 
   console.log(`[PiBridge] Panel ${panelId}: using model ${providerName}/${modelName}`)
 
-  const { session: s } = await createAgentSession({
-    cwd,
-    agentDir,
-    resourceLoader,
-    sessionManager: sharedSessionManager,  // 共享单例
-    authStorage,
-    modelRegistry,
-    model,
-    noTools: 'builtin',
-    customTools: effectiveTools,
-  })
+  let sessionInstance: AgentSession
+  try {
+    const { session: s } = await createAgentSession({
+      cwd,
+      agentDir,
+      resourceLoader,
+      sessionManager: sharedSessionManager,  // 共享单例
+      authStorage,
+      modelRegistry,
+      model,
+      noTools: 'builtin',
+      customTools: effectiveTools,
+    })
+    sessionInstance = s
+  } finally {
+    // H8 修复：恢复被临时改写的全局 endpoint（防止污染后续会话）
+    if (sessionEndpoint) {
+      if (prevEndpointEnv === undefined) delete process.env.PI_API_ENDPOINT
+      else process.env.PI_API_ENDPOINT = prevEndpointEnv
+    }
+  }
 
   // 订阅 pi 事件，广播到该面板的所有在线设备（携带 panelId）
   // v3 修复 B4：保存 handler 引用，disposePanelSession 时 unsubscribe
@@ -1807,10 +1844,10 @@ async function createSession(panelId: string, apiConfig?: ApiConfigPayload): Pro
       console.warn(`[PiBridge] persistPiEvent failed for panel ${panelId}:`, err)
     })
   }
-  s.subscribe(subscribeHandler)
+  sessionInstance.subscribe(subscribeHandler)
   panelSessionSubscribeHandlers.set(panelId, subscribeHandler)
 
-  return s
+  return sessionInstance
 }
 
 export async function initPiBridge(): Promise<void> {

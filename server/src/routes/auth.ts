@@ -122,18 +122,11 @@ authLoginRouter.post('/register', async (req, res, next) => {
 
     // 角色判定（优先级）：
     // 1. Phase 4.2：用户名在 ADMIN_USERNAMES 名单中 → admin
-    // 2. 第一个注册的用户 → admin（首个注册用户自动 admin）
-    // 3. 其他 → member
-    const countResult = await pool.query('SELECT COUNT(*)::int as cnt FROM users')
-    const userCount = countResult.rows[0]?.cnt ?? 0
-    let role: UserRole
-    if (isAdminUsername(normalizedUsername)) {
-      role = 'admin'
-    } else if (userCount === 0) {
-      role = 'admin'
-    } else {
-      role = 'member'
-    }
+    // 2. 其他 → member
+    // 【安全修复 2026-08-16：删除"首个注册用户自动 admin"——新部署/清空用户表后
+    // 攻击者抢先注册即可获得管理员权限。管理员必须通过 ADMIN_USERNAMES 名单
+    // 或初始化脚本精确创建。】
+    let role: UserRole = isAdminUsername(normalizedUsername) ? 'admin' : 'member'
 
     const userId = uuidv4()
     const passwordHash = hashPassword(password)

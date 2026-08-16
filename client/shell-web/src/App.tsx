@@ -417,6 +417,79 @@ function thumbUrl(url: string, width: number): string {
   return url
 }
 
+// ---------------------------------------------------------------------------
+// 粘贴/拖拽图片 → 压缩 data URI（2026-08-16 识图链路前端入口）
+// ---------------------------------------------------------------------------
+const MAX_PASTED_IMAGES = 8
+const MAX_PASTED_IMAGE_EDGE = 2048
+
+interface PendingImage {
+  id: string
+  name: string
+  dataUrl: string
+}
+
+function isSupportedImageFile(file: File): boolean {
+  return /^image\/(png|jpe?g|webp|gif|bmp)$/i.test(file.type)
+    || /\.(png|jpe?g|webp|gif|bmp)$/i.test(file.name)
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '')
+    reader.onerror = () => reject(reader.error ?? new Error('图片读取失败'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function loadImageElement(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('图片解码失败'))
+    image.src = src
+  })
+}
+
+async function compressPastedImage(file: File): Promise<string> {
+  const dataUrl = await readFileAsDataUrl(file)
+  const image = await loadImageElement(dataUrl)
+  const maxEdge = MAX_PASTED_IMAGE_EDGE
+  let width = image.naturalWidth || image.width
+  let height = image.naturalHeight || image.height
+  if (width <= 0 || height <= 0) return dataUrl
+  if (width > maxEdge || height > maxEdge) {
+    const scale = Math.min(maxEdge / width, maxEdge / height)
+    width = Math.max(1, Math.round(width * scale))
+    height = Math.max(1, Math.round(height * scale))
+  }
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return dataUrl
+  ctx.drawImage(image, 0, 0, width, height)
+  const keepAlpha = /^image\/(png|webp)$/i.test(file.type) || /\.(png|webp)$/i.test(file.name)
+  return canvas.toDataURL(keepAlpha ? 'image/png' : 'image/jpeg', 0.82)
+}
+
+/** 用户消息里的 data URI 图片 Markdown 渲染为缩略图，避免把 base64 明文展示在气泡里 */
+function UserMessageContent({ text }: { text: string }) {
+  const parts: ReactNode[] = []
+  const imageRe = /!\[([^\]]*)\]\((data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+)\)/gi
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+  let key = 0
+  while ((match = imageRe.exec(text)) !== null) {
+    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index))
+    parts.push(<img key={key++} className="chat-user-image" src={match[2]} alt={match[1] || '图片'} />)
+    lastIndex = match.index + match[0].length
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex))
+  return <>{parts}</>
+}
+
 function Button({ children, onClick, variant = 'primary', disabled = false, type = 'button', className = '' }: {
   children: ReactNode
   onClick?: () => void
@@ -636,7 +709,10 @@ function renderMarkdown(source: string): string {
     }
     // 表格：当前行为表格行且下一行为分隔行（|---|）
     if (i + 1 < lines.length && trimmed.includes('|') && isTableSeparator(splitTableRow(lines[i + 1].trim())[0] ?? '')) {
-      const rows: string[] = [trimmed]
+      // 【bug 修复 2026-08-16】rows 必须包含分隔行：renderTable 用 rows.slice(2)
+      // 取数据行（假设 [表头, 分隔行, 数据1, ...]），此前漏放分隔行导致第一条
+      // 数据被吞掉（表格只有一行数据时 tbody 为空）。
+      const rows: string[] = [trimmed, lines[i + 1].trim()]
       let j = i + 2
       while (j < lines.length && lines[j].trim().includes('|') && lines[j].trim() !== '') {
         rows.push(lines[j].trim())
@@ -1157,7 +1233,18 @@ function LoginPanel({ onClose }: { onClose: () => void }) {
 /** 横向滑动切换助手（assistant ↔ desktop；忽略纵向滚动，避免与对话列表滚动冲突） */
 function useSwipeNavigation(onSwipeLeft: () => void, onSwipeRight: () => void) {
   const startRef = useRef<{ x: number; y: number } | null>(null)
+  // 【bug 修复 2026-08-16】代码区/表格/LaTeX 等可横向滚动容器内的滑动是内容
+  // 滚动意图，不能触发页面级切页手势（用户反馈：黑色代码区右滑直接切到第二桌面）。
+  // 触摸起点落在这些容器内 → 忽略本次手势。
+  const isHorizScrollContainer = (target: EventTarget | null): boolean => {
+    if (!(target instanceof Element)) return false
+    return Boolean(target.closest?.('.md-content pre, .md-table-wrap, .md-latex-block'))
+  }
   const onTouchStart = (event: React.TouchEvent): void => {
+    if (isHorizScrollContainer(event.target)) {
+      startRef.current = null
+      return
+    }
     startRef.current = { x: event.touches[0].clientX, y: event.touches[0].clientY }
   }
   const onTouchEnd = (event: React.TouchEvent): void => {
@@ -1304,7 +1391,7 @@ const MessageBubble = memo(function MessageBubble({ message, messageIndex, isLas
   if (message.role === 'user') {
     return <div className="chat-row user-row"><div className="chat-body user-body"><div className="chat-name">{userLabel}</div>{editing
       ? <div className="chat-edit"><textarea autoFocus value={editValue} onChange={(event) => setEditValue(event.target.value)} rows={3} aria-label="编辑消息内容" /><div className="chat-edit-actions"><button type="button" className="chat-edit-cancel" onClick={cancelEdit}>取消</button><button type="button" className="chat-edit-save" onClick={saveEdit} disabled={!editValue.trim()}>发送修改</button></div></div>
-      : <div className="chat-text">{message.content}</div>}{actions}</div><button type="button" className="chat-avatar user-avatar user-avatar-btn" onClick={onAvatarClick} aria-label="更换头像">{avatar ? <img src={`data:${avatar.mime};base64,${avatar.base64}`} alt="头像" /> : <span>{userLabel.slice(0, 1).toUpperCase()}</span>}</button></div>
+      : <div className="chat-text"><UserMessageContent text={message.content} /></div>}{actions}</div><button type="button" className="chat-avatar user-avatar user-avatar-btn" onClick={onAvatarClick} aria-label="更换头像">{avatar ? <img src={`data:${avatar.mime};base64,${avatar.base64}`} alt="头像" /> : <span>{userLabel.slice(0, 1).toUpperCase()}</span>}</button></div>
   }
   // AI 消息：一个回合 = 一条消息，内部按时间顺序分段（文字/工具调用连贯展示，不另起头像）
   const segments = 'segments' in message
@@ -1598,6 +1685,9 @@ function AssistantHome({ onOpenLogin }: { onOpenLogin: () => void }) {
   const setDraft = useShellStore((state) => state.setDraft)
   const sendMessage = useShellStore((state) => state.sendMessage)
   const stopStreaming = useShellStore((state) => state.stopStreaming)
+  // 【bug 修复 2026-08-16】新建对话入口太深（齿轮→会话列表→新建）；把
+  // createConversation 提到 AssistantHome，供 composer 加号旁的新建按钮直接调用。
+  const createConversation = useShellStore((state) => state.createConversation)
 
   // 2026-08-06 互动 HTML 提问回传：AI 通过 show_interactive_html 展示的提问框内
   // 点击答案 → iframe postMessage({channel:'daily-webos-sdk',kind:'event',
@@ -1644,17 +1734,28 @@ function AssistantHome({ onOpenLogin }: { onOpenLogin: () => void }) {
   const setError = useShellStore((state) => state.setError)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const nearBottomRef = useRef(true)
-  // 输入框自适应高度（2026-08-03）：输入多行时自动长高，最多 160px，再高内部滚动
+  // 输入框自适应高度（2026-08-03）：输入多行时自动长高；【bug 修复 2026-08-16】
+  // 上限从 160px 放宽到 min(45vh, 320px)——用户反馈输入大量文字时看不到已输入
+  // 内容、难以操作（160px 硬上限 + WebView 滚动条不明显）。
+  const COMPOSER_MAX_HEIGHT = 320
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
   const resizeComposer = (): void => {
     const el = composerRef.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = `${Math.min(Math.max(el.scrollHeight, 44), 160)}px`
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, 44), Math.min(window.innerHeight * 0.45, COMPOSER_MAX_HEIGHT))}px`
   }
+  // 【bug 修复 2026-08-16】draft 变化（切换会话/恢复草稿/点击建议词等程序化设置）
+  // 时重新计算输入框高度——此前只在 onChange 调用 resizeComposer，程序化设置
+  // draft 后输入框保持旧高度。
+  useEffect(() => {
+    resizeComposer()
+  }, [draft])
   const [showHtmlImport, setShowHtmlImport] = useState(false)
   // 发送框 ➕ 弹出面板（上传文件 / 粘贴 HTML / 思考档 / 分享整套系统）
   const [composerMenu, setComposerMenu] = useState(false)
+  // 2026-08-16 识图链路：粘贴/拖拽图片的待发送附件（发送时转成 Markdown data URI）
+  const [pastedImages, setPastedImages] = useState<PendingImage[]>([])
   // 2026-08-07 整套系统分享：打包 加载页+桌面+全部 App 生成链接（与发布到商店不同）
   const [shareBusy, setShareBusy] = useState(false)
   const [shareDone, setShareDone] = useState(false)
@@ -1732,6 +1833,50 @@ function AssistantHome({ onOpenLogin }: { onOpenLogin: () => void }) {
       if (uploadInputRef.current) uploadInputRef.current.value = ''
     }
   }
+
+  // 2026-08-16 识图链路：粘贴/拖拽图片 → 压缩 data URI 附件
+  const addImageFiles = async (files: Iterable<File>): Promise<void> => {
+    const candidates = Array.from(files).filter(isSupportedImageFile)
+    if (candidates.length === 0) return
+    const room = MAX_PASTED_IMAGES - pastedImages.length
+    if (room <= 0) {
+      setNotice(`最多同时发送 ${MAX_PASTED_IMAGES} 张图片`)
+      return
+    }
+    const items: PendingImage[] = []
+    for (const file of candidates.slice(0, room)) {
+      try {
+        const dataUrl = await compressPastedImage(file)
+        items.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, name: file.name, dataUrl })
+      } catch {
+        // 单张图片解码/压缩失败时跳过，不阻断其他图片
+      }
+    }
+    if (items.length > 0) setPastedImages((prev) => [...prev, ...items].slice(0, MAX_PASTED_IMAGES))
+  }
+  const removePastedImage = (id: string): void => {
+    setPastedImages((prev) => prev.filter((image) => image.id !== id))
+  }
+  const handleComposerPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
+    const files = Array.from(event.clipboardData?.files ?? [])
+    if (files.some(isSupportedImageFile)) {
+      event.preventDefault()
+      void addImageFiles(files)
+    }
+  }
+  const handleComposerDrop = (event: React.DragEvent<HTMLFormElement>): void => {
+    const files = Array.from(event.dataTransfer?.files ?? [])
+    if (files.some(isSupportedImageFile)) {
+      event.preventDefault()
+      void addImageFiles(files)
+    }
+  }
+  const handleComposerDragOver = (event: React.DragEvent<HTMLFormElement>): void => {
+    if (Array.from(event.dataTransfer?.types ?? []).includes('Files')) {
+      event.preventDefault()
+    }
+  }
+
   // AI 对话页左滑 → 桌面（右侧边缘右滑回 AI 由 DesktopView 的边缘热区处理）
   const swipe = useSwipeNavigation(
     () => setView('desktop'),
@@ -1742,6 +1887,19 @@ function AssistantHome({ onOpenLogin }: { onOpenLogin: () => void }) {
     const el = scrollRef.current
     if (el && nearBottomRef.current) el.scrollTop = el.scrollHeight
   }, [messages, streaming])
+  // 【bug 修复 2026-08-16】从桌面切回对话页时强制滚到最新消息（用户反馈：
+  // 每次切回来都要手动下滑）。messages 未变化时上面的 effect 不触发，所以
+  // 监听 activeView；仍尊重 nearBottomRef（用户上滑阅读历史时切走再切回不抢滚）。
+  const activeView = useShellStore((state) => state.activeView)
+  useEffect(() => {
+    if (activeView !== 'assistant') return
+    const el = scrollRef.current
+    if (!el || !nearBottomRef.current) return
+    const frame = requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [activeView])
   const onScroll = (): void => {
     const el = scrollRef.current
     if (!el) return
@@ -1756,7 +1914,17 @@ function AssistantHome({ onOpenLogin }: { onOpenLogin: () => void }) {
   // 单一 AI 对话入口：所有能力（包括创建 App）都在对话中完成，
   // 不再提供独立的“做成 App”入口。建议词直接作为对话消息发送。
   const suggestions = ['做一个旅行清单 App', '帮我整理今天的重点', '把一个想法变成小工具']
-  const submit = (event: FormEvent<HTMLFormElement>): void => { event.preventDefault(); void sendMessage(); window.setTimeout(resizeComposer, 0) }
+  const submit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault()
+    const text = draft.trim()
+    if (!text && pastedImages.length === 0) return
+    const content = pastedImages.length > 0
+      ? `${text}${text ? '\n' : ''}${pastedImages.map((image, index) => `\n![图片${index + 1}](${image.dataUrl})`).join('')}`
+      : text
+    void sendMessage(content)
+    setPastedImages([])
+    window.setTimeout(resizeComposer, 0)
+  }
   const loggedIn = session && !session.guest
   const accountLabel = loggedIn
     ? (session.user.email?.split('@')[0] ?? session.user.username)
@@ -1795,9 +1963,22 @@ function AssistantHome({ onOpenLogin }: { onOpenLogin: () => void }) {
         <div className="composer-menu-chips"><ModelThinkingCard compact /></div>
       </div>
     </> : null}
-      <form className="assistant-composer" onSubmit={submit}>
+      {pastedImages.length > 0 ? (
+        <div className="composer-attachments">
+          {pastedImages.map((image) => (
+            <div className="composer-attachment" key={image.id}>
+              <img src={image.dataUrl} alt={image.name} />
+              <button type="button" className="composer-attachment-remove" aria-label={`移除图片 ${image.name}`} onClick={() => removePastedImage(image.id)}><X size={11} /></button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <form className="assistant-composer" onSubmit={submit} onDrop={handleComposerDrop} onDragOver={handleComposerDragOver}>
         <button type="button" className={`composer-plus ${composerMenu ? 'composer-plus-active' : ''}`} aria-label="更多功能" onClick={() => setComposerMenu((value) => !value)}><Settings size={17} /></button>
-        <textarea ref={composerRef} aria-label="输入消息" value={draft} onChange={(event) => { setDraft(event.target.value); resizeComposer() }} placeholder="告诉 Daily 你想做什么…" rows={1} />{streaming ? <Button variant="danger" onClick={stopStreaming}><Square size={13} fill="currentColor" /> 停止</Button> : <button className="send-button" aria-label="发送消息" disabled={!draft.trim()} type="submit"><ArrowRight size={18} /></button>}
+        {/* 【bug 修复 2026-08-16】新建对话按钮直接放在输入框左侧（用户建议：
+           齿轮→会话列表→新建 太深）。复用 createConversation；与 ➕ 相邻，视觉一致。 */}
+        <button type="button" className="composer-new" aria-label="新建对话" title="新建对话" onClick={() => { setComposerMenu(false); createConversation() }}><Plus size={17} /></button>
+        <textarea ref={composerRef} aria-label="输入消息" value={draft} onChange={(event) => { setDraft(event.target.value); resizeComposer() }} onPaste={handleComposerPaste} placeholder="告诉 Daily 你想做什么…（支持粘贴/拖拽图片）" rows={1} />{streaming ? <Button variant="danger" onClick={stopStreaming}><Square size={13} fill="currentColor" /> 停止</Button> : <button className="send-button" aria-label="发送消息" disabled={!draft.trim() && pastedImages.length === 0} type="submit"><ArrowRight size={17} /></button>}
       </form>
     </div>
       {showHtmlImport ? <HtmlImportPanel onClose={() => setShowHtmlImport(false)} onCreated={onCreateAppFromHtml} /> : null}
@@ -2921,72 +3102,6 @@ function CurrentView({ onOpenLogin }: { onOpenLogin: () => void }) {
   return app ? <AppRuntime app={app} /> : <DesktopView onOpenLogin={onOpenLogin} />
 }
 
-/**
- * 公告弹窗（2026-08-05）：首次进入自动展示（当前用于爱发电宣传）；
- * 「不再显示」后本公告不再出现；发布新公告只需改 CURRENT_ANNOUNCEMENT.id +
- * 内容，老用户也会重新看到。按身份（游客/用户）记忆在 localStorage。
- */
-const ANNOUNCEMENT_CACHE_KEY = 'daily-webos-announcement-dismissed'
-
-const CURRENT_ANNOUNCEMENT: {
-  id: string
-  title: string
-  body: Array<{ head: string; text: string }>
-  actionLabel: string
-  actionUrl: string
-} = {
-  id: 'afdian-v2',
-  title: '我们入驻了爱发电',
-  body: [
-    { head: '为什么要支持', text: 'Daily 的 AI 能力（对话 · 生图 · 视频）都由积分驱动。订阅月卡每月自动发放积分额度，付款后留言填注册邮箱即可自动到账。' },
-    { head: '轻量月卡 ¥9.9', text: '每月 1000 积分，当月用不完自动作废，续费重新给满。' },
-    { head: '中量月卡 ¥29', text: '每月 3200 积分，高频使用更划算。' },
-    { head: '重量月卡 ¥99 / 尝鲜包 ¥5', text: '重量月卡每月 10800 积分；尝鲜包 500 积分永久有效（每人限购一次）。所有档位都可用生图、生视频。' },
-  ],
-  actionLabel: '前往爱发电主页',
-  actionUrl: 'https://ifdian.net/a/jiujueyusheng',
-}
-
-function AnnouncementModal() {
-  const session = useShellStore((state) => state.session)
-  const [open, setOpen] = useState(false)
-  useEffect(() => {
-    if (!session) return
-    const scopeKey = session.guest ? `guest:${session.guestState.id}` : `user:${session.user.id}`
-    try {
-      const dismissed = localStorage.getItem(`${ANNOUNCEMENT_CACHE_KEY}:${scopeKey}`)
-      if (dismissed === CURRENT_ANNOUNCEMENT.id) return
-    } catch { /* 忽略 */ }
-    // 首屏渲染完成后再弹出（避免打断加载动画）
-    const timer = window.setTimeout(() => setOpen(true), 800)
-    return () => window.clearTimeout(timer)
-  }, [session])
-
-  const dismiss = (forever: boolean): void => {
-    if (forever && session) {
-      const scopeKey = session.guest ? `guest:${session.guestState.id}` : `user:${session.user.id}`
-      try { localStorage.setItem(`${ANNOUNCEMENT_CACHE_KEY}:${scopeKey}`, CURRENT_ANNOUNCEMENT.id) } catch { /* 忽略 */ }
-    }
-    setOpen(false)
-  }
-
-  if (!open) return null
-  return <div className="login-overlay announcement-overlay" onClick={() => dismiss(false)}>
-    <div className="login-panel announcement-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={CURRENT_ANNOUNCEMENT.title}>
-      <div className="announcement-head">
-        <span className="announcement-icon"><Heart size={17} /></span>
-        <div><strong>{CURRENT_ANNOUNCEMENT.title}</strong><small>Daily · 公告</small></div>
-        <button className="login-close" onClick={() => dismiss(false)} aria-label="关闭"><X size={16} /></button>
-      </div>
-      <div className="announcement-body">
-        {CURRENT_ANNOUNCEMENT.body.map((item) => <div className="announcement-row" key={item.head}><span className="announcement-dot" /><p><strong>{item.head}</strong>{item.text}</p></div>)}
-      </div>
-      <a className="os-button os-button-primary announcement-action" href={CURRENT_ANNOUNCEMENT.actionUrl} target="_blank" rel="noreferrer"><Heart size={15} /> {CURRENT_ANNOUNCEMENT.actionLabel} <ExternalLink size={13} /></a>
-      <button type="button" className="login-link announcement-dismiss" onClick={() => dismiss(true)}>不再显示，以后有新公告再提醒我</button>
-    </div>
-  </div>
-}
-
 export default function App() {
   const boot = useShellStore((state) => state.boot)
   const booting = useShellStore((state) => state.booting)
@@ -3128,5 +3243,5 @@ export default function App() {
 
   if (showBootScreen) return <BootScreen />
   if (error && !ready) return <ErrorScreen message={error} />
-  return <div className="shell-root"><div className="shell-stage"><CurrentView onOpenLogin={() => setShowLogin(true)} /></div><Toasts />{showLogin ? <LoginPanel onClose={() => setShowLogin(false)} /> : null}<AnnouncementModal /></div>
+  return <div className="shell-root"><div className="shell-stage"><CurrentView onOpenLogin={() => setShowLogin(true)} /></div><Toasts />{showLogin ? <LoginPanel onClose={() => setShowLogin(false)} /> : null}</div>
 }

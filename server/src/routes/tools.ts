@@ -181,10 +181,12 @@ toolsRouter.get('/enabled', async (_req, res, next) => {
  * PUT /api/tools/:name
  * 更新单个工具启用状态（spec 9.3.4 节）
  * body: { enabled: boolean }
+ * 【安全修复 2026-08-16（H6）】：加 requireAdmin——任意用户此前可自助启用
+ * bash 等文件系统工具，叠加 H8 可形成 RCE 链。
  */
-toolsRouter.put('/:name', async (req, res, next) => {
+toolsRouter.put('/:name', requireAdmin, async (req, res, next) => {
   try {
-    const toolName = req.params.name
+    const toolName = String(req.params.name)
     const { enabled } = req.body as { enabled: boolean }
 
     // 校验工具名
@@ -223,7 +225,7 @@ toolsRouter.put('/:name', async (req, res, next) => {
  * POST /api/tools/reset
  * 重置所有工具为默认启用（删除 tool_settings 表中所有 AI 工具记录）
  */
-toolsRouter.post('/reset', async (_req, res, next) => {
+toolsRouter.post('/reset', requireAdmin, async (_req, res, next) => {
   try {
     const pool = getPool()
     const toolNames = Array.from(DISABLEABLE_TOOL_NAMES)

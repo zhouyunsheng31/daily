@@ -8,17 +8,85 @@ import type { CreateEntityRequest, UpdateEntityRequest, EntityQueryParams } from
 
 export const entitiesRouter = Router()
 
+// ============================================================================
+// 【安全修复 2026-08-16（C1）】entities 通用 API 越权封堵
+// - webos_state 是 webOS 用户私有状态（App/积分/存储），只允许 webOS 专用
+//   路由（webos.ts loadState/saveState）访问，通用 entities API 一律 403。
+// - 列表查询强制要求 scope（禁止不带条件全库枚举）；scope 只能是 'default'
+//   （旧桌面端兼容）或当前用户的 user:/guest: scope。
+// - 单条读写/删除：webos_state → 403；user:/guest: scope 非本人 → 403。
+// ============================================================================
+const WEBOS_STATE_TYPE = 'webos_state'
+
+/** 当前请求主键：登录用户 → user:<id>；游客 → guest:<deviceId>；单密码/无身份 → null */
+function principalKeyOf(req: { user?: { userId?: string; guest?: boolean; guestDeviceId?: string } }): string | null {
+  if (req.user?.guest) return req.user.guestDeviceId ? `guest:${req.user.guestDeviceId}` : null
+  if (req.user?.userId) return `user:${req.user.userId}`
+  return null
+}
+
+/** scope 是否允许当前用户访问：'default'（旧兼容）或等于自己的 principal key */
+function scopeAllowed(req: { user?: { userId?: string; guest?: boolean; guestDeviceId?: string } }, scope: string | null | undefined): boolean {
+  if (!scope) return false
+  if (scope === 'default') return true
+  const mine = principalKeyOf(req)
+  return mine !== null && scope === mine
+}
+
+/** 校验实体行是否可被当前用户访问；返回错误则抛 403 */
+function assertEntityAccessible(req: { user?: { userId?: string; guest?: boolean; guestDeviceId?: string } }, row: { type?: string | null; scope?: string | null }): void {
+  if (row.type === WEBOS_STATE_TYPE) {
+    throw createError(403, 'WEBOS_STATE_PROTECTED', 'webos_state 只能经 webOS 专用接口访问')
+  }
+  if (!scopeAllowed(req, row.scope)) {
+    throw createError(403, 'ENTITY_SCOPE_FORBIDDEN', '无权访问该 scope 的实体')
+  }
+}
+
+/** 校验请求体 scope（写操作）：webos_state 禁止；scope 必须是 default 或本人 */
+function assertScopeWritable(req: { user?: { userId?: string; guest?: boolean; guestDeviceId?: string } }, type: string | undefined, scope: string | null | undefined): void {
+  if (type === WEBOS_STATE_TYPE) {
+    throw createError(403, 'WEBOS_STATE_PROTECTED', 'webos_state 只能经 webOS 专用接口访问')
+  }
+  if (scope !== undefined && !scopeAllowed(req, scope)) {
+    throw createError(403, 'ENTITY_SCOPE_FORBIDDEN', '无权写入该 scope 的实体')
+  }
+}
+
 // GET /api/entities — 灵活查询
 entitiesRouter.get('/', async (req, res, next) => {
   try {
     const pool = getPool()
     const params = req.query as unknown as EntityQueryParams
+    // 【安全修复 C1】列表查询：旧客户端不传 scope（'default' 兼容）→ 自动按当前
+    // principal 推导；显式传 scope 时校验合法性；webos_state 一律禁止通用 API。
+    // 推导规则：default（旧数据）∪ 自己的 scope（user:<id> / guest:<deviceId>），
+    // 保证不泄露他人 user:/guest: 数据，同时旧客户端（scope 缺省）不降级。
+    if (params.type === WEBOS_STATE_TYPE) {
+      throw createError(403, 'WEBOS_STATE_PROTECTED', 'webos_state 只能经 webOS 专用接口访问')
+    }
+    let effectiveScope: string | null = params.scope ?? null
+    if (effectiveScope !== null && !scopeAllowed(req, effectiveScope)) {
+      throw createError(403, 'ENTITY_SCOPE_FORBIDDEN', '无权访问该 scope 的实体')
+    }
     const conditions: string[] = []
     const values: unknown[] = []
     let paramIdx = 1
 
     if (params.type) { conditions.push(`type = $${paramIdx++}`); values.push(params.type) }
-    if (params.scope) { conditions.push(`scope = $${paramIdx++}`); values.push(params.scope) }
+    // scope 过滤：显式 scope → 精确匹配；缺省 → default ∪ 自己（旧客户端兼容）
+    if (effectiveScope !== null) {
+      conditions.push(`scope = $${paramIdx++}`)
+      values.push(effectiveScope)
+    } else {
+      const mine = principalKeyOf(req)
+      if (mine) {
+        conditions.push(`(scope = 'default' OR scope = $${paramIdx++})`)
+        values.push(mine)
+      } else {
+        conditions.push(`scope = 'default'`)
+      }
+    }
     if (params.panelId) { conditions.push(`panel_id = $${paramIdx++}`); values.push(params.panelId) }
     if (params.widgetId) { conditions.push(`widget_id = $${paramIdx++}`); values.push(params.widgetId) }
     if (params.recordStatus) { conditions.push(`record_status = $${paramIdx++}`); values.push(params.recordStatus) }
@@ -49,6 +117,10 @@ entitiesRouter.post('/batch', async (req, res, next) => {
   try {
     const pool = getPool()
     const { entities } = req.body as { entities: CreateEntityRequest[] }
+    // 【安全修复 C1】批量写入同样校验 scope 与 webos_state
+    for (const e of entities) {
+      assertScopeWritable(req, e.type, e.scope)
+    }
     const now = Date.now()
 
     const results = await withTransaction(async (client) => {
@@ -80,6 +152,12 @@ entitiesRouter.put('/batch', async (req, res, next) => {
 
     await withTransaction(async (client) => {
       for (const e of entities) {
+        // 【安全修复 C1】批量更新：先校验目标实体可访问，再校验写入字段 scope
+        const existingRow = await client.query('SELECT * FROM entities WHERE id = $1', [e.id])
+        if (existingRow.rows.length > 0) {
+          assertEntityAccessible(req, existingRow.rows[0])
+        }
+        assertScopeWritable(req, e.type, e.scope)
         const updates: string[] = []
         const values: unknown[] = []
         let paramIdx = 1
@@ -112,6 +190,11 @@ entitiesRouter.delete('/batch', async (req, res, next) => {
     const { ids } = req.body as { ids: string[] }
     await withTransaction(async (client) => {
       for (const id of ids) {
+        // 【安全修复 C1】批量删除：校验目标实体可访问
+        const existingRow = await client.query('SELECT * FROM entities WHERE id = $1', [id])
+        if (existingRow.rows.length > 0) {
+          assertEntityAccessible(req, existingRow.rows[0])
+        }
         await client.query('DELETE FROM entities WHERE id = $1', [id])
       }
     })
@@ -126,6 +209,8 @@ entitiesRouter.get('/:id', async (req, res, next) => {
     const pool = getPool()
     const result = await pool.query('SELECT * FROM entities WHERE id = $1', [req.params.id])
     if (result.rows.length === 0) throw createError(404, 'NOT_FOUND', `Entity ${req.params.id} not found`)
+    // 【安全修复 C1】单条读取校验访问权限
+    assertEntityAccessible(req, result.rows[0])
     res.json(parseEntityRow(result.rows[0]))
   } catch (e) { next(e) }
 })
@@ -135,6 +220,8 @@ entitiesRouter.post('/', async (req, res, next) => {
   try {
     const pool = getPool()
     const body = req.body as CreateEntityRequest
+    // 【安全修复 C1】创建校验 scope 与 webos_state
+    assertScopeWritable(req, body.type, body.scope)
     const id = body.id || uuidv4()
     const now = Date.now()
 
@@ -158,6 +245,9 @@ entitiesRouter.put('/:id', async (req, res, next) => {
     const body = req.body as UpdateEntityRequest & { expectedVersion?: number }
     const existing = await pool.query('SELECT * FROM entities WHERE id = $1', [req.params.id])
     if (existing.rows.length === 0) throw createError(404, 'NOT_FOUND', `Entity ${req.params.id} not found`)
+    // 【安全修复 C1】更新前校验目标实体可访问 + 写入 scope 合法
+    assertEntityAccessible(req, existing.rows[0])
+    assertScopeWritable(req, body.type, body.scope)
 
     const conflictRow = existing.rows[0]
     // Phase S3 缺口 A：版本不匹配时记录冲突日志（仍应用更新，LWW + 日志策略）
@@ -229,6 +319,11 @@ entitiesRouter.put('/:id', async (req, res, next) => {
 entitiesRouter.delete('/:id', async (req, res, next) => {
   try {
     const pool = getPool()
+    // 【安全修复 C1】删除前校验目标实体可访问
+    const existing = await pool.query('SELECT * FROM entities WHERE id = $1', [req.params.id])
+    if (existing.rows.length > 0) {
+      assertEntityAccessible(req, existing.rows[0])
+    }
     const result = await pool.query('DELETE FROM entities WHERE id = $1', [req.params.id])
     if (result.rowCount === 0) throw createError(404, 'NOT_FOUND', `Entity ${req.params.id} not found`)
     res.json({ ok: true })

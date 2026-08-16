@@ -64,6 +64,8 @@ import { editVideo as processVideo, ffmpegAvailable, isVideoFile } from '../util
 import { searchTools } from '../utils/searchTools.js'
 // 2026-08-06 爱发电支付（档位定义 / webhook 验签发货 / API 对账）
 import { afdianConfigured, AFDIAN_TIERS, handleAfdianOrder, redeemAfdianCode } from '../payment/afdian.js'
+// 2026-08-16 系统时间能力：北京时间换算 + 对话时间前缀 + GET /webos/api/time
+import { beijingTimePrefix } from './webosTime.js'
 
 // ---------------------------------------------------------------------------
 // webOS 专用 skills（.pi/skills-webos/）：受控 skill 目录，AI 可读/写
@@ -161,6 +163,9 @@ const APP_BASE_URL = process.env.WEBOS_BASE_URL ?? 'https://shadowshub.xyz/daily
 
 const MAX_CHAT_MESSAGES = 40
 const MAX_MESSAGE_LENGTH = 12_000
+// 2026-08-16 识图链路：消息里带 data URI 图片时允许更大的体积（前端压缩后仍可能
+// 远超纯文本 12k 上限；M3 拿到 data URI 后会把原始 base64 替换为占位符再交给 DeepSeek）。
+const MAX_MEDIA_MESSAGE_LENGTH = 128 * 1024 * 1024
 // 2026-08-12 放开 App HTML 大小：50MB 为数据库安全阀（HTML 快照存 webos_state），
 // 实际闸门是工作区空间配额（App HTML 镜像占工作区，满则无法创建/更新）。
 const MAX_APP_HTML_LENGTH = 50 * 1024 * 1024
@@ -990,27 +995,56 @@ function collectAppExportFiles(principal: Principal, appId: string, html: string
 }
 
 // ---- 外部 API 代理安全校验（App 接入第三方/自建 API；防 SSRF）----
+// 【安全修复 2026-08-16（H3）】：
+// - isPrivateIp 增加 IPv6 与更多保留段识别（此前 IPv6 一律按私网拦截=过度拦截，
+//   同时未覆盖 IPv6 私网/环回/链路本地段；现在用 net.isIP + 段前缀精确判断）
+// - redirect 改为 manual + 逐跳校验：重定向目标也必须过协议/DNS/IP 检查，
+//   最多跟随 3 跳，杜绝"合法域名 → 内网"的经典 SSRF 绕过
+import { isIP } from 'net'
+
 function isPrivateIp(ip: string): boolean {
-  const parts = ip.split('.').map(Number)
-  if (parts.length !== 4 || parts.some((p) => Number.isNaN(p) || p < 0 || p > 255)) return true
-  const [a, b] = parts
-  return a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a === 0 || a >= 224
-}
-async function proxyHttp(principal: Principal, input: { method?: unknown; url?: unknown; headers?: unknown; body?: unknown }): Promise<{ status: number; body: string; contentType: string | null }> {
-  const method = typeof input.method === 'string' && ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD'].includes(input.method.toUpperCase()) ? input.method.toUpperCase() : 'GET'
-  const rawUrl = typeof input.url === 'string' ? input.url.trim() : ''
-  let parsed: URL
-  try {
-    parsed = new URL(rawUrl)
-  } catch {
-    throw createError(400, 'PROXY_INVALID_URL', 'url 必须是合法的 http/https 地址')
+  const version = isIP(ip)
+  if (version === 4) {
+    const parts = ip.split('.').map(Number)
+    if (parts.length !== 4 || parts.some((p) => Number.isNaN(p) || p < 0 || p > 255)) return true
+    const [a, b, c] = parts
+    // RFC1918 / 回环 / 链路本地 / CGNAT / 文档段 / 组播 / 保留
+    return a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || (a === 198 && (b === 18 || b === 19))
+      || a === 0 || (a === 192 && b === 0 && c === 0) || a >= 224
   }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+  if (version === 6) {
+    const lower = ip.toLowerCase()
+    // ::1 环回 / :: 未指定 / fc00::/7 唯一本地 / fe80::/10 链路本地 / ::ffff:0:0/96 IPv4-mapped / 2001:db8::/32 文档
+    if (lower === '::1' || lower === '::' || lower.startsWith('fc') || lower.startsWith('fd')
+      || lower.startsWith('fe8') || lower.startsWith('fe9') || lower.startsWith('fea') || lower.startsWith('feb')
+      || lower.startsWith('::ffff:') || lower.startsWith('2001:db8:')) return true
+    // 组播 ff00::/8
+    if (lower.startsWith('ff')) return true
+  }
+  // 非 IP（域名或无法识别）由调用方按 hostname 解析处理
+  return false
+}
+
+/** 校验 URL 目标：协议 + hostname 解析后所有 IP 过私网黑名单；不合法则抛错 */
+async function assertProxyTargetAllowed(url: URL): Promise<void> {
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw createError(400, 'PROXY_INVALID_URL', '仅支持 http/https 协议')
   }
-  // SSRF 防护：解析 host 的 IP，禁止内网/回环/保留地址
+  // 拒绝带 userinfo 的 URL（user@host 混淆）
+  if (url.username || url.password) {
+    throw createError(400, 'PROXY_INVALID_URL', 'URL 不允许包含用户名/密码')
+  }
+  if (url.hostname === 'localhost' || url.hostname === 'metadata.google.internal') {
+    throw createError(403, 'PROXY_SSRF_BLOCKED', '目标地址被禁止（内网/回环地址不可代理）')
+  }
+  // 拒绝 IP 字面量（防混淆编码绕过），只允许域名
+  if (isIP(url.hostname) !== 0) {
+    throw createError(400, 'PROXY_INVALID_URL', '请使用域名访问（IP 字面量被禁止）')
+  }
   try {
-    const addresses = await dns.lookup(parsed.hostname, { all: true })
+    const addresses = await dns.lookup(url.hostname, { all: true, verbatim: true })
+    if (addresses.length === 0) throw new Error('no addresses')
     for (const addr of addresses) {
       if (isPrivateIp(addr.address)) {
         throw createError(403, 'PROXY_SSRF_BLOCKED', '目标地址被禁止（内网/回环地址不可代理）')
@@ -1020,6 +1054,20 @@ async function proxyHttp(principal: Principal, input: { method?: unknown; url?: 
     if (error && typeof error === 'object' && 'code' in error && (error as { code?: string }).code === 'PROXY_SSRF_BLOCKED') throw error
     throw createError(502, 'PROXY_DNS_FAILED', '无法解析目标域名')
   }
+}
+
+async function proxyHttp(principal: Principal, input: { method?: unknown; url?: unknown; headers?: unknown; body?: unknown }): Promise<{ status: number; body: string; contentType: string | null }> {
+  const method = typeof input.method === 'string' && ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD'].includes(input.method.toUpperCase()) ? input.method.toUpperCase() : 'GET'
+  const rawUrl = typeof input.url === 'string' ? input.url.trim() : ''
+  let parsed: URL
+  try {
+    parsed = new URL(rawUrl)
+  } catch {
+    throw createError(400, 'PROXY_INVALID_URL', 'url 必须是合法的 http/https 地址')
+  }
+  // 初始目标 SSRF 校验（含协议/IP 字面量/hostname 解析）
+  await assertProxyTargetAllowed(parsed)
+
   const headers: Record<string, string> = { 'user-agent': 'Daily-webOS/1.0' }
   if (input.headers && typeof input.headers === 'object') {
     for (const [key, value] of Object.entries(input.headers as Record<string, unknown>)) {
@@ -1031,22 +1079,44 @@ async function proxyHttp(principal: Principal, input: { method?: unknown; url?: 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 15_000)
   try {
-    const response = await fetch(parsed.toString(), {
-      method,
-      headers,
-      body: method === 'GET' || method === 'HEAD' ? undefined : (typeof input.body === 'string' ? input.body : JSON.stringify(input.body ?? {})),
-      redirect: 'follow',
-      signal: controller.signal,
-    })
-    const arrayBuffer = await response.arrayBuffer()
-    if (arrayBuffer.byteLength > 2 * 1024 * 1024) {
-      throw createError(502, 'PROXY_RESPONSE_TOO_LARGE', '响应超过 2MB 限制')
+    // redirect: 'manual' + 手动逐跳校验（最多 3 跳），每跳都重新过 SSRF 检查
+    let current = parsed
+    for (let hop = 0; hop <= 3; hop += 1) {
+      const response = await fetch(current.toString(), {
+        method,
+        headers,
+        body: method === 'GET' || method === 'HEAD' ? undefined : (typeof input.body === 'string' ? input.body : JSON.stringify(input.body ?? {})),
+        redirect: 'manual',
+        signal: controller.signal,
+      })
+      if (response.status >= 300 && response.status < 400 && response.headers.get('location')) {
+        const location = response.headers.get('location')!
+        let next: URL
+        try {
+          next = new URL(location, current)
+        } catch {
+          throw createError(502, 'PROXY_INVALID_REDIRECT', '重定向地址不合法')
+        }
+        // 重定向跨源时剥离敏感请求头（Authorization/Cookie 由上层注入，此处统一防泄漏）
+        if (next.origin !== current.origin) {
+          for (const h of ['authorization', 'cookie', 'x-api-key', 'x-auth-token']) delete headers[h]
+        }
+        await assertProxyTargetAllowed(next)
+        current = next
+        continue
+      }
+      const arrayBuffer = await response.arrayBuffer()
+      if (arrayBuffer.byteLength > 2 * 1024 * 1024) {
+        throw createError(502, 'PROXY_RESPONSE_TOO_LARGE', '响应超过 2MB 限制')
+      }
+      const contentType = response.headers.get('content-type')
+      const body = Buffer.from(arrayBuffer).toString('utf8')
+      return { status: response.status, body, contentType }
     }
-    const contentType = response.headers.get('content-type')
-    const body = Buffer.from(arrayBuffer).toString('utf8')
-    return { status: response.status, body, contentType }
+    throw createError(502, 'PROXY_TOO_MANY_REDIRECTS', '重定向次数超过 3 次上限')
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && (error as { code?: string }).code === 'PROXY_RESPONSE_TOO_LARGE') throw error
+    if (error && typeof error === 'object' && 'code' in error && (error as { code?: string }).code === 'PROXY_SSRF_BLOCKED') throw error
     if (error instanceof Error && error.name === 'AbortError') throw createError(504, 'PROXY_TIMEOUT', '外部 API 响应超时（15s）')
     throw createError(502, 'PROXY_FETCH_FAILED', `外部 API 请求失败：${error instanceof Error ? error.message : String(error)}`)
   } finally {
@@ -1271,7 +1341,11 @@ function buildBootstrap(principal: Principal, state: StoredState) {
 
 /** 预估本次对话积分消耗（按输入字符估算 token → chatCostMinor；仅用于前端展示与不足提示） */
 function estimateCostMinor(messages: ChatMessage[], thinking: WebOsThinkingLevel): number {
-  const inputChars = messages.reduce((total, message) => total + message.content.length, 0)
+  // 识图链路：data URI 只用于 M3，不会进入 DeepSeek 上下文，估算时不能按 base64 原文算
+  const inputChars = messages.reduce((total, message) => {
+    const text = message.content.replace(/data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[图片]')
+    return total + text.length
+  }, 0)
   const outputBudget = {
     low: 400,
     medium: 800,
@@ -1534,10 +1608,12 @@ function validateMessages(raw: unknown): ChatMessage[] {
     if (row.role !== 'user' && row.role !== 'assistant') {
       throw createError(400, 'INVALID_MESSAGE_ROLE', '只允许 user 或 assistant 消息')
     }
-    if (typeof row.content !== 'string' || row.content.trim().length === 0 || row.content.length > MAX_MESSAGE_LENGTH) {
-      throw createError(400, 'INVALID_MESSAGE_CONTENT', `消息内容不能为空且不得超过 ${MAX_MESSAGE_LENGTH} 字符`)
+    const content = typeof row.content === 'string' ? row.content : ''
+    const contentLimit = /data:image\/[a-z0-9.+-]+;base64,/i.test(content) ? MAX_MEDIA_MESSAGE_LENGTH : MAX_MESSAGE_LENGTH
+    if (content.trim().length === 0 || content.length > contentLimit) {
+      throw createError(400, 'INVALID_MESSAGE_CONTENT', `消息内容不能为空且不得超过 ${contentLimit} 字符`)
     }
-    return { role: row.role, content: row.content }
+    return { role: row.role, content }
   })
 }
 
@@ -1793,11 +1869,11 @@ function looksLikeMediaRef(text: string): boolean {
   if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(text)) return true
   if (PLATFORM_MEDIA_PREFIXES.some((prefix) => text.startsWith(prefix))) return true
   if (/^https?:\/\//i.test(text)) {
-    const withoutQuery = text.split('?')[0] ?? ''
-    return /\.(png|jpe?g|webp|gif|bmp|mp4|webm|mov)$/i.test(withoutQuery) || text.includes('image') || text.includes('video')
+    const pathPart = text.split(/[?#]/)[0] ?? ''
+    return /\.(png|jpe?g|webp|gif|bmp|mp4|webm|mov)$/i.test(pathPart) || /image|video/i.test(text)
   }
-  // 工作区相对路径（home/agent/apps/shared/skills + 图片/视频扩展名）
-  if (/^(home|agent|apps|shared|skills)\//i.test(text)) {
+  // 工作区相对路径（home/agent/apps/shared/skills/system + 图片/视频扩展名；允许 ./ 或 / 前缀）
+  if (/^(?:\.\/|\/)?(home|agent|apps|shared|skills|system)\//i.test(text)) {
     return /\.(png|jpe?g|webp|gif|bmp|mp4|webm|mov)$/i.test(text)
   }
   return false
@@ -1812,31 +1888,64 @@ function extractMediaRefs(text: string): string[] {
     if (!value || refs.includes(value)) return
     if (looksLikeMediaRef(value)) refs.push(value)
   }
+  // Markdown 图片语法是显式媒体声明，URL 即使不带扩展名也直接按媒体引用处理
+  const addMarkdownImage = (raw: string): void => {
+    let value = raw.trim()
+    value = value.replace(/[.,;:!?。，；：！？、）】」』"'`]+$/, '')
+    if (!value || refs.includes(value)) return
+    if (/^(?:https?:\/\/|data:image\/|\/webos\/api\/|(?:\.\/|\/)?(?:home|agent|apps|shared|skills|system)\/)/i.test(value)) {
+      refs.push(value)
+    }
+  }
   // data URI
   for (const m of text.matchAll(/data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi)) add(m[0])
+  // Markdown 图片语法：![alt](url) 里的 url 即使没有扩展名也按媒体引用处理
+  for (const m of text.matchAll(/!\[[^\]]*\]\(([^)\s]+)\)/gi)) addMarkdownImage(m[1] ?? '')
   // 平台内部 URL（/webos/api/...）
   for (const m of text.matchAll(/\/webos\/api\/(?:apps\/[^\s"'<>()]+?\/files\/raw[^\s"'<>()]*|imagegen\/file\/[^\s"'<>()]+|videogen\/file\/[^\s"'<>()]+|workspace\/files\/raw[^\s"'<>()]*)/g)) add(m[0])
-  // 公网 URL（带媒体扩展名）
+  // 公网 URL（带媒体扩展名，或 URL 中带 image/video 的扩展名缺失地址）
   for (const m of text.matchAll(/https?:\/\/[^\s"'<>()]+/gi)) {
     const raw = m[0]
-    const withoutQuery = raw.split('?')[0] ?? ''
-    if (/\.(png|jpe?g|webp|gif|bmp|mp4|webm|mov)$/i.test(withoutQuery)) add(raw)
+    if (looksLikeMediaRef(raw)) add(raw)
   }
   // 工作区相对路径
-  for (const m of text.matchAll(/(?:^|[\s（(【\[「『])((?:home|agent|apps|shared|skills)\/[^\s"'<>()，。；：！？、]+\.(?:png|jpe?g|webp|gif|bmp|mp4|webm|mov))/gi)) add(m[1] ?? '')
+  for (const m of text.matchAll(/(?:^|[\s（(【\[「『])((?:\.\/|\/)?(?:home|agent|apps|shared|skills|system)\/[^\s"'<>()，。；：！？、]+\.(?:png|jpe?g|webp|gif|bmp|mp4|webm|mov))/gi)) add(m[1] ?? '')
   return refs.slice(0, MAX_BRIDGE_MEDIA_PER_MESSAGE)
 }
 
-/** 桥接一次对话消息：文本中的媒体 → M3 描述注入（失败静默降级，不阻断主流程） */
+/** 把消息里的 data URI 图片替换成短占位符，避免把 base64 原文喂给纯文本 DeepSeek */
+function replaceDataUriMediaRefs(text: string, mediaRefs: string[]): string {
+  let output = text
+  mediaRefs.forEach((ref, index) => {
+    if (!/^data:image\//i.test(ref)) return
+    const placeholder = `[图片${index + 1}]`
+    const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const markdownRe = new RegExp(`!\\[[^\\]]*\\]\\(${escaped}\\)`, 'g')
+    output = output.replace(markdownRe, placeholder)
+    output = output.split(ref).join(placeholder)
+  })
+  return output
+}
+
+/** 桥接一次对话消息：文本中的媒体 → M3 描述注入（失败降级为提示，不阻断主流程） */
 async function bridgeVisionIntoText(
   principal: Principal,
   text: string,
   opts: { requestId: string; conversationId: string; ip?: string; ask?: string },
 ): Promise<{ text: string; injected: boolean }> {
-  if (!visionConfigured()) return { text, injected: false }
+  const mediaRefs = extractMediaRefs(text)
+  if (mediaRefs.length === 0) return { text, injected: false }
+  // data URI 只用于 M3 识图，不把 base64 原文喂给纯文本 DeepSeek
+  const safeText = replaceDataUriMediaRefs(text, mediaRefs)
+  const sourceLabel = (ref: string | undefined, index: number): string => {
+    if (!ref) return '未知'
+    if (/^data:image\//i.test(ref)) return `图片${index + 1}`
+    return ref.length > 120 ? `${ref.slice(0, 120)}…` : ref
+  }
+  if (!visionConfigured()) {
+    return { text: `${safeText}\n\n[系统：检测到图片/视频，但视觉模型未配置，暂时无法识图]`, injected: false }
+  }
   try {
-    const mediaRefs = extractMediaRefs(text)
-    if (mediaRefs.length === 0) return { text, injected: false }
     const result = await describeMedia({
       ctx: { workspaceRoot: getWorkspaceRoot(principal.key), publicBase: PUBLIC_BASE },
       sources: mediaRefs,
@@ -1850,14 +1959,18 @@ async function bridgeVisionIntoText(
     })
     if (result.ok && result.descriptions.length > 0) {
       const blocks = result.descriptions
-        .map((desc, i) => `[视觉助手（${visionModelName()}）已分析你收到的媒体 #${i + 1}（来源：${mediaRefs[i] ?? '未知'}）：\n${desc}\n]`)
+        .map((desc, i) => `[视觉助手（${visionModelName()}）已分析你收到的媒体 #${i + 1}（来源：${sourceLabel(mediaRefs[i], i)}）：\n${desc}\n]`)
         .join('\n\n')
-      return { text: `${text}\n\n${blocks}`, injected: true }
+      return { text: `${safeText}\n\n${blocks}`, injected: true }
     }
-    return { text, injected: false }
+    const reason = result.status === 'not_configured' ? '视觉模型未配置'
+      : result.status === 'timeout' ? '视觉模型分析超时'
+        : result.status === 'unsupported' ? '媒体格式暂不支持'
+          : '视觉模型分析失败'
+    return { text: `${safeText}\n\n[系统：检测到图片/视频，但${reason}，请稍后重试或改发文字描述]`, injected: false }
   } catch (error) {
     console.warn('[vision] bridge failed:', error instanceof Error ? error.message : String(error))
-    return { text, injected: false }
+    return { text: `${safeText}\n\n[系统：检测到图片/视频，但视觉桥接异常，请稍后重试]`, injected: false }
   }
 }
 
@@ -2830,6 +2943,20 @@ export async function servePublicAppRawFile(req: Request, res: Response): Promis
     const ext = path.extname(full).toLowerCase().replace('.', '')
     res.setHeader('Content-Type', publicRawMime(ext))
     res.setHeader('Cache-Control', 'public, max-age=86400')
+    // 【安全修复 2026-08-16（C4）】：html/js/mjs/xml 等可执行类型在公开同源
+    // 端点直接内联返回会被当作主域脚本/页面执行（存储型 XSS）。强制下载（attachment）
+    // + CSP sandbox，阻断同源执行。SVG 保留内联（<img> 上下文不执行脚本，且大量
+    // App 用 SVG 做图标/素材）。
+    // 【回归审查修正】：不能对所有请求加 attachment——App 静态包内 <iframe src="xxx.html">
+    // 属子资源导航，attachment 会导致 ERR_ABORTED 加载失败。仅对**顶级导航**
+    // （Sec-Fetch-Dest: document 且非 iframe/子资源）加 attachment+CSP。
+    const EXECUTABLE_EXTENSIONS = new Set(['html', 'htm', 'js', 'mjs', 'xml'])
+    const secFetchDest = String(req.headers['sec-fetch-dest'] ?? '')
+    const isTopLevelNavigation = secFetchDest === 'document' || secFetchDest === ''
+    if (EXECUTABLE_EXTENSIONS.has(ext) && isTopLevelNavigation) {
+      res.setHeader('Content-Disposition', `attachment; filename="${path.basename(full)}"`)
+      res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'")
+    }
     // 2026-08-08：视频素材（mp4/webm）支持 Range 分段加载——此前 App 里 <video src="assets/xxx.mp4">
     // 走此端点全量下载完才能播放（对话页走 videogen/file 支持 Range 所以秒开），
     // 跨境网络下几 MB 也要等几十秒。moov 已 faststart（偏移 ~36B），Range 一发即可秒播。
@@ -5430,11 +5557,12 @@ webosRouter.post('/chat/stream', async (req, res, next) => {
     if (!lastUser) throw createError(400, 'INVALID_MESSAGES', '缺少 user 消息')
     // 编辑/回退重来：丢弃该会话的旧 pi 上下文，用修改后的完整消息历史重放
     const historyContext = rebuild ? formatHistoryContext(messages.slice(0, -1)) : ''
+    const timePrefix = beijingTimePrefix()
     const userText = appId
-      ? `（当前 App 上下文：appId=${appId}，sourceVersionId=${sourceVersionId ?? 'none'}）\n${historyContext ? `${historyContext}\n\n` : ''}${lastUser.content}`
+      ? `${timePrefix}\n\n（当前 App 上下文：appId=${appId}，sourceVersionId=${sourceVersionId ?? 'none'}）\n${historyContext ? `${historyContext}\n\n` : ''}${lastUser.content}`
       : historyContext
-        ? `${historyContext}\n\n${lastUser.content}`
-        : lastUser.content
+        ? `${timePrefix}\n\n${historyContext}\n\n${lastUser.content}`
+        : `${timePrefix}\n\n${lastUser.content}`
 
     // 2026-08-14 M3 视觉桥接（AI 的眼睛）：DeepSeek 非视觉。用户消息里带
     // 图片/视频引用时，自动调 MiniMax-M3 生成文字描述注入 userText，让 AI

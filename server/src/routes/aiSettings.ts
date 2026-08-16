@@ -16,6 +16,7 @@ import {
   sanitizeEndpointUrl,
 } from '../utils/sanitize.js'
 import { createError } from '../middleware/error.js'
+import { requireAdmin, requireAdminOrLocalServer } from '../middleware/auth.js'
 
 // ============================================================================
 // Phase 4：AI 配置 API（spec 3.2 节）
@@ -233,7 +234,7 @@ aiSettingsRouter.get('/settings', async (_req, res, next) => {
  * 安全考量：此端点仅在本地桌面端使用（server 嵌入在 Electron 中），
  * 不暴露到外网。当 safeStorage 中的 apiKey 丢失/损坏时，用于从后端数据库同步恢复。
  */
-aiSettingsRouter.get('/settings/api-key', async (_req, res, next) => {
+aiSettingsRouter.get('/settings/api-key', requireAdminOrLocalServer, async (_req, res, next) => {
   try {
     const settings = await getAiSettings()
     const apiKey = settings.apiKey || process.env.PI_API_KEY || ''
@@ -246,7 +247,7 @@ aiSettingsRouter.get('/settings/api-key', async (_req, res, next) => {
  * 更新 AI 设置（API Key 经此保存到 ai_settings 表，spec 3.2 节）
  * 注意：API Key 实际存到 ai_settings 表，piBridge 启动时读取并注入到 authStorage
  */
-aiSettingsRouter.put('/settings', async (req, res, next) => {
+  aiSettingsRouter.put('/settings', requireAdmin, async (req, res, next) => {
   try {
     const { model, apiKey, endpoint } = req.body as {
       model?: string
@@ -437,7 +438,7 @@ aiSettingsRouter.get('/prompts', async (_req, res, next) => {
  * PUT /api/ai/prompts
  * 更新提示词（spec 3.2 节）
  */
-aiSettingsRouter.put('/prompts', async (req, res, next) => {
+aiSettingsRouter.put('/prompts', requireAdmin, async (req, res, next) => {
   try {
     const { systemPrompt, canvasPrompt, browserPrompt } = req.body as {
       systemPrompt?: string
@@ -475,7 +476,7 @@ aiSettingsRouter.put('/prompts', async (req, res, next) => {
  * POST /api/ai/prompts/reset
  * 恢复默认提示词（spec 3.2 节）
  */
-aiSettingsRouter.post('/prompts/reset', async (_req, res, next) => {
+aiSettingsRouter.post('/prompts/reset', requireAdmin, async (_req, res, next) => {
   try {
     // 删除提示词覆盖，让 piBridge 回退到默认值
     await getPool().query(

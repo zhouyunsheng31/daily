@@ -7,6 +7,7 @@ import {
   type SearchProvider,
 } from '../db/aiSettingsStore.js'
 import { createError } from '../middleware/error.js'
+import { requireAdmin } from '../middleware/auth.js'
 import { logApiUsage } from '../db/apiUsageLog.js'
 import { sanitizeApiKey } from '../utils/sanitize.js'
 
@@ -73,9 +74,9 @@ searchKeysRouter.get('/:provider', async (req, res, next) => {
  * 更新 Key（spec 8.4 节）
  * body: { key: string }
  */
-searchKeysRouter.put('/:provider', async (req, res, next) => {
+searchKeysRouter.put('/:provider', requireAdmin, async (req, res, next) => {
   try {
-    const provider = req.params.provider
+    const provider = String(req.params.provider)
     if (!isValidProvider(provider)) {
       throw createError(400, 'INVALID_PROVIDER', `Unknown provider: ${provider}`)
     }
@@ -101,9 +102,9 @@ searchKeysRouter.put('/:provider', async (req, res, next) => {
  * DELETE /api/search/keys/:provider
  * 删除 Key（spec 8.4 节）
  */
-searchKeysRouter.delete('/:provider', async (req, res, next) => {
+searchKeysRouter.delete('/:provider', requireAdmin, async (req, res, next) => {
   try {
-    const provider = req.params.provider
+    const provider = String(req.params.provider)
     if (!isValidProvider(provider)) {
       throw createError(400, 'INVALID_PROVIDER', `Unknown provider: ${provider}`)
     }

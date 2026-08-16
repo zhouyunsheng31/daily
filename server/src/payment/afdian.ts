@@ -486,6 +486,45 @@ async function markRedeemCodeUsed(code: string, userKey: string): Promise<void> 
   }
 }
 
+/**
+ * 【安全修复 2026-08-16（M1）】原子占用兑换码：防止并发重复兑换。
+ * 条件 UPDATE（status='unused'）是原子的——两个并发请求只有一个能命中，
+ * 命中的返回 true；另一个影响行数=0 返回 false，调用方应拒绝（409）。
+ */
+async function tryClaimRedeemCode(code: string, userKey: string): Promise<boolean> {
+  try {
+    const pool = getPool()
+    const now = Date.now()
+    const result = await pool.query(
+      `UPDATE webos_redeem_codes
+       SET status = 'used', redeemed_by = $2, redeemed_at = $3, updated_at = $3
+       WHERE LOWER(code) = LOWER($1) AND status = 'unused'`,
+      [code, userKey, now],
+    )
+    return (result.rowCount ?? 0) > 0
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 【回归审查修正（M1 补充）】发货失败时回滚兑换码占用：
+ * status 从 used 恢复为 unused，清除 redeemed_by/redeemed_at。
+ */
+async function releaseRedeemCode(code: string): Promise<void> {
+  try {
+    const pool = getPool()
+    await pool.query(
+      `UPDATE webos_redeem_codes
+       SET status = 'unused', redeemed_by = NULL, redeemed_at = NULL, updated_at = $2
+       WHERE LOWER(code) = LOWER($1)`,
+      [code, Date.now()],
+    )
+  } catch (error) {
+    console.warn('[afdian] releaseRedeemCode failed:', error instanceof Error ? error.message : String(error))
+  }
+}
+
 /** 批量导入兑换码（管理后台 POST /api/admin/webos/redeem-codes/import；幂等：重复 code 更新档位） */
 export async function importRedeemCodes(items: Array<{ code: string; planId: string; note?: string }>): Promise<{ imported: number; skipped: number }> {
   const pool = getPool()
@@ -683,9 +722,20 @@ export async function redeemAfdianCode(principal: Principal, rawCode: string): P
       console.warn(`[afdian] redeem local code ${code.slice(0, 12)}… unknown plan ${String(localCode.plan_id)}`)
       throw createError(400, 'UNKNOWN_PLAN', '该兑换码对应的档位未配置，请联系站长（微信 fangyan876）')
     }
-    const result = await deliverRedeemTier(principal, tier, code, await realOrderNoFor(code))
-    await markRedeemCodeUsed(code, principal.key)
-    return result
+    // 【安全修复 M1】先原子占用兑换码（status unused → used），并发时只有一个
+    // 请求能成功占用；占位失败（已被并发占用）直接拒绝，避免重复发货。
+    const claimed = await tryClaimRedeemCode(code, principal.key)
+    if (!claimed) throw createError(409, 'REDEEM_ALREADY_USED', '该兑换码已被使用（每个兑换码只能兑换一次）')
+    try {
+      const result = await deliverRedeemTier(principal, tier, code, await realOrderNoFor(code))
+      return result
+    } catch (error) {
+      // 【回归审查修正】：发货失败（loadState/saveState 异常等）时回滚占用，
+      // 避免用户兑换码被永久标记 used 却未到账。已标记 delivered 的订单不在此
+      // 路径（deliverRedeemTier 内部 catch 处理），此处只回滚本地兑换码状态。
+      await releaseRedeemCode(code)
+      throw error
+    }
   }
 
   // 1. 找订单（本地优先，避免每次全量拉 API）

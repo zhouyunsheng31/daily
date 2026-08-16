@@ -3,8 +3,13 @@ import { getPool } from '../db/connection.js'
 import { broadcastChange } from '../ws.js'
 import { sanitizeShortText } from '../utils/sanitize.js'
 import { createError } from '../middleware/error.js'
+import { requireAdmin } from '../middleware/auth.js'
 
 export const dynamicWidgetsRouter = Router()
+
+// 【安全修复 2026-08-16（C2）】：动态组件 code 会被所有客户端以 new Function 执行，
+// 任意用户可上传=存储型 RCE/XSS。写操作（POST/PUT/DELETE）全部 requireAdmin。
+// GET 保留（展示已发布组件）。
 
 // GET /api/dynamic-widgets
 // 支持 ?desktop=false 过滤（T11 移动端过滤）
@@ -35,7 +40,7 @@ dynamicWidgetsRouter.get('/', async (req, res, next) => {
 })
 
 // POST /api/dynamic-widgets
-dynamicWidgetsRouter.post('/', async (req, res, next) => {
+dynamicWidgetsRouter.post('/', requireAdmin, async (req, res, next) => {
   try {
     const pool = getPool()
     const now = Date.now()
@@ -186,7 +191,7 @@ dynamicWidgetsRouter.post('/', async (req, res, next) => {
 })
 
 // PUT /api/dynamic-widgets/:widgetType - 更新元数据
-dynamicWidgetsRouter.put('/:widgetType', async (req, res, next) => {
+dynamicWidgetsRouter.put('/:widgetType', requireAdmin, async (req, res, next) => {
   try {
     // 修复 Bug 2：widgetType URL 参数格式校验
     if (typeof req.params.widgetType !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(req.params.widgetType) || req.params.widgetType.length > 64) {
@@ -360,7 +365,7 @@ dynamicWidgetsRouter.put('/:widgetType', async (req, res, next) => {
 })
 
 // DELETE /api/dynamic-widgets/:widgetType
-dynamicWidgetsRouter.delete('/:widgetType', async (req, res, next) => {
+dynamicWidgetsRouter.delete('/:widgetType', requireAdmin, async (req, res, next) => {
   try {
     // 修复 Bug 2：widgetType URL 参数格式校验
     if (typeof req.params.widgetType !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(req.params.widgetType) || req.params.widgetType.length > 64) {

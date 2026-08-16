@@ -95,10 +95,41 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
   if (jwtToken) {
     const payload = verifyToken(jwtToken)
     if (payload?.authenticated) {
+      // 【安全修复 2026-08-16（H1）】：JWT payload 中的 role 可能已过期（封禁/降权），
+      // 对多用户真实账号实时查库校验 is_banned 与当前 role：
+      // - 被封禁 → 401 INVALID_JWT（清 cookie，强制重新登录）
+      // - 角色已变更（如降权）→ 以数据库当前 role 为准，不使用 JWT 中的旧 role
+      let effectiveRole = payload.role as UserRole | undefined
+      if (payload.userId && !payload.guest && !payload.singlePassword) {
+        try {
+          const pool = getPool()
+          const row = await pool.query<{ role: string; is_banned: boolean | number }>(
+            'SELECT role, is_banned FROM users WHERE id = $1', [payload.userId],
+          )
+          const userRow = row.rows[0]
+          if (!userRow) {
+            // 用户已被删除：视为无效会话
+            const opts = getCookieOptions()
+            res.clearCookie(getCookieName(), { path: opts.path, sameSite: opts.sameSite, secure: opts.secure })
+            res.status(401).json({ error: 'INVALID_JWT' })
+            return
+          }
+          if (typeof userRow.is_banned === 'number' ? userRow.is_banned !== 0 : !!userRow.is_banned) {
+            const opts = getCookieOptions()
+            res.clearCookie(getCookieName(), { path: opts.path, sameSite: opts.sameSite, secure: opts.secure })
+            res.status(401).json({ error: 'USER_BANNED' })
+            return
+          }
+          effectiveRole = userRow.role as UserRole
+        } catch {
+          // 查询失败时降级：仍使用 JWT 中 role（不阻断请求，但日志告警）
+          console.warn(`[Auth] user state check failed for ${payload.userId}, falling back to JWT role`)
+        }
+      }
       req.user = {
         authenticated: true,
         userId: payload.userId,
-        role: payload.role,
+        role: effectiveRole,
         singlePassword: payload.singlePassword,
         guest: payload.guest,
         guestDeviceId: payload.deviceId,
@@ -211,5 +242,29 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
     })
     return
   }
+  next()
+}
+
+/**
+ * 【安全修复 2026-08-16 补充】「本机 SERVER_TOKEN 或 admin」中间件：
+ * - Web 多用户模式（JWT）：要求 role === 'admin'（防止游客/普通用户读取服务器 Key）；
+ * - 本机/桌面端模式（SERVER_TOKEN Bearer 或 dev 无身份）：放行——
+ *   用于 Electron 桌面端 safeStorage 恢复 API Key 等本地管理端点，
+ *   该模式 req.user 无 userId（authMiddleware 路径 2 不注入用户身份），
+ *   若用 requireAdmin 会导致桌面端功能失效（回归审查 #7）。
+ */
+export function requireAdminOrLocalServer(req: Request, res: Response, next: NextFunction): void {
+  // 有 JWT 用户身份 → 必须是 admin
+  if (req.user?.authenticated && req.user.userId) {
+    if (req.user.role !== 'admin') {
+      res.status(403).json({
+        error: { status: 403, code: 'FORBIDDEN', message: '需要管理员权限' },
+      })
+      return
+    }
+    next()
+    return
+  }
+  // 无用户身份（SERVER_TOKEN Bearer / dev 模式）：视为本机/桌面端，放行
   next()
 }

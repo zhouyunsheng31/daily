@@ -1,12 +1,17 @@
 import { Router } from 'express'
 import { getPool, withTransaction } from '../db/connection.js'
 import { createError } from '../middleware/error.js'
+import { requireAdmin } from '../middleware/auth.js'
 import { broadcastChange } from '../ws.js'
 
 export const scopesRouter = Router()
 
-// GET /api/scopes — 列出所有 scope（去重）
-scopesRouter.get('/', async (_req, res, next) => {
+// 【安全修复 2026-08-16（C1）】：scope 操作可跨用户移动/合并任意实体，
+// 且 GET /api/scopes 会枚举全部用户 scope（泄露 user:*/guest:* 身份）。
+// 全部改为 requireAdmin——旧桌面端如需 scope 管理，由管理员操作。
+
+// GET /api/scopes — 列出所有 scope（去重）【仅管理员】
+scopesRouter.get('/', requireAdmin, async (_req, res, next) => {
   try {
     const pool = getPool()
     const result = await pool.query('SELECT DISTINCT scope FROM entities ORDER BY scope')
@@ -14,8 +19,8 @@ scopesRouter.get('/', async (_req, res, next) => {
   } catch (e) { next(e) }
 })
 
-// PUT /api/scopes/entity/:id — 修改实体所属 scope
-scopesRouter.put('/entity/:id', async (req, res, next) => {
+// PUT /api/scopes/entity/:id — 修改实体所属 scope【仅管理员】
+scopesRouter.put('/entity/:id', requireAdmin, async (req, res, next) => {
   try {
     const pool = getPool()
     const { scope } = req.body as { scope: string }
@@ -30,8 +35,8 @@ scopesRouter.put('/entity/:id', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-// POST /api/scopes/merge — 合并 scope
-scopesRouter.post('/merge', async (req, res, next) => {
+// POST /api/scopes/merge — 合并 scope【仅管理员】
+scopesRouter.post('/merge', requireAdmin, async (req, res, next) => {
   try {
     const pool = getPool()
     const { fromScope, toScope } = req.body as { fromScope: string; toScope: string }
@@ -45,8 +50,8 @@ scopesRouter.post('/merge', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-// POST /api/scopes/split — 拆分 scope
-scopesRouter.post('/split', async (req, res, next) => {
+// POST /api/scopes/split — 拆分 scope【仅管理员】
+scopesRouter.post('/split', requireAdmin, async (req, res, next) => {
   try {
     const pool = getPool()
     const { entityIds, newScope } = req.body as { entityIds: string[]; newScope: string }

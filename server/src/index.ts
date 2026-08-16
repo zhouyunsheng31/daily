@@ -53,8 +53,9 @@ import { githubProxyRouter } from './routes/githubProxy.js'
 import { wikiRouter } from './routes/wiki.js'
 import { componentCapabilitiesRouter } from './routes/componentCapabilities.js'
 import { webosRouter, servePublicImageFile, servePublicAppRawFile, servePublicVideoFile, serveSharePreview, serveShareRawFile, serveStoreRawFile } from './routes/webos.js'
+import { webosTimeRouter } from './routes/webosTime.js'
 import { communitiesRouter } from './routes/communities.js'
-import { backgroundRouter, BACKGROUNDS_DIR } from './routes/background.js'
+import { backgroundRouter, BACKGROUNDS_DIR, quarantineLegacySvgBackgrounds } from './routes/background.js'
 import { getSearchKey } from './db/aiSettingsStore.js'
 import { initSandbox } from './sandbox/index.js'
 // 2026-08-06 服务器负载监控采样（管理后台 + AI 工具 get_server_status 数据源）
@@ -255,7 +256,7 @@ function createApp(options: CreateAppOptions = {}): { app: Express } {
   app.use('/api/component-capabilities', componentCapabilitiesRouter)
 
   // webOS P0：独立命名空间，显式继承现有 JWT 游客/账户鉴权；不改动 Legacy Dashboard 路由或 WS 协议
-  app.use('/webos/api', authMiddleware, webosRouter)
+  app.use('/webos/api', authMiddleware, webosRouter, webosTimeRouter)
 
   // Phase 6：联邦式社区 API（spec §9 节，走 /api 全局 authMiddleware 继承）
   app.use('/api/communities', communitiesRouter)
@@ -289,24 +290,30 @@ function createApp(options: CreateAppOptions = {}): { app: Express } {
     //   sh-* ：整套系统分享（加载动画 / 桌面 / 应用列表，数据在 share-assets/<id>/meta.json）
     // 页面形态：全屏预览 iframe + 右下角唯一悬浮按钮（点击展开菜单），无顶栏底条。
     // 必须在 SPA fallback 之前注册（否则被 index.html 兜底）。
+    // 【安全修复 2026-08-16（H5）】：title/menu 字段此前未转义直接拼接进 HTML，
+    // 用户可控（App 名/ownerName）可注入 </title><script> → 同源存储型 XSS。
+    const escapeHtml = (value: string): string => value
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '"').replace(/'/g, '&#39;')
     const sharePageTemplate = (payload: {
       title: string; shareId: string; isBundle: boolean;
       srcDoc: string; menu: Array<{ icon: string; bg: string; title: string; sub: string; href?: string; action?: string }>;
     }): string => {
       const { title, shareId, isBundle, srcDoc, menu } = payload
       const srcDocAttr = srcDoc.replace(/&/g, '&amp;').replace(/"/g, '"').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      const safeTitle = escapeHtml(title)
       const menuHtml = menu.map((m) => {
-        const href = m.href ? `href="${m.href}"` : ''
-        const action = m.action ? `data-action="${m.action}"` : ''
-        return `<a ${href} ${action}><span class="ico" style="background:${m.bg}">${m.icon}</span><span class="t"><b>${m.title}</b><small>${m.sub}</small></span></a>`
+        const href = m.href ? `href="${escapeHtml(m.href)}"` : ''
+        const action = m.action ? `data-action="${escapeHtml(m.action)}"` : ''
+        return `<a ${href} ${action}><span class="ico" style="background:${escapeHtml(m.bg)}">${escapeHtml(m.icon)}</span><span class="t"><b>${escapeHtml(m.title)}</b><small>${escapeHtml(m.sub)}</small></span></a>`
       }).join('')
       return `<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="description" content="${title} · Daily 分享">
-<title>${title} · Daily 分享</title>
+<meta name="description" content="${safeTitle} · Daily 分享">
+<title>${safeTitle} · Daily 分享</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{height:100%;overflow:hidden}
@@ -325,7 +332,7 @@ function createApp(options: CreateAppOptions = {}): { app: Express } {
 </style>
 </head>
 <body>
-<div class="preview"><iframe id="preview" sandbox="allow-scripts" srcdoc="${srcDocAttr}" title="${title}"></iframe></div>
+<div class="preview"><iframe id="preview" sandbox="allow-scripts" srcdoc="${srcDocAttr}" title="${safeTitle}"></iframe></div>
 <button class="fab" id="fab" aria-label="打开菜单">＋</button>
 <div class="menu" id="menu"><div class="m-head">${isBundle ? '整套系统 · 可分别安装' : 'Daily 应用分享'}</div>${menuHtml}</div>
 <script>
@@ -588,6 +595,13 @@ async function main() {
     logStep('initSandbox done')
   } catch (err) {
     console.warn('[Server] Sandbox init failed:', err)
+  }
+
+  // 【安全修复 2026-08-16（H4）】启动时隔离历史遗留 .svg 背景（存储型 XSS 清理）
+  try {
+    quarantineLegacySvgBackgrounds()
+  } catch (err) {
+    console.warn('[Server] quarantineLegacySvgBackgrounds failed:', err)
   }
 
   // 2026-08-06：启动服务器负载监控采样（CPU/内存/磁盘/带宽，每 5s）

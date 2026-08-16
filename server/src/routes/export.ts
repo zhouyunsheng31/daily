@@ -1,10 +1,12 @@
 import { Router } from 'express'
 import { getPool } from '../db/connection.js'
+import { requireAdmin } from '../middleware/auth.js'
 
 export const exportRouter = Router()
 
+// 【安全修复 2026-08-16（C1）】：全库导出（含 entities/webos_state）仅管理员可用
 // GET /api/export
-exportRouter.get('/', async (_req, res, next) => {
+exportRouter.get('/', requireAdmin, async (_req, res, next) => {
   try {
     const pool = getPool()
 

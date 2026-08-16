@@ -1,13 +1,15 @@
 import { Router } from 'express'
 import { getPool, withTransaction } from '../db/connection.js'
 import { createError } from '../middleware/error.js'
+import { requireAdmin } from '../middleware/auth.js'
 import { broadcastChange } from '../ws.js'
 import { v4 as uuidv4 } from 'uuid'
 
 export const importRouter = Router()
 
+// 【安全修复 2026-08-16（C1）】：import 会清空全库后导入任意数据（全站 DoS），仅管理员可用
 // POST /api/import/idb — 从 IndexedDB 导出格式导入（兼容迁移）
-importRouter.post('/idb', async (req, res, next) => {
+importRouter.post('/idb', requireAdmin, async (req, res, next) => {
   try {
     const pool = getPool()
     const data = req.body
@@ -198,8 +200,8 @@ importRouter.post('/idb', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-// POST /api/import — 从新格式导入
-importRouter.post('/', async (req, res, next) => {
+// POST /api/import — 从新格式导入【安全修复 2026-08-16：同 /idb 一样会清空全库，必须 requireAdmin】
+importRouter.post('/', requireAdmin, async (req, res, next) => {
   try {
     const pool = getPool()
     const data = req.body

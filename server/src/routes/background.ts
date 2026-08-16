@@ -11,7 +11,7 @@
 
 import { Router } from 'express'
 import multer from 'multer'
-import { existsSync, mkdirSync, readdirSync, statSync } from 'fs'
+import { existsSync, mkdirSync, readdirSync, renameSync, statSync } from 'fs'
 import { extname, join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { randomUUID } from 'crypto'
@@ -29,7 +29,9 @@ if (!existsSync(BACKGROUNDS_DIR)) {
 }
 
 /** 允许的图片扩展名 */
-const ALLOWED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp'])
+/** 【安全修复 2026-08-16（H4）】：移除 .svg——任意用户可上传恶意 SVG 到公开同源
+ * 路径（/backgrounds/* 以 image/svg+xml 公开服务），构成存储型 XSS。禁止上传 SVG。 */
+const ALLOWED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'])
 
 /** 最大文件大小 10MB */
 const MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -125,5 +127,28 @@ backgroundRouter.get('/list', (_req, res, next) => {
 // 在 index.ts 中注册：app.use('/backgrounds', express.static(BACKGROUNDS_DIR))
 // 此处导出 BACKGROUNDS_DIR 供 index.ts 使用
 // ============================================================================
+
+/** 【安全修复 2026-08-16（H4 补充/回归审查 #8）】启动时清理历史遗留 .svg 背景：
+ * 已上传的恶意 SVG 即使列表不再显示，仍可经 /backgrounds/<uuid>.svg 公开访问。
+ * 服务启动时把存量 .svg 移出公开目录（移动到 server/data/backgrounds-quarantine/）。 */
+export function quarantineLegacySvgBackgrounds(): void {
+  try {
+    if (!existsSync(BACKGROUNDS_DIR)) return
+    const quarantineDir = join(dirname(BACKGROUNDS_DIR), 'backgrounds-quarantine')
+    mkdirSync(quarantineDir, { recursive: true })
+    let moved = 0
+    for (const f of readdirSync(BACKGROUNDS_DIR)) {
+      if (extname(f).toLowerCase() === '.svg') {
+        try {
+          renameSync(join(BACKGROUNDS_DIR, f), join(quarantineDir, f))
+          moved += 1
+        } catch { /* 单个失败跳过 */ }
+      }
+    }
+    if (moved > 0) console.log(`[background] quarantined ${moved} legacy .svg background(s) -> backgrounds-quarantine/`)
+  } catch (error) {
+    console.warn('[background] quarantineLegacySvgBackgrounds failed:', error instanceof Error ? error.message : String(error))
+  }
+}
 
 export { BACKGROUNDS_DIR as BACKGROUNDS_PUBLIC_DIR }
