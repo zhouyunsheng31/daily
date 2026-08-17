@@ -3,9 +3,9 @@ import {
   Activity, Ban, BarChart3, Check, CircleDollarSign, Eye, KeyRound, LoaderCircle,
   LogOut, Search, ShieldCheck, Sparkles, Ticket, UserRound, Users, X,
 } from 'lucide-react'
-import { api, formatCredits, formatDate, formatTokens, type AdminUser, type GuestUser, type UsageItem, type UsageSummary, type ImageGenStats, type ImageGenPricing, type ImageGenUsageItem, type ServerStats, type ServerHealthAlert, type ServerMetricsPoint, type AfdianOrderItem, type RedeemCodeItem, type VisionStats, type VisionUsageItem } from './api'
+import { api, formatCredits, formatDate, formatTokens, type AdminUser, type GuestUser, type UsageItem, type UsageSummary, type ActivityStats, type ImageGenStats, type ImageGenPricing, type ImageGenUsageItem, type ServerStats, type ServerHealthAlert, type ServerMetricsPoint, type AfdianOrderItem, type RedeemCodeItem, type VisionStats, type VisionUsageItem, type SearchStats } from './api'
 
-type View = 'dashboard' | 'users' | 'imagegen' | 'vision' | 'orders' | 'redeem'
+type View = 'dashboard' | 'users' | 'imagegen' | 'vision' | 'search' | 'orders' | 'redeem'
 
 /** 字节数格式化（服务器状态展示） */
 function formatBytes(value: number): string {
@@ -18,6 +18,11 @@ function formatUptime(sec: number): string {
   const days = Math.floor(sec / 86400)
   const hours = Math.floor((sec % 86400) / 3600)
   return days > 0 ? `${days}天${hours}小时` : `${hours}小时${Math.floor((sec % 3600) / 60)}分`
+}
+
+/** 涨跌幅显示（+12.5% / -3%） */
+function fmtPct(value: number): string {
+  return `${value > 0 ? '+' : ''}${value}%`
 }
 
 // ============================================================================
@@ -139,6 +144,21 @@ function Dashboard({ summary, onRefresh }: { summary: UsageSummary | null; onRef
     const timer = window.setInterval(() => void load(), 60_000)
     return () => { cancelled = true; window.clearInterval(timer) }
   }, [range])
+  // 2026-08-17 日活/月活（DAU/MAU）：活跃 = 当天/当月有任意对话或工具调用，按 user_key 去重
+  const [activity, setActivity] = useState<ActivityStats | null>(null)
+  const [actDays, setActDays] = useState(30)
+  useEffect(() => {
+    let cancelled = false
+    const load = async (): Promise<void> => {
+      try {
+        const data = await api.activityStats(actDays)
+        if (!cancelled) setActivity(data)
+      } catch { /* 统计接口异常时静默（后台可能未就绪） */ }
+    }
+    void load()
+    const timer = window.setInterval(() => void load(), 60_000)
+    return () => { cancelled = true; window.clearInterval(timer) }
+  }, [actDays])
   if (!summary) return <div className="empty-card">加载中…</div>
   const kinds = Object.entries(summary.byKind)
   const statuses = Object.entries(summary.byStatus)
@@ -147,6 +167,7 @@ function Dashboard({ summary, onRefresh }: { summary: UsageSummary | null; onRef
   const alerts = server?.alerts ?? []
   const bar = (percent: number): string => `${Math.max(2, Math.min(100, Math.round(percent)))}%`
   const tone = (percent: number): string => percent > 90 ? 'bar-critical' : percent > 70 ? 'bar-warn' : ''
+  const activityMaxDay = Math.max(1, ...(activity?.dau.map((d) => d.total) ?? []))
   return <div className="dashboard">
     {/* 服务器负载（CPU / 内存 / 磁盘 / 带宽） */}
     <div className="panel-card">
@@ -870,6 +891,120 @@ function VisionView() {
 }
 
 // ============================================================================
+// 搜索 API 状态（2026-08-17）：各引擎调用次数 / 成功率 / 平均耗时 / 失败样例
+// 数据源：api_usage_log（搜索工具每次调用写一条：时间/用户/引擎/query/成败/耗时/来源）
+// ============================================================================
+
+const SEARCH_TOOL_LABEL: Record<string, string> = {
+  web_search: '网页搜索（秘塔）',
+  read_webpage: '读取网页（秘塔）',
+  academic_search: '学术搜索（ArXiv）',
+  github_search: 'GitHub 搜索',
+}
+
+function SearchView() {
+  const [stats, setStats] = useState<SearchStats | null>(null)
+  const [days, setDays] = useState(7)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async (d: number) => {
+    try {
+      setStats(await api.searchStats(d))
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }, [])
+
+  useEffect(() => { void load(days) }, [load, days])
+
+  if (!stats) return <div className="empty-card">加载中…</div>
+  const t = stats.total
+  const maxDay = Math.max(1, ...stats.byDay.map((d) => d.calls))
+  const engineLabel = (provider: string): string =>
+    ({ metaso: '秘塔搜索', arxiv: '学术搜索(ArXiv)', github: 'GitHub搜索', github_proxy: 'GitHub代理下载', local: '本地搜索' })[provider] ?? provider
+
+  return <div className="dashboard">
+    <div className="stat-grid">
+      <div className="stat-card"><span>近 {stats.days} 天搜索调用</span><strong>{t.calls} 次</strong><small>成功 {t.ok} · 失败 {t.failed} · 秘塔积分 {t.creditsConsumed}</small></div>
+      <div className="stat-card"><span>成功率</span><strong className={t.successRate < 90 ? 'danger' : ''}>{t.successRate}%</strong><small>成功 {t.ok} / 总调用 {t.calls}</small></div>
+      <div className="stat-card"><span>平均耗时</span><strong>{t.avgLatencyMs}ms</strong><small>成功请求平均 {t.avgOkLatencyMs}ms</small></div>
+      <div className="stat-card"><span>失败样例</span><strong>{stats.failures.length > 0 ? `${stats.failures.length} 条` : '无'}</strong><small>{stats.byDay.length === 0 ? '该时间段暂无搜索调用' : `最近一天 ${stats.byDay[stats.byDay.length - 1].calls} 次`}</small></div>
+    </div>
+
+    <div className="panel-card">
+      <div className="panel-head">
+        <strong>各引擎状态</strong>
+        <div className="meta">
+          <button className="ghost-btn" onClick={() => void load(days)}><Sparkles size={13} />刷新</button>
+          <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="ghost-select">
+            <option value={1}>近 1 天</option><option value={7}>近 7 天</option><option value={30}>近 30 天</option>
+          </select>
+        </div>
+      </div>
+      {error ? <p className="error-text">{error}</p> : null}
+      <div className="usage-table">
+        <div className="usage-head"><span>引擎</span><span>调用</span><span>成功/失败</span><span>成功率</span><span>平均耗时</span><span>秘塔积分</span><span>最近调用</span></div>
+        {stats.byEngine.length === 0 ? <p className="muted">该时间段暂无搜索调用。</p> : stats.byEngine.map((e) => (
+          <div className="usage-row" key={e.provider}>
+            <span><strong>{engineLabel(e.provider)}</strong><small className="muted"> {e.provider}</small></span>
+            <span>{e.calls}</span>
+            <span><span className="status-ok">{e.ok}</span> / <span className={e.failed > 0 ? 'status-failed' : 'muted'}>{e.failed}</span></span>
+            <span className={e.successRate < 90 ? 'danger' : ''}>{e.successRate}%</span>
+            <span>{e.avgLatencyMs}ms{Number.isFinite(e.avgOkLatencyMs) ? <small className="muted">（成功 {e.avgOkLatencyMs}ms）</small> : null}</span>
+            <span>{e.creditsConsumed || '—'}</span>
+            <span>{e.lastCallAt ? formatDate(e.lastCallAt) : '—'}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    <div className="panel-card">
+      <div className="panel-head"><strong>每日趋势（搜索调用次数）</strong><small className="muted">失败天数标红</small></div>
+      {stats.byDay.length === 0 ? <p className="muted">该时间段暂无搜索调用。</p> : <div className="day-bars">{stats.byDay.map((d) => (
+        <div className="day-bar" key={d.day} title={`${d.day}：${d.calls} 次（成功 ${d.ok} / 失败 ${d.failed}）`}>
+          <div className="day-bar-track"><span style={{ height: `${Math.max(4, Math.round((d.calls / maxDay) * 100))}%` }} className={d.failed > 0 ? 'has-failed' : ''} /></div>
+          <small>{d.day.slice(5)}</small><b>{d.calls}</b>
+        </div>
+      ))}</div>}
+      <p className="muted">来源工具：{stats.byTool.map((tool) => `${SEARCH_TOOL_LABEL[tool.tool] ?? tool.tool} ${tool.calls}次`).join(' · ') || '暂无'}</p>
+    </div>
+
+    {stats.byUser.length > 0 ? <div className="panel-card">
+      <div className="panel-head"><strong>按用户 TOP（调用次数）</strong></div>
+      <div className="usage-table">
+        <div className="usage-head"><span>用户</span><span>调用</span><span>成功</span><span>失败</span></div>
+        {stats.byUser.map((u) => (
+          <div className="usage-row" key={u.userKey}>
+            <span title={u.userKey}>{u.userKey}</span>
+            <span>{u.calls}</span>
+            <span className="status-ok">{u.ok}</span>
+            <span className={u.failed > 0 ? 'status-failed' : 'muted'}>{u.failed}</span>
+          </div>
+        ))}
+      </div>
+    </div> : null}
+
+    <div className="panel-card">
+      <div className="panel-head"><strong>失败样例（最近 {stats.failures.length} 条）</strong><small className="muted">按时间倒序，帮助定位搜索 API 故障</small></div>
+      {stats.failures.length === 0 ? <p className="muted">该时间段无搜索失败 ✅</p> : <div className="usage-table">
+        <div className="usage-head"><span>时间</span><span>引擎/工具</span><span>用户</span><span>query</span><span>耗时</span><span>错误信息</span></div>
+        {stats.failures.map((f, idx) => (
+          <div className="usage-row" key={`${f.createdAt}-${idx}`}>
+            <span>{formatDate(f.createdAt)}</span>
+            <span>{engineLabel(f.provider)}<small className="muted"> {SEARCH_TOOL_LABEL[f.tool ?? ''] ?? f.tool ?? f.endpoint}</small></span>
+            <span title={f.userKey ?? ''}>{f.userKey ? f.userKey.slice(0, 24) : '—'}</span>
+            <span className="prompt-cell" title={f.query ?? ''}>{f.query || '—'}</span>
+            <span>{f.latencyMs != null ? `${f.latencyMs}ms` : '—'}</span>
+            <span className="note-cell danger" title={f.errorMsg ?? ''}>{f.errorMsg ?? '—'}</span>
+          </div>
+        ))}
+      </div>}
+    </div>
+  </div>
+}
+
+// ============================================================================
 // 主应用
 // ============================================================================
 
@@ -917,6 +1052,7 @@ export function App() {
         <button className={view === 'redeem' ? 'active' : ''} onClick={() => setView('redeem')}><Ticket size={15} />兑换码管理</button>
         <button className={view === 'imagegen' ? 'active' : ''} onClick={() => setView('imagegen')}><Sparkles size={15} />生图监测</button>
         <button className={view === 'vision' ? 'active' : ''} onClick={() => setView('vision')}><Eye size={15} />视觉模型</button>
+        <button className={view === 'search' ? 'active' : ''} onClick={() => setView('search')}><Search size={15} />搜索 API</button>
       </nav>
       <div className="me"><Activity size={14} /><span>{me?.email ?? me?.username}</span><button className="ghost-btn" onClick={() => void logout()}><LogOut size={13} />退出</button></div>
     </header>
@@ -931,7 +1067,9 @@ export function App() {
               ? <RedeemCodesView />
               : view === 'vision'
                 ? <VisionView />
-                : <ImageGenView />}
+                : view === 'search'
+                  ? <SearchView />
+                  : <ImageGenView />}
     </main>
     {adjustTarget ? <AdjustTokensModal userKey={adjustTarget.userKey} name={adjustTarget.name} onClose={() => setAdjustTarget(null)} onDone={() => { setAdjustTarget(null); void loadSummary() }} /> : null}
     {usageTarget ? <UsageModal userKey={usageTarget.userKey} name={usageTarget.name} onClose={() => setUsageTarget(null)} /> : null}

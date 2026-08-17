@@ -140,6 +140,17 @@ Phase 14「AI 基础设施解放」阶段性版本：Skill CLI + Docker 化部�
 
 > 2026-08-14：AGENT.md 精简，将历史改动记录从 AGENT.md 迁移至此。此后所有功能上线/修复/决策记录统一写在本文件，AGENT.md 只保留项目概述与可复用技巧。
 
+## 2026-08-17（追加）：管理后台日活/月活统计（DAU/MAU）
+
+### Added
+
+- **`GET /api/admin/webos/stats/activity?days=30`**（`server/src/routes/adminWebos.ts`）：返回最近 N 天 DAU 序列（含 0 天补齐）+ 窗口活跃用户 + 当月 MAU + 上月 MAU + 趋势（今日/昨日/近 7 天日均/近 30 天日均/周环比/峰值/MAU 环比）。活跃口径 = 当天/当月有任意 chat/stream 或工具调用，来源六表并集（`webos_chat_sessions` / `webos_chat_logs` / `webos_ai_usage` / `webos_imagegen_usage` / `webos_video_usage` / `webos_vision_usage`），按 `user_key` 去重、guest/member 分开统计；时区 Asia/Shanghai（UTC+8）切日/切月；会话表工具事件（`events LIKE '%tool_start%'`）在库内判定，避免把含 reasoning 的大字段拉回内存；PG/SQLite 双驱动通用（与 vision/stats 相同的取行 + JS 聚合风格）。
+- **管理后台仪表盘「日活 / 月活（DAU / MAU）」卡片**（`client/admin-web/src/App.tsx` + `src/api.ts`）：今日 DAU（游客/会员/工具拆解）、近 7 天日均 + 周环比 + 峰值、当月 MAU、MAU 环比上月 + DAU 条形图（7/30/90 天切换，60s 自动刷新）。
+
+### Validation
+
+- 独立脚本重算与端点结果一致：08-07 DAU 35（33 游客 + 2 会员）、08-17 DAU 3（2+1）、8 月 MAU 105（101+4）✅；未登录 401 / 非 admin 403 / admin 200（经 nginx https 端到端）✅；admin-web `tsc -b --noEmit` + `vite build` 通过，产物已部署 `/var/www/daily-admin/public`（index-CqfvgnMO.js）✅。
+
 ## 2026-08-16：UI 探索启动（图标 E1 定稿 + 全套 UI 稿）+ D19 组合式包 + D20 系统包化
 
 ### Added
@@ -551,8 +562,95 @@ Phase 14「AI 基础设施解放」阶段性版本：Skill CLI + Docker 化部�
 - 发消息后 AI 立即显示「●●● 正在思考…」（占位消息改空 segments 触发 typing 动画，修复"发送后无提示"）
 - 流式生成中的消息不显示「复制/回退重来」操作条（生成完成才出现）
 - AI 消息左边缘收敛到 ~40px（消息区 padding 10px + 头像 24px + gap 8px）
+### 2026-08-16：webOS 三项修复 + 系统时间能力 + Skill 市场生效（sub-agent 并行）
 
-### 2026-08-04：grep 系统源码 + 空闲超时 + 生图展示 + 工具折叠
+**① 识图 bug 修复（MiniMax-M3 视觉桥接全链路）**
+- 根因：`chat/stream` 的 `validateMessages` 把单条消息硬限制 12,000 字符，前端压缩后的图片 data URI（几十 KB~数 MB）在进入视觉桥接前就被 `INVALID_MESSAGE_CONTENT` 400 拒绝 → AI 永远收不到图片。
+- 修复（server/src/routes/webos.ts）：
+  - 媒体消息（含 `data:image/...;base64,`）放行至 128MB，普通文本仍限 12,000；
+  - 新增 `replaceDataUriMediaRefs`：data URI 只交给 M3，不再原样喂给纯文本 DeepSeek（替换为 `[图片N]`，避免上下文膨胀/成本失真）；
+  - `extractMediaRefs` / `looksLikeMediaRef` 补充 `system/` 路径、Markdown 图片无扩展名 URL、`./`/`/` 前缀、URL 中带 `image`/`video` 的地址；
+  - `estimateCostMinor` 先替换 data URI 再统计字符，避免 base64 被算成巨额输入 token；
+  - M3 失败/未配置时不再完全静默，向 AI 注入系统提示（用户能感知"检测到图片但分析失败"）。
+- 修复（server/src/vision/m3Vision.ts）：路径归一化（去 `./`、URL 解码）、公网 URL 按 pathPart 判断扩展名、`max_tokens` 兼容、响应 content 数组兼容。
+- 前端（client/shell-web/src/App.tsx / styles.css）：composer 粘贴/拖拽图片 → 压缩（最长边 ≤2048）→ data URI 附件预览 → 用户消息缩略图渲染（该部分由并行任务补齐）。
+- 验证：本地 + 线上真实图片消息全链路通过（M3 描述注入 → DeepSeek 基于描述回答）。
+
+**② 对话框默认保存上一条消息修复（client/shell-web/src/store.ts）**
+- 根因：`runConversationTurn` 只清顶层 `draft`，未同步清空 `conversations` 中该会话的 `conv.draft`；持久化保存的是旧草稿 → 刷新/重开/切换会话后输入框恢复上一条已发送消息。
+- 修复：乐观更新时同步清空对应 conv 的 `draft` 并 `persistNow()` 立即落盘；普通发送与编辑重建（rebuild）均覆盖；未发送草稿的切换保留语义不变。
+
+**③ 系统时间能力（server/src/routes/webosTime.ts 新增 + webos.ts + index.ts + shared/webos-contracts + client/shell-web/src/api.ts）**
+- 对话默认携带时间：`chat/stream` 在 userText 组装处注入 `当前时间：YYYY-MM-DD HH:mm 星期X（北京时间）` 前缀（App 上下文 / rebuild 场景同样注入）。
+- 时间 API：`GET /webos/api/time`（鉴权）返回 `{ iso, timestamp, beijing, weekday, timezone: 'Asia/Shanghai' }`；共享契约 `WebOsTimeInfo`；前端 `fetchServerTime()` 封装。
+- 时区同步：本机 `/etc/localtime` → Asia/Shanghai；docker-compose(.prod).yml 与 .env(.prod).example 增加 `TZ=Asia/Shanghai`。
+- 注：初版路由挂载前缀剥离导致 404（`get('/')` 在 `/webos/api` 前缀下不匹配 `/time`），已修为 `get('/time')` 并线上复测通过。
+
+**④ Skill 市场生效（server/src/webosStoreV1.ts 模板 + 既有 API/SDK）**
+- 商店模板（含「技能」页签：skills.list / skills.install、单列卡片、安装状态）随本次部署上线；`ensureSystemStore` 未改动商店自动升级，新模板含 `tab-skills`（线上实测 hasSkillsTab=true）。
+- 市场数据源 = 全局 `.pi/skills-webos/`（app-dev / design / myself / video-sprites / xhs-content），`SKILL_INSTALL_MAX_BYTES` 内可安装到用户工作区。
+
+**部署**：`server/src/{routes/webos.ts, routes/webosTime.ts(新), index.ts, vision/m3Vision.ts, webosStoreV1.ts}` 上传生产 + `client/shell-web` dist 产物更新 `server/public/` + 生产 `.env` 配置 `MINIMAX_API_KEY` + `pm2 restart daily-server`（PID 283116）。
+**验证**：server/shell-web `tsc --noEmit` 零错误；本地冒烟（health/time/skills/带图 chat 链路）；线上实测 time API（北京时间 12:48 正确）、AI 正确报出北京时间、M3 识图描述注入、新游客商店含技能页签。
+
+### 2026-08-16（追加）：桌面壁纸 bug 修复——上传图片无法显示（sub-agent）
+
+- 根因：桌面 system.desktop 运行在 sandbox iframe（opaque origin），`<img>`/CSS `url()` 请求不带 SameSite cookie；而用户上传区图片（home/uploads/）的 `/webos/api/workspace/files/raw?path=` 端点带鉴权 → iframe 内 401 → Chrome ORB 拦截（表现为图片不显示）；AI 用相对路径 `home/uploads/xx.png` 则被 `<base>` 解析成 `/home/uploads/xx.png` → 404。此前生图产物有免鉴权公开 URL，但用户上传图片没有。
+- 修复（仿「生图公开目录」模式，server/src/utils/webosWorkspace.ts + routes/webos.ts + piBridge.ts + shared/webos-contracts）：
+  - `home/` 下图片双写 UUID 命名公开副本（`PUBLIC_IMAGES_DIR`），映射存 `data/webos-public-uploads.json`；
+  - `agent_fs_list / agent_fs_stat / agent_fs_read` 与上传/列表接口（fileEntry）返回 `publicUrl`（`WebOsWorkspaceEntry.publicUrl?` 兼容旧字段）；
+  - 删除文件时同步清理公开副本；`home/` 之外不生成（不开放 workspace/files/raw 免鉴权，path 仍不可枚举）；
+  - AI 系统提示词、工作区 README、design 文档新增指引：沙箱内引用用户上传图片必须用 `publicUrl`。
+- 部署：上传 4 文件 + `pm2 restart daily-server`。
+- 验证：站长账号（真实账号）上传图返回 publicUrl；**存量壁纸 P20260801-*.jpg（13 张）全部自动补 publicUrl**；免鉴权无 cookie 拉取 200（image/png、image/jpeg）；tsc 双端零错误。
+
+### 2026-08-16（追加）：FFmpeg 全能力上线——edit_video 扩展 7 大操作（sub-agent）
+
+- 背景：AI 只能用 FFmpeg 处理视频（抽帧/裁剪/缩放等），无法处理壁纸/图片的滤镜（半透明、对比度等）。本次把 edit_video 扩展为 FFmpeg 全能力工具，**操作从 13 个增至 20 个**：
+  - 原有 13：extract-frames / sprite-sheet / to-sprite / to-gif / poster / trim / crop / scale / extract-audio / mute / speed / remove-bg / concat；
+  - **新增 7**：`filter`（图片/视频帧滤镜：contrast/brightness/saturation/gamma/blur/alpha 半透明/darken 暗化/hue/negate，顺序 eq→hue→gblur→colorlevels→negate→alpha）、`rotate`（90/180/270 无损 + 任意角度）、`flip`（水平/垂直）、`convert`（png/jpg/webp/gif/mp4/webm 互转 + quality）、`watermark`（图片水印 overlay / 文字水印 drawtext，字体探测 DejaVu、文本转义防注入、支持 #RRGGBBAA 半透明）、`tile`（2-12 张图网格拼图，montage）、`volume`（音频音量 0-3）。
+- 安全：全部结构化参数（`Number()+clamp` 范围钳制），**不接受任意 filter 字符串**；drawtext 转义 `\ : ' , %`；watermarkPath 工作区路径校验防越界；产物继续走公开 URL 管线（imagegen/videogen），游客禁止、logAgentAction 记录不变。
+- 部署：`server/src/utils/videoEdit.ts` + `server/src/routes/webos.ts`（工具描述完整列出新操作与中文示例）上传生产 + pm2 重启。
+- 验证：本地 + 生产实测 filter（alpha=0.55+contrast=1.4+darken）产物正确；rotate/flip/convert/watermark（文+图）/tile/volume 本地冒烟全过；tsc 双端零错误。
+- 开放情况：**对 AI 对话开放**（edit_video 工具，登录可用）；**skill 形式**：video-sprites（精灵图工作流）等系统技能文档已就位；**App 运行时 API 未开放**（App SDK 无 FFmpeg 能力，App 集成需 AI 生成时预处理素材，未来可走 API 包）。
+
+### 2026-08-16（追加）：web 端「复制」按钮假复制修复（sub-agent）
+
+- 根因：`copyMessageAt` 只用 `navigator.clipboard.writeText`，失败无 fallback 且无任何反馈（失败被静默吞掉）→ 用户点「复制」没反应，像假按钮；AI 错误信息复制、分享链接复制同款问题。
+- 修复：新增 `copyTextToClipboard()`（Clipboard API 优先 + 临时 textarea + `execCommand('copy')` fallback，兼容移动端/WebView）；消息复制/错误复制/分享链接复制统一走它；成功绿色「已复制」、失败红色「复制失败」（1.6s 复原）。
+- 文件：`client/shell-web/src/{store.ts, App.tsx, styles.css}` + `client/desktop/.../PdfViewer.tsx`（同类修复）。
+- 部署：shell-web 重新构建上传 `server/public/`（daily 200 验证）；tsc 双端零错误。
+
+### 2026-08-17：web 端 AI 切换 ChatST 网关（deepseek-v4-flash-0731）
+
+- 背景：用户紧急要求 web 端 AI 从 DeepSeek 官方直连切换到 ChatST 聚合网关：模型 `deepseek-v4-flash-0731`、Key `sk-XPxx...PatJm`、Base URL `https://api.chatst.org/v1`。
+- 改动：
+  - `server/src/piBridge.ts`：`registerDeepseekModels` 新增 `baseUrl` 参数（`DEEPSEEK_BASE_URL` 环境变量覆盖，默认仍 `https://api.deepseek.com`）；deepseek provider 注册 `deepseek-v4-flash-0731`（保留官方 `deepseek-v4-flash` 定义便于回退）；`createWebosSession` 与 `generateConversationTitle` 默认模型改为 `deepseek/deepseek-v4-flash-0731`。
+  - `server/.env`：`DEEPSEEK_API_KEY` 换新 Key + `DEEPSEEK_MODEL=deepseek/deepseek-v4-flash-0731` + `DEEPSEEK_BASE_URL=https://api.chatst.org/v1`（.env 已被 .gitignore 忽略，Key 不入 git）。
+  - `server/src/billing/pricing.ts`：计费目录 chat 项 model 同步为 `deepseek-v4-flash-0731`（计费按 kind 匹配，模型名仅展示用）。
+  - `.env.example` / `.env.prod.example` / `docker-compose.prod.yml`：新增 `DEEPSEEK_BASE_URL` 说明与透传。
+- 验证：server `tsc --noEmit` 零错误；ChatST 网关实测——非流式/流式（SSE）均 200，`thinking:{type:enabled}` + `reasoning_effort` 参数被接受，思考内容经 `delta.reasoning` 返回（pi-ai `reasoningFields` 兼容 `reasoning` 字段，无需改 pi 层）；模型返回 `deepseek-v4-flash:0731`。
+- 部署：上传 `server/src/piBridge.ts` + `server/src/billing/pricing.ts` 到生产 + 生产 `.env` 配置三项 + `pm2 restart daily-server`。
+
+### 2026-08-17（追加）：web 端平板布局适配（触屏平板铺满 + 内容列限宽）
+
+- 背景：用户反馈平板体验很烂。根因：`.shell-stage` 默认 `max-width: 440px`（手机壳），竖屏平板（触屏、宽 600-1024px）落在既有媒体查询夹缝里——`min-width:700px` 规则要求 `hover:hover`（平板触屏不命中）、横屏规则要求 landscape（竖屏不命中）→ 平板只能看到一条 440px 手机窄条，两侧大片空白。
+- 改动（纯 CSS，`client/shell-web/src/styles.css` 末尾新增两个媒体查询，不动 React 结构）：
+  - `@media (min-width: 600px) and (pointer: coarse) and (hover: none)`：Shell 铺满视口（去 440px 壳）；对话页/系统页内容列限宽 760px 居中（`max(24px, calc((100% - 760px)/2))`）；消息气泡收窄（AI 72% / 用户 58%）；会话抽屉加宽 320px；字号/卡片/按钮/图标整体放大适配大屏；爱发电档位卡与套餐卡改横排；桌面内容列限宽 900px、Dock 限宽 640px 居中。
+  - `@media (min-width: 900px) and (pointer: coarse) and (hover: none) and (orientation: landscape)`：横屏内容列限宽 820px，气泡进一步收窄（AI 68% / 用户 55%）。
+- 验证：`tsc -b --noEmit` + `vite build` 零错误；Playwright 触屏视口实测（`scripts/verify-tablet-layout.mjs`，mock bootstrap 本地渲染）——iPad 竖屏 768×1024 stage 宽 768=视口 ✅、iPad 横屏 1024×768 stage 宽 1024=视口 + 内容列 820px 居中（padding 102px）✅、手机 390×844 保持原布局（tabletRule=false，padding 10px）✅；无 JS 报错。
+- 部署：shell-web 重新构建，dist 产物复制到 `server/public/`（`/daily` 静态托管），随服务端一起上线。
+
+### 2026-08-17（追加）：web 端 AI 二次切换 opencode.ai 网关（deepseek-v4-flash）
+
+- 背景：用户要求把 web 端 AI 从 ChatST 网关换到 opencode.ai：模型 `deepseek-v4-flash`、Key `sk-UHXs...HWt`、Base URL `https://opencode.ai/zen/go/v1`。
+- 改动：仅配置层（代码无需改——`registerDeepseekModels` 已支持 `DEEPSEEK_BASE_URL` 覆盖，`deepseek-v4-flash` 模型定义已注册）：
+  - `server/.env`（本地 + 服务器）：`DEEPSEEK_API_KEY` 换新 Key + `DEEPSEEK_MODEL=deepseek/deepseek-v4-flash` + `DEEPSEEK_BASE_URL=https://opencode.ai/zen/go/v1`。
+  - `.env.example` / `.env.prod.example`：注释更新为通用网关说明（ChatST / opencode.ai 两种示例）。
+- 验证：opencode.ai 端点直连——**当前 Key 余额不足**（`CreditsError: Insufficient balance`，非流式/流式均返回，需到 https://opencode.ai/workspace/wrk_01KY7V0XC0J2DZH8ATMS9WTPM8/billing 充值）；线上 chat/stream 链路正常（SSE start → 因余额不足 pi 空响应 → 服务端 `WEBOS_AI_EMPTY_RESPONSE` 自动重置会话，服务不崩，充值后即可用）。
+- 部署：服务器 `.env` 三项已更新 + `pm2 restart daily-server`（PID 287218）online、端口唯一监听。
+
+
 
 **追加（2026-08-04 下午）三个线上问题修复**：
 

@@ -18,6 +18,7 @@ import { IMAGE_PRICING } from '../imagegen/chatstImage.js'
  * - GET  /usage          单用户用量明细（new-api 风格）
  * - PUT  /credits        调整用户积分额度（套餐开通/客服补偿；/tokens 兼容旧名）
  * - GET  /server-status  服务器负载（2026-08-06：CPU/内存/磁盘/带宽）
+ * - GET  /stats/activity  日活/月活统计（DAU 序列 + 当月 MAU + 7/30 天趋势，2026-08-17）
  */
 
 export const adminWebosRouter = Router()
@@ -1187,6 +1188,343 @@ adminWebosRouter.get('/vision/usage', async (req, res, next) => {
         ip: row.ip ?? null,
         createdAt: Number(row.created_at),
       })),
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+// ============================================================================
+// GET /api/admin/webos/stats/activity?days=30 — 日活/月活（DAU/MAU）统计
+// 活跃口径（2026-08-17）：当天/当月有任意 chat/stream 或工具调用即活跃，按
+// user_key 去重（guest:<deviceId> / user:<userId>），guest/member 分开统计。
+// 数据来源（并集去重）：webos_chat_sessions（一次 chat/stream 一行，含工具事件）
+// + webos_chat_logs + webos_ai_usage + webos_imagegen_usage + webos_video_usage
+// + webos_vision_usage。时区按 Asia/Shanghai（UTC+8）切日/切月（产品面向国内用户）。
+// ============================================================================
+
+const ACTIVITY_TZ_OFFSET_MS = 8 * 3600 * 1000
+
+/** UTC+8 时区下的「日序号」（1970-01-01 起第几天） */
+function activityDayIndex(ts: number): number {
+  return Math.floor((ts + ACTIVITY_TZ_OFFSET_MS) / 86400000)
+}
+
+/** 日序号 → YYYY-MM-DD（UTC+8；dayIdx 是 ts+8h 的 UTC 日序号，日界 = dayIdx*86400000） */
+function activityDayDate(dayIdx: number): string {
+  return new Date(dayIdx * 86400000).toISOString().slice(0, 10)
+}
+
+/** 时间戳 → YYYY-MM（UTC+8 当月） */
+function activityMonthOf(ts: number): string {
+  return new Date(ts + ACTIVITY_TZ_OFFSET_MS).toISOString().slice(0, 7)
+}
+
+interface ActivityBucket {
+  total: Set<string>
+  guest: Set<string>
+  member: Set<string>
+  tool: Set<string>
+}
+
+function activityBucket(): ActivityBucket {
+  return { total: new Set(), guest: new Set(), member: new Set(), tool: new Set() }
+}
+
+adminWebosRouter.get('/stats/activity', async (req, res, next) => {
+  try {
+    const pool = getPool()
+    const days = Math.min(90, Math.max(1, Number(req.query.days) || 30))
+
+    // DAU 窗口起点（含今天）+ 当月/上月起点：一次查询覆盖全部所需数据
+    const now = Date.now()
+    const todayIdx = activityDayIndex(now)
+    const nowShifted = new Date(now + ACTIVITY_TZ_OFFSET_MS)
+    const monthStart = Date.UTC(nowShifted.getUTCFullYear(), nowShifted.getUTCMonth(), 1) - ACTIVITY_TZ_OFFSET_MS
+    const prevMonthStart = Date.UTC(nowShifted.getUTCFullYear(), nowShifted.getUTCMonth() - 1, 1) - ACTIVITY_TZ_OFFSET_MS
+    const daysStart = (todayIdx - (days - 1)) * 86400000 - ACTIVITY_TZ_OFFSET_MS
+    const since = Math.min(daysStart, monthStart, prevMonthStart)
+
+    // 活跃来源表：只取 user_key + created_at 两列（会话表额外取工具事件标记），
+    // 与 vision/stats 的「取行 + JS 聚合」风格一致，PG/SQLite 双驱动通用；
+    // LIKE 判断在库里完成，避免把 events（含 reasoning 大字段）拉回内存。
+    const sources: Array<{ table: string; toolColumn?: string }> = [
+      { table: 'webos_ai_usage' },
+      { table: 'webos_chat_logs' },
+      { table: 'webos_chat_sessions', toolColumn: 'events' },
+      { table: 'webos_imagegen_usage' },
+      { table: 'webos_video_usage' },
+      { table: 'webos_vision_usage' },
+    ]
+
+    const byDay = new Map<number, ActivityBucket>()
+    const byMonth = new Map<string, ActivityBucket>()
+    const bySource = new Map<string, { usersWindow: Set<string>; usersMonth: Set<string> }>()
+    const curMonth = activityMonthOf(now)
+    const prevMonth = activityMonthOf(monthStart - 1)
+
+    for (const source of sources) {
+      const selectTool = source.toolColumn
+        ? `, (${source.toolColumn} LIKE '%tool_start%') AS used_tool`
+        : ''
+      const rows = await pool.query(
+        `SELECT user_key, created_at${selectTool} FROM ${source.table} WHERE created_at >= $1`,
+        [since],
+      )
+      const sourceAgg = bySource.get(source.table) ?? { usersWindow: new Set<string>(), usersMonth: new Set<string>() }
+      bySource.set(source.table, sourceAgg)
+
+      for (const row of rows.rows) {
+        const userKey = row.user_key ? String(row.user_key) : ''
+        if (!userKey) continue
+        const createdAt = Number(row.created_at)
+        if (!Number.isFinite(createdAt)) continue
+        const dayIdx = activityDayIndex(createdAt)
+
+        if (dayIdx >= todayIdx - (days - 1) && dayIdx <= todayIdx) {
+          const day = byDay.get(dayIdx) ?? activityBucket()
+          byDay.set(dayIdx, day)
+          day.total.add(userKey)
+          if (userKey.startsWith('guest:')) day.guest.add(userKey)
+          else if (userKey.startsWith('user:')) day.member.add(userKey)
+          if (source.toolColumn && Boolean(row.used_tool)) day.tool.add(userKey)
+          sourceAgg.usersWindow.add(userKey)
+        }
+
+        const month = activityMonthOf(createdAt)
+        if (month === curMonth || month === prevMonth) {
+          const m = byMonth.get(month) ?? activityBucket()
+          byMonth.set(month, m)
+          m.total.add(userKey)
+          if (userKey.startsWith('guest:')) m.guest.add(userKey)
+          else if (userKey.startsWith('user:')) m.member.add(userKey)
+        }
+        if (month === curMonth) sourceAgg.usersMonth.add(userKey)
+      }
+    }
+
+    // DAU 序列（无数据的天补 0，保证图表连续）
+    const dau: Array<{ day: string; total: number; guest: number; member: number; tool: number }> = []
+    for (let i = todayIdx - (days - 1); i <= todayIdx; i++) {
+      const d = byDay.get(i)
+      dau.push({
+        day: activityDayDate(i),
+        total: d?.total.size ?? 0,
+        guest: d?.guest.size ?? 0,
+        member: d?.member.size ?? 0,
+        tool: d?.tool.size ?? 0,
+      })
+    }
+
+    // 窗口内活跃用户（按天 union）
+    const windowUsers = activityBucket()
+    for (const d of byDay.values()) {
+      for (const k of d.total) windowUsers.total.add(k)
+      for (const k of d.guest) windowUsers.guest.add(k)
+      for (const k of d.member) windowUsers.member.add(k)
+    }
+
+    const mauBucket = byMonth.get(curMonth) ?? activityBucket()
+    const prevMauBucket = byMonth.get(prevMonth) ?? activityBucket()
+
+    // 趋势（7/30 天对比）
+    const values = dau.map((d) => d.total)
+    const avg = (arr: number[]): number => (arr.length === 0 ? 0 : arr.reduce((a, b) => a + b, 0) / arr.length)
+    const pct = (cur: number, base: number): number =>
+      base > 0 ? Math.round(((cur - base) / base) * 1000) / 10 : cur > 0 ? 100 : 0
+    const avg7 = avg(values.slice(-7))
+    const avg30 = avg(values)
+    const avgPrev7 = avg(values.slice(-14, -7))
+    let peak = { day: dau[0]?.day ?? '', total: 0 }
+    for (const d of dau) if (d.total > peak.total) peak = { day: d.day, total: d.total }
+
+    res.json({
+      days,
+      timezone: 'Asia/Shanghai (UTC+8)',
+      generatedAt: now,
+      sources: sources.map((s) => s.table),
+      dau,
+      activeUsersWindow: { total: windowUsers.total.size, guest: windowUsers.guest.size, member: windowUsers.member.size },
+      mau: { month: curMonth, total: mauBucket.total.size, guest: mauBucket.guest.size, member: mauBucket.member.size },
+      mauPrevMonth: { month: prevMonth, total: prevMauBucket.total.size, guest: prevMauBucket.guest.size, member: prevMauBucket.member.size },
+      trend: {
+        today: dau[dau.length - 1] ?? null,
+        yesterday: dau.length >= 2 ? dau[dau.length - 2] : null,
+        avg7: Math.round(avg7 * 10) / 10,
+        avgPrev7: Math.round(avgPrev7 * 10) / 10,
+        avg30: Math.round(avg30 * 10) / 10,
+        todayVsAvg7Pct: pct(dau[dau.length - 1]?.total ?? 0, avg7),
+        todayVsAvg30Pct: pct(dau[dau.length - 1]?.total ?? 0, avg30),
+        weekOverWeekPct: pct(avg7, avgPrev7),
+        peak,
+        mauChangePct: pct(mauBucket.total.size, prevMauBucket.total.size),
+      },
+      bySource: Object.fromEntries(
+        [...bySource.entries()].map(([table, agg]) => [
+          table,
+          { activeUsersWindow: agg.usersWindow.size, activeUsersMonth: agg.usersMonth.size },
+        ]),
+      ),
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// ============================================================================
+// GET /api/admin/webos/search-stats?days=7 — 搜索 API 状态可视化（2026-08-17）
+//
+// 数据源：api_usage_log（搜索工具每次调用写一条：时间/用户/引擎/query/成败/耗时/来源）。
+// 返回：整体统计 + 按引擎 + 按来源工具 + 按天趋势 + 按用户 TOP + 失败样例。
+// 引擎 provider：metaso（秘塔搜索 web_search/read_webpage）、arxiv（academic_search）、
+// github（github_search）；github_proxy 为 GitHub 下载代理（不属搜索工具，谨慎区分）。
+// ============================================================================
+
+const SEARCH_ENGINE_LABEL: Record<string, string> = {
+  metaso: '秘塔搜索',
+  arxiv: '学术搜索(ArXiv)',
+  github: 'GitHub搜索',
+  github_proxy: 'GitHub代理下载',
+  local: '本地搜索',
+}
+
+function searchEngineDisplay(provider: string): string {
+  return SEARCH_ENGINE_LABEL[provider] ?? provider
+}
+
+/** 失败样例展示用的 query（截断，避免表格撑爆） */
+function truncateSearchQuery(value: unknown, max = 80): string | null {
+  if (value === null || value === undefined) return null
+  const text = String(value)
+  return text.length > max ? `${text.slice(0, max)}…` : text
+}
+
+adminWebosRouter.get('/search-stats', async (req, res, next) => {
+  try {
+    const pool = getPool()
+    const days = Math.min(90, Math.max(1, Number(req.query.days) || 7))
+    const since = Date.now() - days * 24 * 60 * 60 * 1000
+
+    // 时间窗内全部记录（api_usage_log 行数可控：搜索调用低频，全量拉取后内存聚合）
+    const rows = await pool.query(
+      `SELECT provider, endpoint, status, latency_ms, error_msg, credits_consumed, user_key, query, tool, created_at
+       FROM api_usage_log WHERE created_at >= $1`,
+      [since],
+    )
+
+    const total = { calls: 0, ok: 0, failed: 0, latencyMsSum: 0, okLatencyMsSum: 0, creditsConsumed: 0 }
+    const byEngine: Record<string, { calls: number; ok: number; failed: number; latencyMsSum: number; okLatencyMsSum: number; creditsConsumed: number; lastCallAt: number | null }> = {}
+    const byTool: Record<string, { calls: number; ok: number; failed: number }> = {}
+    const byDay: Record<string, { calls: number; ok: number; failed: number }> = {}
+    const byUser: Record<string, { userKey: string; calls: number; ok: number; failed: number }> = {}
+    const failures: Array<{
+      id: unknown
+      createdAt: number
+      provider: string
+      tool: string | null
+      userKey: string | null
+      query: string | null
+      endpoint: string
+      latencyMs: number | null
+      errorMsg: string | null
+    }> = []
+
+    for (const row of rows.rows) {
+      const provider = String(row.provider ?? 'unknown')
+      const status = String(row.status ?? 'ok')
+      const latency = row.latency_ms !== null && row.latency_ms !== undefined ? Number(row.latency_ms) : null
+      const credits = Number(row.credits_consumed ?? 0)
+      const ok = status === 'ok'
+
+      total.calls += 1
+      if (ok) total.ok += 1
+      else total.failed += 1
+      if (latency !== null) total.latencyMsSum += latency
+      if (ok && latency !== null) total.okLatencyMsSum += latency
+      total.creditsConsumed += credits
+
+      byEngine[provider] ??= { calls: 0, ok: 0, failed: 0, latencyMsSum: 0, okLatencyMsSum: 0, creditsConsumed: 0, lastCallAt: null }
+      const eng = byEngine[provider]
+      eng.calls += 1
+      if (ok) eng.ok += 1
+      else eng.failed += 1
+      if (latency !== null) eng.latencyMsSum += latency
+      if (ok && latency !== null) eng.okLatencyMsSum += latency
+      eng.creditsConsumed += credits
+      const created = Number(row.created_at ?? 0)
+      if (created > (eng.lastCallAt ?? 0)) eng.lastCallAt = created
+
+      const tool = row.tool ? String(row.tool) : null
+      byTool[tool ?? provider] ??= { calls: 0, ok: 0, failed: 0 }
+      byTool[tool ?? provider].calls += 1
+      if (ok) byTool[tool ?? provider].ok += 1
+      else byTool[tool ?? provider].failed += 1
+
+      const day = new Date(created).toISOString().slice(0, 10)
+      byDay[day] ??= { calls: 0, ok: 0, failed: 0 }
+      byDay[day].calls += 1
+      if (ok) byDay[day].ok += 1
+      else byDay[day].failed += 1
+
+      const userKey = row.user_key ? String(row.user_key) : null
+      if (userKey) {
+        byUser[userKey] ??= { userKey, calls: 0, ok: 0, failed: 0 }
+        byUser[userKey].calls += 1
+        if (ok) byUser[userKey].ok += 1
+        else byUser[userKey].failed += 1
+      }
+
+      if (!ok && failures.length < 20) {
+        failures.push({
+          id: row.id,
+          createdAt: created,
+          provider,
+          tool,
+          userKey,
+          query: truncateSearchQuery(row.query),
+          endpoint: String(row.endpoint ?? ''),
+          latencyMs: latency,
+          errorMsg: row.error_msg ? String(row.error_msg) : null,
+        })
+      }
+    }
+
+    const pct = (okCount: number, calls: number): number => (calls > 0 ? Math.round((okCount / calls) * 1000) / 10 : 100)
+    const avg = (sum: number, count: number): number => (count > 0 ? Math.round(sum / count) : 0)
+
+    res.json({
+      days,
+      since,
+      total: {
+        calls: total.calls,
+        ok: total.ok,
+        failed: total.failed,
+        successRate: pct(total.ok, total.calls),
+        avgLatencyMs: avg(total.latencyMsSum, total.calls),
+        avgOkLatencyMs: avg(total.okLatencyMsSum, total.ok),
+        creditsConsumed: total.creditsConsumed,
+      },
+      byEngine: Object.entries(byEngine)
+        .sort(([, a], [, b]) => b.calls - a.calls)
+        .map(([provider, e]) => ({
+          provider,
+          displayName: searchEngineDisplay(provider),
+          calls: e.calls,
+          ok: e.ok,
+          failed: e.failed,
+          successRate: pct(e.ok, e.calls),
+          avgLatencyMs: avg(e.latencyMsSum, e.calls),
+          avgOkLatencyMs: avg(e.okLatencyMsSum, e.ok),
+          creditsConsumed: e.creditsConsumed,
+          lastCallAt: e.lastCallAt,
+        })),
+      byTool: Object.entries(byTool)
+        .sort(([, a], [, b]) => b.calls - a.calls)
+        .map(([tool, t]) => ({ tool, calls: t.calls, ok: t.ok, failed: t.failed, successRate: pct(t.ok, t.calls) })),
+      byDay: Object.entries(byDay)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([day, d]) => ({ day, calls: d.calls, ok: d.ok, failed: d.failed })),
+      byUser: Object.values(byUser).sort((a, b) => b.calls - a.calls).slice(0, 20),
+      failures,
     })
   } catch (error) {
     next(error)

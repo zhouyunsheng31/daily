@@ -179,6 +179,47 @@ export interface VisionUsageItem {
 }
 
 // ============================================================================
+// 日活/月活统计（2026-08-17）：DAU 序列 + 当月 MAU + 7/30 天趋势对比
+// ============================================================================
+
+export interface ActivityDay {
+  day: string
+  total: number
+  guest: number
+  member: number
+  tool: number
+}
+export interface ActivityMonth {
+  month: string
+  total: number
+  guest: number
+  member: number
+}
+export interface ActivityStats {
+  days: number
+  timezone: string
+  generatedAt: number
+  sources: string[]
+  dau: ActivityDay[]
+  activeUsersWindow: { total: number; guest: number; member: number }
+  mau: ActivityMonth
+  mauPrevMonth: ActivityMonth
+  trend: {
+    today: ActivityDay | null
+    yesterday: ActivityDay | null
+    avg7: number
+    avgPrev7: number
+    avg30: number
+    todayVsAvg7Pct: number
+    todayVsAvg30Pct: number
+    weekOverWeekPct: number
+    peak: { day: string; total: number }
+    mauChangePct: number
+  }
+  bySource: Record<string, { activeUsersWindow: number; activeUsersMonth: number }>
+}
+
+// ============================================================================
 // 服务器负载监控（2026-08-06）
 // ============================================================================
 
@@ -212,6 +253,71 @@ export interface ServerMetricsResponse {
   points: ServerMetricsPoint[]
 }
 
+// ============================================================================
+// 搜索 API 状态可视化（2026-08-17）
+// ============================================================================
+
+export interface SearchEngineStat {
+  provider: string
+  displayName: string
+  calls: number
+  ok: number
+  failed: number
+  successRate: number
+  avgLatencyMs: number
+  avgOkLatencyMs: number
+  creditsConsumed: number
+  lastCallAt: number | null
+}
+export interface SearchToolStat {
+  tool: string
+  calls: number
+  ok: number
+  failed: number
+  successRate: number
+}
+export interface SearchDayStat {
+  day: string
+  calls: number
+  ok: number
+  failed: number
+}
+export interface SearchUserStat {
+  userKey: string
+  calls: number
+  ok: number
+  failed: number
+}
+export interface SearchFailureSample {
+  id: unknown
+  createdAt: number
+  provider: string
+  tool: string | null
+  userKey: string | null
+  query: string | null
+  endpoint: string
+  latencyMs: number | null
+  errorMsg: string | null
+}
+export interface SearchStats {
+  days: number
+  since: number
+  total: {
+    calls: number
+    ok: number
+    failed: number
+    successRate: number
+    avgLatencyMs: number
+    avgOkLatencyMs: number
+    creditsConsumed: number
+  }
+  byEngine: SearchEngineStat[]
+  byTool: SearchToolStat[]
+  byDay: SearchDayStat[]
+  byUser: SearchUserStat[]
+  failures: SearchFailureSample[]
+}
+
 export const api = {
   me: () => request<MeUser>('/api/auth/me'),
   login: (email: string, password: string) =>
@@ -243,6 +349,10 @@ export const api = {
     request<{ userKey: string | null; page: number; total: number; items: VisionUsageItem[] }>(
       `/api/admin/webos/vision/usage?${userKey ? `userKey=${encodeURIComponent(userKey)}&` : ''}page=${page}&limit=30`,
     ),
+  // 2026-08-17 日活/月活（DAU/MAU）统计
+  activityStats: (days = 30) => request<ActivityStats>(`/api/admin/webos/stats/activity?days=${days}`),
+  // 2026-08-17 搜索 API 状态可视化
+  searchStats: (days = 7) => request<SearchStats>(`/api/admin/webos/search-stats?days=${days}`),
   ban: (id: string, isBanned: boolean) =>
     request<unknown>(`/api/admin/users/${encodeURIComponent(id)}/ban`, {
       method: 'PUT',
