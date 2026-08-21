@@ -12,19 +12,18 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.CoroutineScope
 import org.koin.android.ext.android.getKoin
 import xyz.shadowshub.appruntime.AppRuntimeHost
 import xyz.shadowshub.core.network.AppDetail
 import xyz.shadowshub.core.network.WebosApi
 import xyz.shadowshub.daily.BuildConfig
-import xyz.shadowshub.daily.ui.theme.LoadingView
 
 /**
  * App 运行页（M1-1 沉浸化）：
@@ -37,6 +36,8 @@ fun AppRunScreen(
     appId: String,
     appName: String,
     onBack: () -> Unit,
+    /** 宿主级常驻协程作用域（AppRuntimeHost 异步回调用，App 关闭后仍可用） */
+    appScope: CoroutineScope,
     onOpenApp: (id: String, name: String) -> Unit = { _, _ -> },
     onNavigate: (view: String) -> Unit = {},
 ) {
@@ -44,8 +45,7 @@ fun AppRunScreen(
     val api: WebosApi = remember {
         (context.applicationContext as Application).getKoin().get()
     }
-    val scope = rememberCoroutineScope()
-    val host = remember { AppRuntimeHost(context, api, scope, BuildConfig.API_BASE_URL, onOpenApp, onNavigate) }
+    val host = remember { AppRuntimeHost(context, api, appScope, BuildConfig.API_BASE_URL, onOpenApp, onNavigate) }
 
     var detail by remember { mutableStateOf<AppDetail?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -79,7 +79,8 @@ fun AppRunScreen(
                 update = {},
                 onRelease = { AppRuntimeHost.destroy(it) },
             )
-            else -> LoadingView()
+            // 不显示品牌启动图：App 加载体验归 App 自己（宿主不干涉，2026-08-16 用户要求）
+            else -> Box(Modifier.fillMaxSize())
         }
     }
 }

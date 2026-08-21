@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--
-      Daily 主题：NoActionBar + 深蓝启动背景（#0F172A，与 E1 图标同族）——
-      冷启动/加载期不白屏，从系统 splash 到 App 内容保持深蓝过渡。
+      Daily 主题：NoActionBar + 品牌启动图窗口背景（splash_window.png：浅底 + E1 logo + daily）——
+      系统冷启动第一帧即显示品牌图（不等 Compose 首帧，消除白屏）；
+      与 Compose LoadingView 视觉一致，LoadingView 撤下时无缝过渡到桌面。
     -->
     <style name="Theme.Daily" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">#0F172A</item>
+        <item name="android:windowBackground">@drawable/splash_window</item>
         <item name="android:colorAccent">#4F8CFF</item>
     </style>
 </resources>

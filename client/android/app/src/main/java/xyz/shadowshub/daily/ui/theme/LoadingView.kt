@@ -9,13 +9,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -23,19 +22,21 @@ import androidx.compose.ui.unit.sp
 import xyz.shadowshub.daily.R
 
 /**
- * 正式加载视图（替代占位"加载中…"文本）：
- * E1 logo + 应用名，深蓝底（与启动背景/图标同族），小 spinner 提示。
- * 用于桌面 WebView 与 App 运行页的加载期。
+ * 品牌启动图（2026-08-16 用户定稿：纯色极简，去掉生图背景）：
+ * 浅色纯底（与主题 background 一致，无闪变）+ 中央 E1 logo + "daily"。
+ * 只用于系统首屏（冷启动 → 桌面第一帧渲染完成），不用于 App 加载（宿主不干涉 App）。
  */
 @Composable
 fun LoadingView(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-        contentAlignment = Alignment.Center,
+            .background(Color(0xFFF8F7F3)),
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            modifier = Modifier.align(Alignment.Center),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
             Image(
                 painter = painterResource(R.drawable.icon_e1_logo),
                 contentDescription = "Daily",
@@ -43,17 +44,11 @@ fun LoadingView(modifier: Modifier = Modifier) {
             )
             Spacer(Modifier.height(16.dp))
             Text(
-                "Daily",
-                style = MaterialTheme.typography.titleLarge,
+                "daily",
+                fontSize = 24.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onBackground,
-                letterSpacing = 1.sp,
-            )
-            Spacer(Modifier.height(18.dp))
-            CircularProgressIndicator(
-                strokeWidth = 2.dp,
-                modifier = Modifier.size(20.dp),
-                color = MaterialTheme.colorScheme.primary,
+                color = Color(0xFF0F172A),
+                letterSpacing = 3.sp,
             )
         }
     }

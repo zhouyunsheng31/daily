@@ -27,6 +27,8 @@ class AppRuntimeHost(
     /** 桌面 system.navigate → 宿主切换主 Tab */
     private val onNavigate: (view: String) -> Unit = {},
 ) {
+    /** 页面渲染完成回调（onPageFinished 触发，品牌启动图撤下时机；destroy 的 about:blank 不触发） */
+    private var pendingOnLoaded: (() -> Unit)? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     fun createWebView(): WebView {
@@ -36,8 +38,9 @@ class AppRuntimeHost(
             android.view.ViewGroup.LayoutParams.MATCH_PARENT,
             android.view.ViewGroup.LayoutParams.MATCH_PARENT,
         )
-        // 加载期深蓝背景（页面渲染完成后由页面自身背景覆盖）：避免冷启动白屏闪烁
-        webView.setBackgroundColor(0xFF0F172A.toInt())
+        // 加载期背景 = 主题浅色（页面渲染完成后由页面自身背景覆盖）：
+        // 避免深蓝背景与浅色主题（LoadingView/桌面/市场页）之间闪变（2026-08-16）
+        webView.setBackgroundColor(0xFFF8F7F3.toInt())
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -63,6 +66,12 @@ class AppRuntimeHost(
                 ) { r ->
                     android.util.Log.d("AppRuntime", "pageState: $r")
                 }
+                // 页面渲染完成 → 品牌启动图撤下时机。
+                // ⚠️ 不能用 url 过滤：loadDataWithBaseURL(null) 的页面 URL 就是 "about:blank"，
+                // 按 url 判断会把正常加载也过滤掉 → 品牌图永不撤下（2026-08-16 卡首屏根因）。
+                // 无条件触发是安全的：桌面传 onLoaded（正常页触发）；AppRunScreen 不传（null，无副作用）；
+                // destroy 的 about:blank 只有 AppRunScreen 路径（其 pendingOnLoaded 为 null）。
+                pendingOnLoaded?.let { it(); pendingOnLoaded = null }
                 super.onPageFinished(view, url)
             }
 
@@ -107,7 +116,8 @@ class AppRuntimeHost(
             "dailyBridge",
         )
         webView.loadDataWithBaseURL(null, finalHtml, "text/html", "utf-8", null)
-        onLoaded?.invoke()
+        // onLoaded 由 onPageFinished 触发（页面真正渲染完成才通知，品牌启动图覆盖到首帧）
+        pendingOnLoaded = onLoaded
     }
 
     private fun postToJs(webView: WebView, json: String) {
