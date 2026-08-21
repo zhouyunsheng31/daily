@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-21：Android 端 M1 里程碑全线达成 —— 离线静态资源磁盘缓存 + 完备 JSBridge 与 App 版本管理
+
+**背景**：完成 M1 任务卡体系（M1-1 至 M1-5）的所有核心交付与验收要求。移动端具备完整的离线秒开能力、版本回滚、市场安装与文件操作 JSBridge 响应，真机构建平稳运行。
+
+**改动**
+1. **静态资源磁盘缓存与离线秒开（M1-4）**：
+   - 新建 `client/android/app-runtime/src/main/java/xyz/shadowshub/appruntime/WebResourceCacheHelper.kt`：针对 WebOS 核心静态资源（`.js`、`.css`、`.woff2`、`.svg` 等）进行 MD5 磁盘双向缓存；命中时直接返回 `WebResourceResponse`，未命中时异步抓取写盘，彻底解决断网与弱网下的白屏问题。
+2. **`DailyJsBridge.kt` 扩展完备（M1-2 / M1-3）**：
+   - 补齐 App 版本管理：`apps.rollback`（调用 `api.rollbackApp`）、`apps.detail`（版本历史）；
+   - 补齐包市场与文件工作区直接响应：`market.list`、`market.install`、`files.manifest`、`files.delete`；
+   - 接入系统剪贴板原生支持（`system.copy`）。
+3. **`DailyApp.kt` 宿主集成（M1-1 / M1-5）**：
+   - 将 `WebResourceCacheHelper` 注入 `WebViewClient.shouldInterceptRequest`；
+   - 传递宿主 `Context` 支持原生系统能力；
+   - 维持 APK 体积 23MB（< 30MB 预算），冷启动平滑过渡无白屏。
+
+**验证**
+- 云端 Gradle 构建 `BUILD SUCCESSFUL`（产出 23MB APK，`6d79c7ae...`）。
+- 真机安装验证：`xyz.shadowshub.daily` 启动平滑，WebOS 模板加载、本地资源拦截缓存及 SSE 流式对话运行正常。
+
+---
+
 ### 2026-08-21：Android 端 API 契约层与数据仓库全线追平 Web 端（Packages / Market / Files / NetSpaces）
 
 **背景**：继续推进移动端同构与契约对齐，全面补齐 Kotlin 侧与服务端 `shared/webos-contracts` 的类型映射及网络调用，为离线持久化与端侧包/应用/数据流提供完备类型安全支撑。

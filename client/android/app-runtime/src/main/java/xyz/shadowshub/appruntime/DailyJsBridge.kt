@@ -1,8 +1,13 @@
 package xyz.shadowshub.appruntime
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.webkit.JavascriptInterface
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -15,23 +20,19 @@ import xyz.shadowshub.core.network.WebosApi
 
 /**
  * Native ↔ JS 桥（JS 侧对象名 `dailyBridge`，协议与 PWA 端同构）。
- * JS: window.dailyBridge.postMessage(json) → 这里处理 storage/http 请求 →
+ * JS: window.dailyBridge.postMessage(json) → 这里处理 storage/http/apps/market 请求 →
  *     回调 onResponse(json)（宿主经 evaluateJavascript 调 window.__dailySdkDispatch）。
  * 安全：App 不能拿到鉴权 cookie/token——storage 走 native OkHttp（CookieJar 持久化）。
- *
- * 2026-08-16 M0-4 白屏修复：补齐系统桌面（webosDesktopV1）的 postMessage 直连方法
- * apps.list / apps.open / system.navigate（契约 = PWA runtime.ts handleDesktopRequest）。
- * 桌面模板启动即 SDK.apps.list()，此前返回 unknown method 导致拿不到列表 → 白屏。
- * 未实现的方法一律 respond(false)（明确失败，不伪造成功）。
  */
 class DailyJsBridge(
     private val appId: String,
     private val api: WebosApi,
     private val scope: CoroutineScope,
+    private val context: Context? = null,
     private val onResponse: (String) -> Unit,
     /** 桌面 apps.open → 宿主导航打开 App（name 来自最近一次 apps.list 缓存） */
     private val onOpenApp: (appId: String, name: String) -> Unit = { _, _ -> },
-    /** 桌面 system.navigate → 宿主切换主 Tab（assistant/desktop；files 无对应页面返回失败） */
+    /** 桌面 system.navigate → 宿主切换主 Tab（assistant/desktop/store/files） */
     private val onNavigate: (view: String) -> Unit = {},
 ) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -71,7 +72,7 @@ class DailyJsBridge(
                         }
                         Triple(true, obj, null)
                     }
-                    // ---- 系统桌面（postMessage 直连协议，PWA runtime.ts handleDesktopRequest 镜像）----
+                    // ---- 系统桌面 / App 管理（PWA runtime.ts handleDesktopRequest 镜像）----
                     "apps.list" -> {
                         val apps = api.listApps()
                             .filter { it.id != "system.desktop" } // 桌面不显示自己（PWA 同规则）
@@ -82,7 +83,7 @@ class DailyJsBridge(
                                 add(buildJsonObject {
                                     put("id", app.id)
                                     put("name", app.name)
-                                    put("icon", app.icon?.let { JsonPrimitive(it) } ?: JsonNull) // 契约：string | null（PWA 同）
+                                    put("icon", app.icon?.let { JsonPrimitive(it) } ?: JsonNull)
                                     put("source", app.source)
                                     put("installed", app.installed)
                                 })
@@ -108,6 +109,44 @@ class DailyJsBridge(
                             Triple(success, buildJsonObject { put("ok", success) }, if (!success) "删除失败" else null)
                         }
                     }
+                    "apps.rollback" -> {
+                        val id = params["id"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        val versionId = params["versionId"]?.let { if (it is JsonPrimitive) it.content else null }
+                        if (id.isBlank()) {
+                            Triple(false, JsonObject(emptyMap()), "apps.rollback 需要 id")
+                        } else {
+                            val success = api.rollbackApp(id, versionId)
+                            Triple(success, buildJsonObject { put("ok", success) }, if (!success) "回滚失败" else null)
+                        }
+                    }
+                    "apps.detail" -> {
+                        val id = params["id"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        if (id.isBlank()) {
+                            Triple(false, JsonObject(emptyMap()), "apps.detail 需要 id")
+                        } else {
+                            val detail = api.appDetail(id)
+                            if (detail != null) {
+                                val versionsArr = buildJsonArray {
+                                    detail.versions.forEach { v ->
+                                        add(buildJsonObject {
+                                            put("id", v.id)
+                                            put("version", v.version)
+                                            put("html", v.html?.let { JsonPrimitive(it) } ?: JsonNull)
+                                        })
+                                    }
+                                }
+                                val detailObj = buildJsonObject {
+                                    put("id", detail.id)
+                                    put("name", detail.name)
+                                    put("activeVersionId", detail.activeVersionId?.let { JsonPrimitive(it) } ?: JsonNull)
+                                    put("versions", versionsArr)
+                                }
+                                Triple(true, detailObj, null)
+                            } else {
+                                Triple(false, JsonObject(emptyMap()), "找不到 App: $id")
+                            }
+                        }
+                    }
                     "apps.reorder" -> {
                         Triple(true, buildJsonObject { put("ok", true) }, null)
                     }
@@ -117,11 +156,18 @@ class DailyJsBridge(
                             onNavigate(view)
                             Triple(true, buildJsonObject { put("ok", true) }, null)
                         } else {
-                            Triple(false, JsonObject(emptyMap()), "Android 端暂不支持导航到视图: $view")
+                            Triple(false, JsonObject(emptyMap()), "暂不支持导航到视图: $view")
                         }
                     }
                     "system.copy" -> {
                         val text = params["text"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        context?.let { ctx ->
+                            withContext(Dispatchers.Main) {
+                                val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                val clip = ClipData.newPlainText("daily-copy", text)
+                                clipboard?.setPrimaryClip(clip)
+                            }
+                        }
                         Triple(true, buildJsonObject { put("ok", true) }, null)
                     }
                     // ---- 桌面多页网格布局（W4/M1-4） ----
@@ -153,10 +199,59 @@ class DailyJsBridge(
                             Triple(false, JsonObject(emptyMap()), "API 调用失败: $ns/$endpoint")
                         }
                     }
-                    // ---- 通用 SDK 方法 ----
-                    "http.request" -> Triple(false, JsonObject(emptyMap()), "http.request 建议通过 api.json 声明走受限 vm 代理")
-                    "api.register" -> Triple(true, JsonObject(emptyMap()), null)
-                    "api.call" -> Triple(false, JsonObject(emptyMap()), "请使用 sdk.useApi")
+                    // ---- 统一包市场与文件工作区 ----
+                    "market.list" -> {
+                        val type = params["type"]?.let { if (it is JsonPrimitive) it.content else null }
+                        val q = params["q"]?.let { if (it is JsonPrimitive) it.content else null }
+                        val listing = api.listMarket(type, q)
+                        val itemsArr = buildJsonArray {
+                            listing.items.forEach { item ->
+                                add(buildJsonObject {
+                                    put("id", item.id)
+                                    put("type", item.type)
+                                    put("name", item.name)
+                                    put("description", item.description)
+                                    put("icon", item.icon?.let { JsonPrimitive(it) } ?: JsonNull)
+                                    put("author", item.author)
+                                    put("installed", item.installed)
+                                })
+                            }
+                        }
+                        Triple(true, buildJsonObject { put("items", itemsArr); put("total", listing.total) }, null)
+                    }
+                    "market.install" -> {
+                        val id = params["id"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        if (id.isBlank()) {
+                            Triple(false, JsonObject(emptyMap()), "market.install 需要 id")
+                        } else {
+                            val okInstall = api.installMarketPackage(id)
+                            Triple(okInstall, buildJsonObject { put("ok", okInstall) }, if (!okInstall) "安装失败" else null)
+                        }
+                    }
+                    "files.manifest" -> {
+                        val prefix = params["prefix"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        val files = api.getFilesManifest(prefix)
+                        val arr = buildJsonArray {
+                            files.forEach { f ->
+                                add(buildJsonObject {
+                                    put("path", f.path)
+                                    put("size", f.size)
+                                    put("sha256", f.sha256)
+                                    put("updatedAt", f.updatedAt)
+                                })
+                            }
+                        }
+                        Triple(true, buildJsonObject { put("files", arr) }, null)
+                    }
+                    "files.delete" -> {
+                        val path = params["path"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        if (path.isBlank()) {
+                            Triple(false, JsonObject(emptyMap()), "files.delete 需要 path")
+                        } else {
+                            val okDel = api.deleteFile(path)
+                            Triple(okDel, buildJsonObject { put("ok", okDel) }, if (!okDel) "删除失败" else null)
+                        }
+                    }
                     else -> Triple(false, JsonObject(emptyMap()), "unknown method: $method")
                 }
             } catch (e: Exception) {

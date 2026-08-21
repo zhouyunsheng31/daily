@@ -8,6 +8,7 @@ import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -26,8 +27,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import okhttp3.OkHttpClient
 import org.koin.android.ext.android.getKoin
 import xyz.shadowshub.appruntime.DailyJsBridge
+import xyz.shadowshub.appruntime.WebResourceCacheHelper
 import xyz.shadowshub.core.network.WebosApi
 import xyz.shadowshub.daily.BuildConfig
 import xyz.shadowshub.daily.ui.theme.LoadingView
@@ -37,7 +40,7 @@ import xyz.shadowshub.daily.ui.theme.LoadingView
  *
  * 核心架构：
  * - 纯双端同构：直接消费 Web 端 HTML 模板与完整 Shell（对话页、桌面、应用商店全部统一）；
- * - 本地持久化：DOMStorage + CookieManager 同步；
+ * - 本地持久化与离线缓存：DOMStorage + CookieManager + WebResourceCacheHelper 本地静态资源落盘；
  * - 沉浸全屏：edge-to-edge，无浏览器地址栏和工具栏；
  * - 原生手势与返回键支持：优雅响应 __dailySystemBack 钩子。
  */
@@ -46,9 +49,10 @@ import xyz.shadowshub.daily.ui.theme.LoadingView
 fun DailyApp() {
     val context = LocalContext.current
     val appScope = rememberCoroutineScope()
-    val api: WebosApi = remember {
-        (context.applicationContext as Application).getKoin().get()
-    }
+    val koin = remember { (context.applicationContext as Application).getKoin() }
+    val api: WebosApi = remember { koin.get() }
+    val okHttpClient: OkHttpClient = remember { koin.get() }
+    val cacheHelper = remember { WebResourceCacheHelper(context, okHttpClient, appScope) }
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var pageRendered by remember { mutableStateOf(false) }
@@ -121,6 +125,10 @@ fun DailyApp() {
                             }
                         }
 
+                        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                            return cacheHelper.interceptRequest(request) ?: super.shouldInterceptRequest(view, request)
+                        }
+
                         override fun onPageFinished(view: WebView, url: String?) {
                             super.onPageFinished(view, url)
                             android.util.Log.d("AppRuntime", "Shell Web onPageFinished: $url")
@@ -142,6 +150,7 @@ fun DailyApp() {
                             appId = "system.shell",
                             api = api,
                             scope = appScope,
+                            context = ctx,
                             onResponse = { json ->
                                 post {
                                     val escaped = json.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "")
