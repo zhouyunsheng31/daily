@@ -77,10 +77,15 @@ export const WEBOS_DESKTOP_V1_HTML = `<!doctype html>
     width: 300px; height: 300px; top: 38%; right: -110px;
     background: radial-gradient(circle at 50% 50%, rgba(55,107,83,.07), rgba(55,107,83,0) 70%);
   }
-  /* 时钟：日期小字在上、时间大字在下，克制优雅 */
+  /* 时钟：日期小字在上、时间大字在下，根据安全区避让系统状态栏，克制优雅 */
   #clock {
-    position: fixed; top: max(env(safe-area-inset-top), 18px); left: 0; right: 0;
-    z-index: 2; text-align: center; pointer-events: none;
+    position: fixed;
+    top: calc(var(--safe-top, env(safe-area-inset-top, 36px)) + 14px);
+    left: 0;
+    right: 0;
+    z-index: 2;
+    text-align: center;
+    pointer-events: none;
   }
   #clock .date {
     font-size: 11px; font-weight: 600; letter-spacing: 3px; color: var(--ink-soft);
@@ -101,7 +106,7 @@ export const WEBOS_DESKTOP_V1_HTML = `<!doctype html>
     flex: 0 0 100%; height: 100%;
     scroll-snap-align: start;
     display: flex; flex-direction: column;
-    padding: calc(env(safe-area-inset-top) + 112px) 14px 0;
+    padding: calc(var(--safe-top, env(safe-area-inset-top, 36px)) + 128px) 14px calc(var(--safe-bottom, env(safe-area-inset-bottom, 16px)) + 90px);
   }
   .grid {
     display: grid;
@@ -167,7 +172,8 @@ export const WEBOS_DESKTOP_V1_HTML = `<!doctype html>
   #pages.locked #grid { touch-action: none; }
   #pages.locked .app { animation-play-state: paused; }
   #dots {
-    position: fixed; bottom: calc(env(safe-area-inset-bottom) + 86px);
+    position: fixed;
+    bottom: calc(var(--safe-bottom, env(safe-area-inset-bottom, 16px)) + 86px);
     left: 0; right: 0; z-index: 2;
     display: flex; justify-content: center; gap: 5px;
   }
@@ -179,7 +185,8 @@ export const WEBOS_DESKTOP_V1_HTML = `<!doctype html>
   #dots i.active { background: var(--blue); width: 18px; border-radius: 3px; }
   /* 玻璃 Dock：与对话页 composer 同质感（暖白毛玻璃 + 暖阴影） */
   .dock {
-    position: fixed; bottom: max(env(safe-area-inset-bottom), 14px);
+    position: fixed;
+    bottom: calc(var(--safe-bottom, env(safe-area-inset-bottom, 16px)) + 14px);
     left: 50%; transform: translateX(-50%);
     z-index: 2;
     display: flex; gap: 10px;
@@ -736,6 +743,15 @@ export const WEBOS_DESKTOP_V1_HTML = `<!doctype html>
     document.getElementById("appmenu").classList.remove("show");
     document.getElementById("menu-actions").innerHTML = "";
   }
+  // v1.0.36（2026-08-16）：宿主系统返回钩子——菜单/确认框打开时宿主先问本函数，
+  // 返回 true（已处理）则宿主不退出 Daily；返回 false 宿主走默认（退出）。
+  window.__dailySystemBack = function () {
+    var m = document.getElementById("appmenu");
+    if (m.classList.contains("show")) { closeMenu(); return true; }
+    var c = document.getElementById("confirm");
+    if (c.classList.contains("show")) { c.classList.remove("show"); return true; }
+    return false;
+  };
   function openMenu(app) {
     document.getElementById("menu-title").textContent = app.name;
     var SYSTEM_IDS = { "daily.ai": 1, "system.desktop": 1, "system.store": 1, "system.files": 1 };
@@ -784,13 +800,12 @@ export const WEBOS_DESKTOP_V1_HTML = `<!doctype html>
       actions.appendChild(note);
     }
     var box = document.getElementById("appmenu");
-    // v1.0.35：遮罩点击关闭用「距上次 touchend」判断——抬手时浏览器合成的
-    // click（target 会落在新出现的遮罩上）必然在 touchend 后 <300ms 内，
-    // 一律忽略；用户抬手后真正点遮罩（>300ms）才关闭。任何按住时长都稳。
+    // v1.0.36（2026-08-16）：遮罩关闭改 pointerdown——Android WebView 中 click 在
+    // touchend 后立即合成（<300ms），v1.0.35 的时间窗会把所有正常点击误判为"抬手合成"
+    // 而忽略 → 菜单点不掉。pointerdown 无合成延迟，PWA 与 Android 均可靠。
     box.classList.add("show");
-    box.addEventListener("click", function (e) {
+    box.addEventListener("pointerdown", function (e) {
       if (e.target !== box) return;
-      if (Date.now() - (window.__lastTouchEndAt || 0) < 300) return;
       closeMenu();
     });
   }

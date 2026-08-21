@@ -387,8 +387,11 @@ function withRuntimeBootstrap(html: string, appId?: string, storeShareId?: strin
   const storageInject = initialStorage && typeof initialStorage === 'object' && Object.keys(initialStorage).length > 0
     ? `<script>window.__DAILY_WEBOS_INITIAL_STORAGE__=${JSON.stringify(initialStorage).replace(/</g, '\\u003c')}<\/script>`
     : ''
+  const safeTop = typeof window !== 'undefined' ? (window.getComputedStyle(document.documentElement).getPropertyValue('--safe-top').trim() || '36px') : '36px'
+  const safeBottom = typeof window !== 'undefined' ? (window.getComputedStyle(document.documentElement).getPropertyValue('--safe-bottom').trim() || '16px') : '16px'
+  const safeStyleInject = `<style>:root{--safe-top:${safeTop};--safe-bottom:${safeBottom};}</style>`
   const script = `<script data-daily-webos-runtime>${APP_RUNTIME_BOOTSTRAP}</script>`
-  const inject = `${base}${storageInject}${script}`
+  const inject = `${base}${storageInject}${safeStyleInject}${script}`
   // bootstrap 必须最先执行（localStorage polyfill 需在 App 任何脚本之前就位），
   // 因此插到 <head> 开头；无 <head> 时退到 <html> 后，再退到文档最前。
   const headMatch = html.match(/<head\b[^>]*>/i)

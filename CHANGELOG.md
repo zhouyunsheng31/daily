@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-21：系统桌面 iframe 安全区与时钟避让修复 + 真机截图验证全屏沉浸质感
+
+**背景**：解决桌面时间卡片与系统状态栏时间（如 01:44）垂直重叠的问题，确保 iframe 内部的系统桌面（`webosDesktopV1`）与外层 Shell 均具备精准的 `--safe-top` 状态栏避让与通顶通底壁纸铺满效果。
+
+**改动**
+1. **系统桌面模板时钟与页面避让（`server/src/webosDesktopV1.ts`）**：
+   - `#clock` 顶部距离重构为 `calc(var(--safe-top, 36px) + 14px)`；
+   - `.page` 图标网格 paddingTop 重构为 `calc(var(--safe-top, 36px) + 128px)`；
+   - 底部 `#dots` 与 `.dock` 动态对齐 `var(--safe-bottom)`。
+2. **iframe 安全区样式自动注入（`client/shell-web/src/App.tsx`）**：
+   - `withRuntimeBootstrap` 在构建 `system.desktop`、`system.store` 及 App 沙箱时，将宿主计算好的 `--safe-top` 与 `--safe-bottom` 自动注入到每个 iframe 的 `<style>` 标签中。
+3. **全局样式安全区对齐（`client/shell-web/src/styles.css`）**：
+   - 全局将 `max(..., env(safe-area-inset-*))` 彻底对齐为 `calc(var(--safe-top, 36px) + ...)`。
+
+**验证**
+- 云端 Gradle 构建 `BUILD SUCCESSFUL`（产出 23MB APK，`f223854f...`）。
+- 真机截图实测（`daily_desktop_screen.png`）：系统状态栏时间（`02:36`）与桌面时钟卡片（`02:35`）垂直空间分离宽裕优雅，壁纸铺满全屏，无黑边断层。
+
+---
+
 ### 2026-08-21：全屏壁纸通透一体化沉浸 + 消除按钮方形蓝色高亮 + 登录/注册表单零延迟平滑切换
 
 **背景**：针对用户提出的审美与交互优化：① 全局壁纸通顶通底铺满，消除黑白断层，同时内容精准避让状态栏；② 移除 WebView 默认廉价方形蓝色点击框；③ 解决登录卡片切换至注册卡片时的 DOM 重绘卡顿。
