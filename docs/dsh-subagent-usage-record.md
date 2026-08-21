@@ -1,6 +1,6 @@
 # DSH Sub-Agent 使用记录：安全审计 + 问题分析 + App API 调研（2026-08-15/16）
-
 > 本文档完整记录本次会话使用 dsh_subagent 包的**全流程、遇到的问题、规避方法、产出摘要**，供后续复用与排障参考。
+> **⚠️ 排障手册见 `docs/dsh-subagent-known-issues.md`（2026-08-16 新建：watch.pid 陈旧致状态解析瘫痪、同 cwd 串号/排队、并行调用 Engine destroyed 等根因与规避）。**
 > 关联产出：`docs/webos-app-api.md`（App API 设计草稿）、安全威胁建模（见文末摘要）。
 
 ---
