@@ -1,0 +1,174 @@
+{
+  "type": "object",
+  "required": [
+    "schema_version",
+    "namespace",
+    "endpoints"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "number",
+      "const": 1
+    },
+    "namespace": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9.-]*$",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "display_name": {
+      "type": "object",
+      "properties": {
+        "zh": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "en": {
+          "type": "string",
+          "maxLength": 200
+        }
+      },
+      "minProperties": 1
+    },
+    "network": {
+      "type": "object",
+      "properties": {
+        "domains": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(\\*\\.)?[a-zA-Z0-9-]+(\\.[a-zA-Z0-9-]+)+$"
+          },
+          "maxItems": 64
+        }
+      },
+      "additionalProperties": false
+    },
+    "secrets": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z][A-Z0-9_]*$",
+        "maxLength": 64
+      },
+      "maxItems": 16
+    },
+    "endpoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "path",
+          "handler"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "GET"
+              },
+              {
+                "type": "string",
+                "const": "POST"
+              }
+            ]
+          },
+          "path": {
+            "type": "string",
+            "pattern": "^/[a-zA-Z0-9/_-]*$",
+            "maxLength": 256
+          },
+          "description": {
+            "type": "object",
+            "properties": {
+              "zh": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "en": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "minProperties": 1
+          },
+          "params": {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "object"
+              },
+              "properties": {
+                "type": "object",
+                "patternProperties": {
+                  "^.*$": {}
+                }
+              }
+            },
+            "additionalProperties": true
+          },
+          "storage": {
+            "type": "object",
+            "properties": {
+              "read": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "maxItems": 64
+              },
+              "write": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "maxItems": 64
+              }
+            },
+            "additionalProperties": false
+          },
+          "handler": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_./-]+\\.js$",
+            "maxLength": 256
+          },
+          "returns": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          },
+          "visibility": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "owner"
+              },
+              {
+                "type": "string",
+                "const": "public"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "minItems": 1,
+      "maxItems": 64
+    }
+  },
+  "additionalProperties": false
+}

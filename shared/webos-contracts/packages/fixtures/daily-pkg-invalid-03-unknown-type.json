@@ -1,0 +1,6 @@
+{
+  "schema_version": 2,
+  "id": "com.daily.weird",
+  "type": "self-extracting-zip",
+  "version": "1.0.0"
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "namespace": "search",
+  "display_name": { "zh": "搜索服务" },
+  "endpoints": [
+    {
+      "name": "search",
+      "method": "GET",
+      "path": "/search",
+      "description": { "zh": "站内搜索" },
+      "params": {
+        "type": "object",
+        "properties": {
+          "q": { "type": "string" },
+          "page": { "type": "integer", "minimum": 1, "default": 1 }
+        }
+      },
+      "handler": "handlers/search.js",
+      "storage": { "read": ["posts/*", "comments/*"] },
+      "visibility": "owner"
+    }
+  ]
+}

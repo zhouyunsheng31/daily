@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "id": "com.daily.notes",
+  "type": "app",
+  "version": "1.2.0",
+  "entry": "index.html",
+  "display_name": { "zh": "记事本", "en": "Notes" },
+  "description": { "zh": "日常随手记" },
+  "icon": "icon.svg",
+  "capabilities": ["app.storage.private", "app.fs"],
+  "network": { "domains": ["api.example.com"] },
+  "dependencies": [{ "id": "com.daily.forum-api", "range": "^1.0.0" }],
+  "minShell": "0.1.0"
+}

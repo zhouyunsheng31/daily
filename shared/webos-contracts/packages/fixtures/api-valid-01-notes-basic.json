@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "namespace": "notes",
+  "display_name": { "zh": "记事本 API" },
+  "network": { "domains": ["api.exchangerate.host"] },
+  "secrets": ["EXCHANGERATE_KEY"],
+  "endpoints": [
+    {
+      "name": "list_notes",
+      "method": "GET",
+      "path": "/notes",
+      "description": { "zh": "列出笔记，支持按时间与关键词过滤" },
+      "params": {
+        "type": "object",
+        "properties": {
+          "keyword": { "type": "string" },
+          "limit": { "type": "integer", "default": 20, "maximum": 100 }
+        }
+      },
+      "storage": { "read": ["notes/*"] },
+      "handler": "handlers/list_notes.js",
+      "returns": { "type": "array", "items": { "type": "object" } },
+      "visibility": "owner"
+    },
+    {
+      "name": "add_note",
+      "method": "POST",
+      "path": "/notes",
+      "description": { "zh": "新增笔记" },
+      "params": { "type": "object", "properties": { "title": { "type": "string" } } },
+      "storage": { "write": ["notes/*"] },
+      "handler": "handlers/add_note.js",
+      "visibility": "owner"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "namespace": "secret",
+  "endpoints": [
+    { "name": "leak", "path": "no-leading-slash", "handler": "h.js" }
+  ]
+}

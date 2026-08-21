@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "id": "com.daily.aurora-theme",
+  "type": "theme",
+  "version": "1.0.0",
+  "display_name": { "zh": "极光主题" },
+  "icon": "icon.svg",
+  "capabilities": ["ui.theme"],
+  "contents": {
+    "tokens": { "color": { "primary": "#4F8CFF" }, "shape": { "radiusMd": 20 } },
+    "assets": ["wallpapers/aurora.png"]
+  },
+  "minShell": "0.1.0"
+}

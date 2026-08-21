@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "namespace": "x",
+  "endpoints": [
+    { "name": "get", "method": "DELETE", "path": "/x", "handler": "../../etc/passwd.js" }
+  ]
+}

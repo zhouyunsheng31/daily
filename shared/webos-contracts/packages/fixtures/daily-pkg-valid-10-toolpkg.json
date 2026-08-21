@@ -1,0 +1,11 @@
+{
+  "schema_version": 2,
+  "id": "com.daily.png-tools",
+  "type": "toolpkg",
+  "version": "1.1.0",
+  "entry": "main.js",
+  "display_name": { "zh": "图片工具包" },
+  "capabilities": ["app.fs"],
+  "contents": { "tools": ["main.js"] },
+  "minShell": "0.1.0"
+}

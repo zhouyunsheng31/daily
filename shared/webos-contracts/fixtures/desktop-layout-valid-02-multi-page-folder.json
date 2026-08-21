@@ -1,0 +1,12 @@
+{
+  "version": 3,
+  "pages": [
+    [
+      { "kind": "app", "appId": "daily.ai" },
+      { "kind": "app", "appId": "system.desktop" },
+      { "kind": "folder", "name": "工具", "children": [{ "kind": "app", "appId": "system.files" }, { "kind": "app", "appId": "system.store" }] }
+    ],
+    [{ "kind": "app", "appId": "com.daily.notes", "name": "记事本", "icon": "data:image/svg+xml,..." }]
+  ],
+  "updatedAt": 1720000000000
+}

@@ -1,0 +1,8 @@
+{
+  "schema_version": 2,
+  "id": "com.daily.badnet",
+  "type": "app",
+  "version": "1.0.0",
+  "network": { "domains": ["http://api.example.com", "..", "evil"] },
+  "capabilities": ["network.outbound"]
+}

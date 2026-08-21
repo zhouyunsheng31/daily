@@ -1,0 +1,12 @@
+{
+  "schema_version": 2,
+  "id": "com.daily.ui-skill",
+  "type": "skill",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "display_name": { "zh": "UI 指南" },
+  "contents": { "skills": ["SKILL.md"] },
+  "dependencies": [{ "id": "com.daily.png-tools" }],
+  "children": [],
+  "minShell": "0.1.0"
+}

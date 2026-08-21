@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "namespace": "fx",
+  "display_name": { "en": "FX Rates" },
+  "secrets": ["EXCHANGERATE_KEY"],
+  "network": {
+    "domains": ["api.exchangerate.host", "*.openexchangerates.org"]
+  },
+  "endpoints": [
+    {
+      "name": "latest",
+      "method": "GET",
+      "path": "/latest/{base}",
+      "description": { "zh": "查询最新汇率" },
+      "params": { "type": "object", "properties": { "base": { "type": "string" } } },
+      "handler": "handlers/latest.js",
+      "storage": { "read": ["fx/cache/*"] },
+      "returns": { "type": "object", "properties": { "rates": { "type": "object" } } },
+      "visibility": "owner"
+    },
+    {
+      "name": "convert",
+      "method": "POST",
+      "path": "/convert",
+      "handler": "handlers/convert.js",
+      "storage": { "read": ["fx/cache/*"], "write": ["fx/history/*"] },
+      "visibility": "public"
+    }
+  ]
+}

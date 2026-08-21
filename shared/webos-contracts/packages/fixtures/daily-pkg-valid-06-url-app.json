@@ -1,0 +1,11 @@
+{
+  "schema_version": 2,
+  "id": "com.daily.blog-web",
+  "type": "url-app",
+  "version": "1.0.0",
+  "display_name": { "zh": "博客直达" },
+  "url": { "startUrl": "https://blog.example.com", "mode": "live" },
+  "network": { "domains": ["blog.example.com"] },
+  "capabilities": ["network.outbound"],
+  "minShell": "0.1.0"
+}

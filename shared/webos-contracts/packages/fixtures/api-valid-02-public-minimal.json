@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "namespace": "posts",
+  "endpoints": [
+    {
+      "name": "list_posts",
+      "method": "GET",
+      "path": "/posts",
+      "handler": "handlers/list_posts.js",
+      "visibility": "public"
+    }
+  ]
+}

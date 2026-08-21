@@ -1,0 +1,12 @@
+{
+  "schema_version": 2,
+  "id": "com.daily.forum-api",
+  "type": "api",
+  "version": "1.2.3",
+  "display_name": { "zh": "论坛 API" },
+  "description": { "zh": "帖子读写接口", "en": "Posts API" },
+  "api": { "spec": "api.json" },
+  "capabilities": ["app.api.invoke"],
+  "network": { "domains": ["*.example.com"] },
+  "minShell": "0.1.0"
+}

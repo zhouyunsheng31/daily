@@ -1,0 +1,11 @@
+{
+  "schema_version": 2,
+  "id": "com.daily.pet-brawl",
+  "type": "pet-layer",
+  "version": "1.0.0",
+  "entry": "index.html",
+  "display_name": { "en": "Pet Brawl" },
+  "icon": "icon.svg",
+  "capabilities": ["app.storage.private"],
+  "pets": { "maxInstances": 10, "physics": "webview" }
+}

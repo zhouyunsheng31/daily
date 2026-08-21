@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "namespace": "Notes API",
+  "endpoints": [
+    { "name": "list_notes", "path": "/notes", "handler": "h.js" }
+  ]
+}

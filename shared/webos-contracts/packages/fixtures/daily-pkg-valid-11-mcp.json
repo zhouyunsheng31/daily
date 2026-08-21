@@ -1,0 +1,9 @@
+{
+  "schema_version": 2,
+  "id": "com.daily.mcp-bridge",
+  "type": "mcp",
+  "version": "0.2.0",
+  "display_name": { "zh": "MCP 桥" },
+  "contents": { "mcp": [{ "server": "json-rpc", "entry": "mcp/server.js", "env": { "TOKEN": "${TOKEN}" } }] },
+  "minShell": "0.1.0"
+}

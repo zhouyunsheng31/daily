@@ -1,0 +1,10 @@
+{
+  "schema_version": 2,
+  "id": "com.daily.cron-workflow",
+  "type": "workflow",
+  "version": "0.1.0",
+  "display_name": { "zh": "每日归档流程" },
+  "entry": "workflow.json",
+  "capabilities": ["files.workspace.write"],
+  "minShell": "0.1.0"
+}

@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "namespace": "a",
+  "endpoints": [
+    { "name": "get", "path": "/a", "handler": "h.js" },
+    { "name": "get", "path": "/a2", "handler": "h2.js" }
+  ]
+}

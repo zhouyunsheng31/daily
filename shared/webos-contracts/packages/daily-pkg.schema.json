@@ -1,0 +1,314 @@
+{
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "type",
+    "version"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "number",
+      "const": 2,
+      "description": "Manifest 版本：当前组合式包 v2（D19）"
+    },
+    "id": {
+      "type": "string",
+      "title": "PackageId",
+      "description": "包全局唯一 id。允许 Unicode 字母/数字/`._-`，禁止路径分隔符与 `..`（防穿越）。",
+      "pattern": "^[\\p{L}\\p{N}._ -]+$",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "type": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "app"
+        },
+        {
+          "type": "string",
+          "const": "pet-layer"
+        },
+        {
+          "type": "string",
+          "const": "api"
+        },
+        {
+          "type": "string",
+          "const": "skill"
+        },
+        {
+          "type": "string",
+          "const": "theme"
+        },
+        {
+          "type": "string",
+          "const": "toolpkg"
+        },
+        {
+          "type": "string",
+          "const": "mcp"
+        },
+        {
+          "type": "string",
+          "const": "workflow"
+        },
+        {
+          "type": "string",
+          "const": "model-pack"
+        },
+        {
+          "type": "string",
+          "const": "url-app"
+        },
+        {
+          "type": "string",
+          "const": "provider"
+        },
+        {
+          "type": "string",
+          "const": "subagent"
+        },
+        {
+          "type": "string",
+          "const": "bundle"
+        }
+      ],
+      "description": "包类型（13 种）"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?$",
+      "description": "合法 semver，如 1.2.0 / 1.2.0-beta.1"
+    },
+    "entry": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "description": "类型相关入口（相对路径）"
+    },
+    "display_name": {
+      "type": "object",
+      "properties": {
+        "zh": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "en": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "minProperties": 1,
+      "description": "多语言文本，至少一种语言非空"
+    },
+    "description": {
+      "type": "object",
+      "properties": {
+        "zh": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "en": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      },
+      "minProperties": 1
+    },
+    "icon": {
+      "type": "string",
+      "maxLength": 512,
+      "description": "图标相对路径（缺省系统生成）"
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "maxItems": 64
+    },
+    "network": {
+      "type": "object",
+      "properties": {
+        "domains": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(\\*\\.)?[a-zA-Z0-9-]+(\\.[a-zA-Z0-9-]+)+$"
+          },
+          "maxItems": 64
+        }
+      },
+      "additionalProperties": false
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "PackageId",
+            "description": "包全局唯一 id。允许 Unicode 字母/数字/`._-`，禁止路径分隔符与 `..`（防穿越）。",
+            "pattern": "^[\\p{L}\\p{N}._ -]+$",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "range": {
+            "type": "string",
+            "pattern": "^[\\^~><=*]?\\d+\\.\\d+\\.\\d+(\\s*\\|\\|\\s*[\\^~><=*]?\\d+\\.\\d+\\.\\d+)*$",
+            "description": "semver range（默认 ^x.y.z）"
+          }
+        },
+        "additionalProperties": false
+      },
+      "maxItems": 128
+    },
+    "pets": {
+      "type": "object",
+      "properties": {
+        "maxInstances": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "physics": {
+          "type": "string",
+          "maxLength": 32
+        }
+      },
+      "additionalProperties": false
+    },
+    "api": {
+      "type": "object",
+      "required": [
+        "spec"
+      ],
+      "properties": {
+        "spec": {
+          "type": "string",
+          "description": "api.json 相对路径，默认 api.json"
+        }
+      },
+      "additionalProperties": false
+    },
+    "url": {
+      "type": "object",
+      "required": [
+        "startUrl"
+      ],
+      "properties": {
+        "startUrl": {
+          "type": "string",
+          "description": "外部网页 URL（https）"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "live"
+            },
+            {
+              "type": "string",
+              "const": "snapshot"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "contents": {
+      "type": "object",
+      "properties": {
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "内置 skill 相对路径，如 skills/ui-guide/SKILL.md"
+          },
+          "maxItems": 64
+        },
+        "mcp": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "server",
+              "entry"
+            ],
+            "properties": {
+              "server": {
+                "type": "string",
+                "description": "MCP server 标识：json-rpc | stdio | sse | remote"
+              },
+              "entry": {
+                "type": "string",
+                "description": "server 入口相对路径"
+              },
+              "env": {
+                "type": "object",
+                "patternProperties": {
+                  "^.*$": {
+                    "type": "string"
+                  }
+                },
+                "description": "env 模板（值可含 ${SECRET} 引用）"
+              }
+            }
+          }
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "内置工具相对路径"
+          },
+          "maxItems": 128
+        },
+        "tokens": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {}
+          },
+          "description": "主题 tokens（theme/ui 包）"
+        },
+        "assets": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "资源相对路径（壁纸/图标/音频等）"
+          },
+          "maxItems": 256
+        }
+      },
+      "additionalProperties": false
+    },
+    "children": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "title": "PackageId",
+        "description": "包全局唯一 id。允许 Unicode 字母/数字/`._-`，禁止路径分隔符与 `..`（防穿越）。",
+        "pattern": "^[\\p{L}\\p{N}._ -]+$",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "maxItems": 64,
+      "uniqueItems": true,
+      "description": "子包 id（嵌套 ≤3 层）"
+    },
+    "minShell": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    }
+  },
+  "additionalProperties": false
+}

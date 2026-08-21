@@ -1,0 +1,6 @@
+{
+  "schema_version": 2,
+  "id": "com.daily.badver",
+  "type": "app",
+  "version": "not-a-semver"
+}

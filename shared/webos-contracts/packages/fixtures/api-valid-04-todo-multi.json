@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "namespace": "todo",
+  "endpoints": [
+    {
+      "name": "get_todo",
+      "method": "GET",
+      "path": "/todo/{id}",
+      "handler": "handlers/get.js",
+      "storage": { "read": ["todo/*"] },
+      "visibility": "owner"
+    },
+    {
+      "name": "set_todo",
+      "method": "POST",
+      "path": "/todo",
+      "handler": "handlers/set.js",
+      "storage": { "write": ["todo/*"] },
+      "visibility": "public"
+    },
+    {
+      "name": "delete_todo",
+      "method": "POST",
+      "path": "/todo/{id}/delete",
+      "handler": "handlers/del.js",
+      "storage": { "write": ["todo/*"] },
+      "visibility": "owner"
+    }
+  ]
+}

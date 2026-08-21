@@ -1,0 +1,8 @@
+{
+  "schema_version": 2,
+  "id": "com.daily.onetool",
+  "type": "toolpkg",
+  "version": "1.0.0",
+  "capabilities": ["process.spawn", "compute.exec"],
+  "entry": "main.js"
+}

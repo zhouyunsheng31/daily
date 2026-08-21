@@ -258,6 +258,19 @@ export interface WebOsEmailBindingResponse {
   message: string
 }
 
+/** 系统时间信息（GET /webos/api/time） */
+export interface WebOsTimeInfo {
+  /** UTC ISO 字符串 */
+  iso: string
+  /** Unix 毫秒时间戳 */
+  timestamp: number
+  /** 北京时间（UTC+8）格式：YYYY-MM-DD HH:mm:ss */
+  beijing: string
+  /** 中文星期几，如「星期四」 */
+  weekday: string
+  timezone: 'Asia/Shanghai'
+}
+
 export interface WebOsBootstrap {
   session: WebOsSession
   ai: WebOsAiConfig
@@ -280,6 +293,8 @@ export interface WebOsWorkspaceEntry {
   type: 'dir' | 'file'
   size: number
   modifiedAt: number
+  /** 仅 home/ 下图片会附带：免鉴权公开 URL（桌面 sandbox iframe 可加载），不可枚举 UUID */
+  publicUrl?: string
 }
 
 /** 用户文件工作区列表响应 */

@@ -1,0 +1,132 @@
+{
+  "type": "object",
+  "required": [
+    "version",
+    "pages"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pages": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "appId"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "app"
+                },
+                "appId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "name": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "icon": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 4096
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "name",
+                "children"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "folder"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "icon": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 4096
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "children": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "appId"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "app"
+                      },
+                      "appId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "name": {
+                        "type": "string",
+                        "maxLength": 64
+                      },
+                      "icon": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 4096
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "maxItems": 200
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "minItems": 1,
+      "maxItems": 64
+    },
+    "updatedAt": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,7 @@
+{
+  "schema_version": 2,
+  "id": "com.daily.deep",
+  "type": "bundle",
+  "version": "1.0.0",
+  "children": ["a.child.one", "b/../child.two"]
+}

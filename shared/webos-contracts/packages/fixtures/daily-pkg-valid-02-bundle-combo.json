@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "id": "com.daily.combo.pack",
+  "type": "bundle",
+  "version": "0.3.1",
+  "display_name": { "zh": "全家桶" },
+  "contents": {
+    "skills": ["skills/ui-guide/SKILL.md"],
+    "tools": ["tools/ui-layout.js"],
+    "assets": ["wallpapers/day.png"]
+  },
+  "children": ["com.daily.system.ui", "com.daily.system.files"],
+  "minShell": "0.1.0"
+}

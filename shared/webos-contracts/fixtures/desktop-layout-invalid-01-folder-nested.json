@@ -1,0 +1,7 @@
+{
+  "version": 5,
+  "pages": [
+    [{ "kind": "app", "appId": "a" }],
+    [{ "kind": "folder", "name": "deep", "children": [{ "kind": "folder", "name": "nested", "children": [{ "kind": "app", "appId": "x" }] }] }]
+  ]
+}

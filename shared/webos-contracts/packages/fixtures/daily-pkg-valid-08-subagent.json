@@ -1,0 +1,10 @@
+{
+  "schema_version": 2,
+  "id": "com.daily.notes-agent",
+  "type": "subagent",
+  "version": "1.0.0",
+  "entry": "agent.md",
+  "display_name": { "en": "Notes Agent" },
+  "capabilities": ["subagent.spawn"],
+  "minShell": "0.1.0"
+}
