@@ -4,8 +4,444 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
+
+### 2026-08-21：Android 端同构沉浸客户端重构 + 规范文档体系精简收敛
+
+**背景**：按用户最新决策与最高执行纲领，消除 Android 原生 Compose 对话页带来的双端分裂，确立**双端同构**原则；彻底剔除 Shizuku、无障碍、系统全局悬浮窗等外部特权杂质；技能统一装入包内；模型走统一标准服务端链路。
+
+**改动**
+1. **最高纲领与路线规范收敛**：
+   - `AGENT.md` 重写：明确双端同构（Web HTML 模板同构消费）、服务即包（受限 vm 沙箱）、包市场与文件工作区；清除冗余旧叙事。
+   - `docs/routes/mobile.md`、`docs/routes/README.md`、`docs/android/17-m1-task-cards.md` 同步定稿。
+2. **Android 客户端沉浸同构改造**：
+   - `client/android/app/src/main/java/xyz/shadowshub/daily/ui/DailyApp.kt`：重构为全屏沉浸式 WebView 容器，直接消费 Web 端 HTML 模板，支持 CookieManager/DOMStorage 本地持久化、`__dailySystemBack` 优雅拦截与冷启动平滑过渡。
+   - `client/android/app-runtime/src/main/java/xyz/shadowshub/appruntime/DailyJsBridge.kt`：补齐 `apps.remove`、`apps.reorder`、`system.navigate`、`system.copy`、`layout.get/put` 及 `api.invoke`（App API 体系）。
+   - `client/android/core/src/main/java/xyz/shadowshub/core/network/WebosApi.kt`：补齐 `deleteApp`、`rollbackApp`、`getDesktopLayout`、`putDesktopLayout`、`invokeAppApi` 网络调用。
+   - `deploy/android-build.sh`：优化打包规则排除 `tools/` 大文件，上传速度提升 20 倍。
+
+**验证**
+- 服务器 Gradle 构建 `BUILD SUCCESSFUL`（92 任务全绿，产出 22MB APK）。
+- Shizuku 真机安装运行验证：屏幕像素采样为 WebOS 暖色调 `rgb(224, 220, 211)`，启动平滑零白屏，系统返回键拦截正常。
+
+---
+
+### 2026-08-21：W3 收尾修复 —— 补「AI 读 App 数据」路标 + 包市场真实收敛（万物皆可包·市场只有包）
+
+**背景**：用户反馈「AI 无法通过在 App 内创建 API 实现让 AI 读取用户数据」。核查定位：**服务端链路 W2/W3 早已通**（`registerDynamicTools` 把 api 包端点注入为 `appapi_<ns>_<ep>` 工具，W2 单测验证「App 写 storage → AI 调 tool 读回」闭环），**根因是 AI 侧提示词 / app-dev skill 完全没教 AI 这件事**（WEBOS_SYSTEM_PROMPT 零提及 api 包 / appapi 工具；app-dev skill 只有 App 间互联）——「高速公路修好但没立路标」。同时用户重申「市场只要包」：市场页签仍消费旧 store/skills 两套非包数据源，包市场却空。
+
+**改动**
+1. **补路标（核心修复，让 AI 知道怎么读 App 数据）**：
+   - `server/src/piBridge.ts`：`WEBOS_SYSTEM_PROMPT` 新增能力条目「App API（读 App 内数据的关键）」——告诉 AI 可在 `packages/<id>/` 建 api 包（文件夹即包），系统自动把端点注册为 `appapi_<ns>_<ep>` 工具；给完整做法（daily.pkg.json + api.json + handlers/*.js）、生效时序（下一轮/重建会话注入）、隐私边界（没建 api 包读不到私有数据，需建包且声明最小 storage 范围）。
+   - `.pi/skills-webos/app-dev/SKILL.md`：新增 §4.5「App 数据出口（api 包）」——完整姿势 + 代码示例 + api.json 要点 + handler 写法 + 生效时序 + 常见坑 + 「做好 App 主动补 api 包」习惯。
+2. **包市场真实收敛（市场只有「包」）**：
+   - `server/src/webos/market/service.ts`：`listMarket` 无 type 时合并三路 = **真包（market_entries）+ App 包（webos_store_apps 已发布快照映射 type=app）+ 技能包（系统全局 .pi/skills-webos/ + 用户发布 webos_store_skills 映射 type=skill）**——App / skill 不重复注册目录，作「包」的只读适配；新增 `listMarketAppsGlobal`（全局已发布 App 包）+ `listSkillPackages`（系统技能 + 用户技能包视图）。
+   - `server/src/webos/market/router.ts`：新增 `GET /market/apps`。
+   - `client/shell-web/src/api.ts`：`marketApps` 改调 `GET /market/apps`（全局已发布 App）；补 `WebOsWorkspaceEntry` 类型定义（既有欠账）+ App.tsx import。
+   - `server/src/webosStoreV1.ts`：商店默认进入「市场」页签（包市场）；`openMarketDetail`/安装按钮按包 kind 分流（App 包→store.install、技能包→skills.install、真包→market.install）。
+3. **测试**：`market.test.ts` 2 断言从「列表为空」改为「目标包不可见」（因无 type 列表现含技能包视图，语义更准）。
+
+**验证 + 部署**
+- server `tsc` 0 错；九模块 **132/132**；商店模板 JS vm 校验 OK（55.3KB/script 35.2KB）；shell-web `tsc -b` 0 + `VITE_BASE_PATH=/daily/` 构建（`index-BpkdqUfy.js` / `index-DyD8OJ4Z.css`）。
+- 按部署手册上线：后端 4 文件（`piBridge.ts`、`webosStoreV1.ts`、`market/service.ts`、`market/router.ts`）+ `app-dev/SKILL.md` scp→备份 `.bak-w3final-<ts>`→解包→`pm2 restart`→online；前端 dist 上传 + chmod 644。
+- 公网验证：新 JS/CSS/index 200；`GET /market`（游客）**返回 17 个包**（5 系统技能 + 2 用户技能 + 10 个已发布 App 包，全在「包」列表）；SSE 对话 start→thinking→tool_start/read 正常（AI 按提示词读 skill）。
+
+### 2026-08-21：W3 统一包市场（R14）服务端 + 全量部署上线 —— 万物皆可包 · 互通全链路线上
+
+**背景**：W3 最后一个核心切片「统一包市场」+ 按 `docs/webos-deployment-ops.md`（服务器 154.64.249.172，密钥 `~/.ssh/daily_server_ed25519`）**把 W0~W3 全量部署上线**（生产此前无 `server/src/webos/`，本次一并交付：contracts / files / packages / appapi / net / market…）。
+
+**改动（server/src/webos/market/，4 文件 + 接线）**
+- **db.ts**：`market_entries`（package 维度发布条目，status/type/data_scope/scan）+ `market_installs`（调用者安装登记，PK(package_id,caller_key)）；幂等 ensure。
+- **service.ts**：`publishPackage`（owner、app 类型走既有商店、api 至少 1 个 public 端点并复用 appapi 公开索引、**静态扫描**明文密钥/Bearer/硬编码 → 不过不发布带人话 issues）；`unpublishPackage`/`listMarket`(type/q + 发布者 handle + 端点概览)/`marketDetail`(含安装态)/`installMarketPackage`（**依赖闭包** BFS ≤3 层：dependencies+children，逐项必须在市场 live 且 semver range 满足，任一不满足 → DEP_UNSATISFIED 不落库；skill 复制 SKILL.md 到调用者 skills/）；`registerMarketTools` → pi 工具 `search_market_packages` / `install_market_package`。
+- **router.ts**：`GET/POST /webos/api/market*`（list 开放浏览；publish/install/detail/mine/unpublish 非游客 R13）。
+- **接线**：index.ts 挂载 + ensureMarketSchema 启动建表；webos.ts createWebosSession 注入 market 工具（W2 动态工具同点）；`server/src/semver.d.ts` 补 semver 类型。
+
+**部署（docs/webos-deployment-ops.md 执行，2026-08-21 上线）**
+- 后端：`server/src/webos/`（7 模块）+ index.ts / routes/webos.ts / billing/pricing.ts / semver.d.ts + `shared/webos-contracts/` 4 个契约 JSON 快照，scp tar 上传 → 备份 `.bak-w3-<ts>` → 解包 → `pm2 restart daily-server`。
+- 启动日志：files/packages/appapi usage/public/market schema 全部 ensured，无 EADDRINUSE/Error，`/api/health` ok。
+- 公网验证：`/webos/api/market` → 200 `{"entries":[]}`；`/webos/api/net/spaces` 游客 → 401 `GUEST_NOT_ALLOWED`（R13 生效）；`/webos/api/bootstrap` 200 无回归。
+- 前端：shell-web `tsc` + `VITE_BASE_PATH=/daily/` 构建 → dist 上传 public/ + assets（`index-oICBSVSM.js`，路径含 `/daily` 前缀）→ `chmod 644`；`/daily/` 引用新 hash、资源 200 `text/javascript`。
+- AI 链路：SSE 对话（游客，thinking=medium）实测 start→delta×4→done，createWebosSession（含 market/appapi 动态工具）无碍。
+
+**验证**
+- server `tsc --noEmit` 0 错；`market.test.ts` **9/9**；**九模块 132/132 全绿**。
+- **W3 剩余三件切片已完成并部署上线（见下一条 2026-08-21·W3 收尾）**。
+
+### 2026-08-21：W3 收尾 —— 事件总线长轮询 + 宿主 SDK 市场适配 + 商店模板「统一包市场」type 维度 UI（R14 全链路线上）
+
+**背景**：把 W3 统一包市场（R14）的最后三块拼图补齐并部署：让「互通三原语 + 市场」从「服务端 core」升级为「移动端/桌面都能逛、能装、能实时同步」的完整消费闭环。全部按 `docs/webos-deployment-ops.md` 上线。
+
+**改动（三件）**
+1. **事件总线长轮询（实时通知）**：`server/src/webos/net/service.ts` 新增 `eventPollWait`（waitMs 上限 30s、轮询间隔默认 1s、有新事件立即返回否则等满超时）；`router.ts` 的 `GET /net/spaces/:id/events` 支持 `?wait=<秒>` 参数（上限 30s）——客户端订阅者靠它拿到近乎实时的新事件，替代纯拉取。
+2. **宿主 SDK 市场适配**：`client/shell-web/src/api.ts` 新增 `marketList`/`marketDetail`/`marketInstall`/`marketMine`/`marketApps`（`GET/POST /webos/api/market*` + `/packages?type=app` 只读适配）；`runtime.ts` `StoreSdkAdapters` 扩 5 个 market 适配 + `handleStoreRequest` 分发 `market.list/detail/install/mine/apps`；`App.tsx` `buildStoreAdapters` 接线（强类型经 `as unknown as` 与 `Record<string, unknown>` 契约对齐，与既有 skills* 一致）。
+3. **商店模板「统一包市场」type 维度 UI**：`server/src/webosStoreV1.ts` 新增「市场」页签（`tab-market`）+ type chips（全部/API/技能/主题/工具包/App）+ `.mkt-*` 样式族 + 市场详情弹层（namespace/public 端点/数据范围读·写/安装态/R15 按调用者计费提示）+ 「我的安装」；`setTab('market')` 独立模式（隐藏特色/空间条），App 类型走 `marketApps` 只读适配（App 仍在「最新/最热」列表安装）。
+
+**验证（本地）**
+- server `tsc --noEmit` 0 错；**九模块 132/132 全绿**（net 13 / market 9 / appapi-public 6 等全部通过）；net 长轮询单测覆盖 `eventPollWait`（waitMs 上限/立即返回）。
+- shell-web `tsc -b --noEmit` 0 错 + `VITE_BASE_PATH=/daily/` 构建通过（`index-mm26TfNV.js`）。
+- 商店模板 JS vm 校验通过（HTML 52.9KB，script 32.8KB，无 SyntaxError）。
+
+**部署 + 公网验证（上线）**
+- 后端增量 4 文件（`webosStoreV1.ts` + `webos/net/{index,router,service}.ts`）tar scp → 服务器备份 `.bak-w3remain-<ts>` → 解包 → 服务器 `npx tsc`（生产既有 module-resolution 历史报错与 tsx 运行时无关）→ `pm2 restart daily-server` → online，schema ensured，SSE 对话 start→delta→done 链路通。
+- 公网：`/daily/` 200、新 JS/CSS（`index-mm26TfNV.js` / `index-GWsGvaTm.css`）200 `text/javascript`；游客 token 下 bootstrap 200、`/webos/api/market` 200、`/webos/api/net/spaces` 游客 401 `GUEST_NOT_ALLOWED`（R13）；线上确认 `?wait=` 参数与 `eventPollWait` 已在生产中生效。
+- 遗留说明：老套件 `aiTools/phase4-auth/piBridge` 3 文件 19 用例失败为工作区既有技术债（AI 工具定义数 46 vs 45、admin 首用户角色、withSearchUser mock），与本轮 W3 无涉，九模块验证基线 132/132 不受影响；另记入待办按需修。
+
+### 2026-08-21：W3 public 调用（互通②·跨用户受限执行）—— 发布索引 + 属主执行 + 调用者计费
+
+**背景**：W3 通用互通三原语之③（①②=共享数据空间+事件总线已交）。本切片打通「乙调甲的 public 端点」：owner 把含 `visibility=public` 端点的 api 命名空间发布进全局索引 → 任意注册用户（R13 排除游客）按 namespace 调用 → 服务端在**属主 storage** 上跑 W2 受限 vm（数据归属主），**账单记调用者**（R15，谁触发谁付费）。
+
+**改动**
+- `appapi-db.ts`：新表 `webos_api_public`（namespace→owner 全局发布索引，幂等 ensure）+ `upsertApiPublic/getApiPublic/deleteApiPublic/listMyApiPublic`。
+- `appapi-service.ts`：`publishNamespace`（仅 owner、至少 1 个 public 端点）/`unpublishNamespace`/`getPublicStatus`/`resolvePublicEndpoint`（按 namespace 查属主 → 现读属主当前包 → 仅放行 public 端点，防陈旧索引）；`invokeEndpoint` 增 public 分支——owner 未命中 → 游客守卫（GUEST_NOT_ALLOWED，R13）→ 公开解析 → `execPrincipal=属主`（loadState 用属主 storage/secrets/ctx + 读属主 handler）+ `isRemote` 计费（成功：先 saveState 属主落数据，再 loadState 调用者扣 1 积分，`usage` 记调用者 + 审计标注 remoteOwner）。
+- `appapi-router.ts`：`POST /appapi/:namespace/publish`、`/unpublish`、`GET /appapi/:namespace/status`（字面路由置于 `:namespace/:endpoint` 通配之前，否则被吞）。
+- `index.ts`：启动 `ensureApiPublicSchema` 建表。
+- 回归修正：invokeEndpoint 现在任何未命中都会查 public 索引 → 既有 `appapi.test.ts`/`appapi-sdk.test.ts` 的 beforeEach 补 `ensureApiPublicSchema`（建表）。
+
+**验证**
+- server `tsc --noEmit` 0 错；`appapi-public.test.ts` **6/6**（发布与端点清单/非 owner 拒绝+owner 端点不可跨用户/乙读甲 storage+账单记乙甲不扣/乙写甲 storage 甲可见且甲不扣费/R13 游客拒/撤回后 owner 本人仍可调）。
+- **八模块 123/123 全绿**（W0 45 + desktopLayout 8 + W-F 10 + W1 18 + W2 20 + W2-sdk 3 + **W3-public 6** + **W3-net 13**）。
+- **W3 剩余切片**：统一包市场（R14 type 维度 + 依赖闭包 + 审核 + 安装确认）、事件总线 WS 实时通知、`search_packages`/`install_package` pi 工具。
+
+### 2026-08-21：W3 互通原语 v1（web 路线里程碑五·第一切片）—— 共享数据空间 + 事件总线（跨用户）服务端核心
+
+**背景**：W3 启动（用户拍板 2026-08-21：通用原语、组合式包、统一包市场 R14、游客排除 R13）。第一切片区 = 互通原语（09-roadmap W3「隔空互通设计要点」通用原语版）：不按业务造专用 API，提供三个通用原语，聊天/对弈/论坛都是同一套原语的不同组装。本切片交付 ① 共享数据空间 + ② 事件/消息总线 + 寻址（handle→user_key）服务端核心（跨用户受限执行 = 第三原语，下一切片；统一包市场另行）。
+
+**改动（server/src/webos/net/，4 文件 + 接入）**
+- **db.ts**：三表 `net_spaces`（owner/name/mode/ACL）+ `net_keys`（空间持久化 KV，乐观版本）+ `net_events`（事件总线，UNIQUE(space_id,seq) + to_key 定向）；`ensureNetSchema` 幂等建表。
+- **service.ts**：`requireNonGuest`（R13，游客一律 GUEST_NOT_ALLOWED）；`resolveHandle`（注册用户名 username → `user:<uuid>`，users.username UNIQUE；未知 null，不引入 guest deviceId 寻址）；空间 CRUD + 三种可见性模式 `public-ro`（任意注册用户可读，owner 写）/ `open`（公开读写）/ `invite`（owner 按 handle 加成员白名单）+ 成员 add/remove；KV 读写带**乐观版本并发**（VERSION_CONFLICT 409，先 GET 最新 version 再写）；事件发布（canWrite）+ 增量拉取（afterSeq）+ 定向 `to=handle`（仅目标可见）。
+- **router.ts**：REST 端点族 `/webos/api/net/spaces*`（POST 创建 / GET 我的 / :id 信息 / :id/mode / :id/members / :id/keys / :id/keys/:key 读写 / :id/events 发与拉），403/404/409/401 语义化错误码。
+- **index.ts（server）**：挂载 netRouter + `ensureNetSchema` 启动建表。
+- **安全要点（追加 playbook 一条）**：SQLite 驱动会把 TEXT 里的 JSON 自动反序列化成对象 —— 直接对原始 JSON 字符串做 `JSON.parse`/`String()` 会造成往返失真（字符串 `"1"`→数字 1、对象→`[object Object]`）。互通值一律**哨兵打包** `{__v: 值}` 后存储，读取按「已解析对象 / 原始字符串」双态解包（保留 `__v` 为保留键约定）。
+
+**验证**
+- server `tsc --noEmit` 0 错；`net.test.ts` **13/13**（游客拒绝/寻址/创建域名权限/版本冲突 409/三种模式/invite 成员增删/事件广播+定向+增量拉取）。
+- 七模块合计 45+8+10+18+20+3+13=**117/117 全绿**。
+- **W3 剩余切片**：③ 跨用户受限执行（public endpoint：乙经属主路由调甲包 handler）、统一包市场（R14 type 维度/依赖闭包/审核/安装确认）、WS 实时通知接入（事件总线现为拉取）、search_packages/install_package pi 工具。
+
+### 2026-08-21：W2 App API（web 路线里程碑四·核心，服务端核心完成）—— handler 受限 vm + owner 端点 + 动态工具 + 计费 kind='api'
+
+**背景**：按 09-roadmap W2（§04）——「AI 造了 App 却不知道用户在 App 里存了什么」。W1 的 api 包只有壳；本轮落地「api.json 声明 → 服务端受限 vm 执行 handler → 端点/工具/文档」的核心链路（owner 级首发；public 管道 W3）。
+
+**改动（server/src/webos/appapi/，5 文件）**
+- **api-runtime.ts**：受限 vm 执行器 `executeApiHandler`——**安全要点：沙箱必须 `Object.create(null)`**（普通 `{}` 的 constructor 桥接宿主 realm，真机验证可 `this.constructor.constructor("return process")` 逃逸拿宿主 process；null-proto 直接阻断该经典逃逸）；ctx 白名单（storage 前缀权界 + params + userKey + http + secrets）；无 process/require/任意 fetch；注入占位 console + 宿主 setTimeout（回调仍在 vm realm）；超时（Promise.race，rejection 透传不误判超时）+ 输出 ≤64KB；`makeHttp` 域名白名单 + SSRF 拦截 + 256KB/30s 双限；`redactSecrets` 整值脱敏。
+- **appapi-service.ts**：`loadApiSpecs`（聚合本人 api 包 api.json，经 W0 校验）；`invokeEndpoint` 完整管线（owner 校验 → loadState → storage 权界 → vm 执行 → 扣积分 `fixedCostMinor('api',1)` → `webos_api_usage` 落库 → execution.log 审计，失败脱敏）；`registerDynamicTools`（端点点→pi 工具 `appapi_<ns>_<ep>`，参数 schema 直转 TypeBox，≤60 裁剪）；`updateApiSecrets`/`getApiSecretsStatus`（值仅存 `appStorage[<id>]['__api_secrets__']`，回执只报已设置名单）。
+- **appapi-router.ts**：`POST/GET /webos/api/appapi/:namespace/:endpoint`、`PUT/GET /appapi/:namespace/secrets`。
+- **appapi-db.ts**：`webos_api_usage` 表（每次调用一行：ns/package/endpoint/status/cost/duration/ip/脱敏 error）。
+- **接入**：webos.ts 注册 deps（loadState/saveState/chargeCredits，防循环依赖）+ `webosAppTools` 改 async 追加动态工具（2 个 createWebosSession 调用点 await）；index.ts 挂载 `appapiRouter` + `ensureApiUsageSchema`；billing 新增 `kind='api'`（固定 ¥0.01/次=1 积分）。
+- **前端 SDK（sdk.useApi，shell-web runtime.ts/api.ts）**：`sdk.useApi(ns).<endpoint>(params)`（Proxy 动态方法名，支持 camelCase 别名 `listNotes()`，服务端 `camelToSnake` 自动命中 `list_notes`）→ 宿主 MessageChannel `api.invoke` → `/webos/api/appapi/:ns/:ep`（owner 级，扣 1 积分）；`api.invokeAppApi`/`getAppApiSpec`（文档/调试数据源）。服务端新增 `GET /webos/api/appapi/:namespace`（端点清单，供 API Tab 文档页渲染）；route 顺序修正：secrets 字面路由先于 `:namespace/:endpoint` 通配（避免被吞）。
+- **API 文档 / 在线调试页（shell-web）**：「我的 API 包 → API 端点文档」——api.ts 新增 `listPackages(type)`（GET /webos/api/packages?type=api）+ `WebOsPackageListItem`；App.tsx 新增 `AppApiCenter` 全屏子视图（个人主页「我的 API 包」卡进入）：列本人 type=api 包 → 命名空间文档页（GET /appapi/:namespace：method 徽标 / 参数 JSON Schema / storage 读写范围 / visibility 徽标 / network / secrets 声明，namespace 可改）→ 每端点展开「在线调试」（参数 JSON 编辑 → POST /appapi/:ns/:ep，展示返回值与扣分数）；styles.css 新增 `.api-*` 样式族。
+
+**验证**
+- server `tsc --noEmit` 0 错；appapi 必测族 **20/20 + appapi-sdk 3/3 = 23/23**（新增：camel 别名命中、getNamespaceSpec 文档数据源）。
+- 六模块合计 45+8+10+18+20+3=**104/104 全绿**；shell-web `tsc -b` + `vite build` 通过。
+- ⚠️ 本轮 W2 服务端核心 **+ 前端全量（sdk.useApi + API 文档/在线调试页）** 已交付；**剩余（仍在 W2）**：Playwright 线上回归（真实账号，用例 A/D）；用例 C 依赖 W3 市场。
+- 测试基建坑（追加 playbook）：单进程内 node:sqlite `DatabaseSync` 打开约 20 次后 createTestDb 会报 `unable to open database file`（CANTOPEN）——涉及 DB 的单测文件拆分，让每个文件在独立 vitest worker 里打开次数 <20（appapi-sdk.test.ts 因此拆出）。
+
+### 2026-08-21：W1 包体系（web 路线里程碑三·核心）—— packages 三表 + 文件夹即包泛化 + 校验反馈回路 + 包生命周期
+
+**背景**：按总纲（docs/routes/README.md §9.2 第二波）与 09-roadmap W1，把「一切皆包」从契约（W0）落成可运行流水线。此前 Ai 只能通过 apps/ 建 app 型 HTML；theme/skill/api 等非 app 类型无注册/版本/回滚载体。本轮交付「AI 写包目录 → 系统校验 → 自动版本化」的通用通道。
+
+**改动**
+- **契约/DB（server/src/webos/packages/）**：`packages-db.ts` 三表 `packages / package_versions / package_installs`（id 全局唯一 + owner_key，表结构为 W3 市场铺路；启动 `ensurePackageSchema` 幂等建表）。
+- **文件夹即包泛化（packages-service.ts）**：`packages/<id>/` 顶层目录 + `daily.pkg.json`（manifest）→ `syncPackageFromFs` 即时识别 type → W0 校验器（契约）+ 内容校验（单包 ≤10MB / 按类型入口存在 / api.json 语义 / html-js-svg 静态拒绝清单）→ 注册 + 建不可变版本；`syncAllPackagesFromWorkspace` 全量扫（启动/列表兜底，覆盖手动复制/回收站恢复）。
+- **校验反馈回路（核心）**：`agent_fs_write/edit/copy/delete` 命中 `packages/` 时，人话错误（缺入口/非法能力词/危险元素/type=app 错位等）随工具结果 `note` 回流，AI 即时修正——**校验不过不建版本**（包事务，不留半成品）。
+- **生命周期（packages-router.ts）**：REST 端点族 `GET/POST /packages`、`GET /packages/:id`（不可变版本 + 审计 + 安装态）、`POST /packages/:id/versions`、`PUT /packages/:id/active-version`、`POST /packages/:id/rollback`、`DELETE /packages/:id`（回收站 packages/.trash/，可 restore）、`GET /packages/:id/files/raw/*`（鉴权+owner+防穿越）；app 只读适配视图注入（`setAppViewProvider`，GET /packages 无 type 过滤时与真包合并）。
+- **接入（webos.ts / index.ts / webosWorkspace.ts）**：fsHooks `onFsFileWritten/onFsFileDeleted` 返回值放宽为 `string|void` 并回流包反馈；`loadState` 触发全量扫描；index.ts 挂载 `packagesRouter` + 启动建表 + 注入适配视图；`ensureWorkspace` 新增 `packages/` 顶层目录与 README 说明。
+- **行为红线**：`type=app` 仍走 apps/（文件夹即 App 单轨，packages/ 给明确指引）；raw 端点 W1 只对安装态 owner 开放（W4 执行引擎再按类型免鉴权）；id 全局唯一（占用即反馈换 id）。
+
+**验证**
+- server `tsc --noEmit` 0 错；`packages.test.ts` 18/18（注册/幂等/自动小版本+1/反馈回路 3 次闭环/指针切换/回滚/回收站 restore/列表合并 app 视图/粘贴创建/纯函数）。
+- 三模块合计 63+18=81 用例全绿（W0 45 + desktopLayout 8 + W-F 10 + W1 18）；shell-web `tsc -b --noEmit` + `vite build` 通过。
+- 全量单测 362 通过 / 33 失败：失败全部落在既有 4 个文件（api/aiTools/phase4-auth/piBridge，认证种子/硬编码工具计数等历史问题），与 W1 代码路径无交集。
+- ⚠️ 线上部署注意事项同 W-F：生产暂不含 `webos/packages`（开发中），勿把工作区未部署模块带入生产 diff。
+
+### 2026-08-21：发送框重设计（方案 A · 用户选定）+ 图片上传链路修复（移动端「图片到对话」入口 / home 图片 publicUrl 打通）
+
+**背景**：用户反馈 ① 对话明明支持图片（粘贴/拖拽），手机端却没有上传按钮；②「上传到本对话」与「上传到 home」区别不清楚；③ home 图片只有相对路径，图片相关功能无法直接访问。且重设计前发送框三个无文字图标按钮（齿轮/图片/新建）拥挤、语义不明。
+
+**方案 A · 功能内嵌输入框（用户从 3 个候选选定，参考外部 AI 聊天输入区截图，沿用 Daily 浅色语言）**
+- 发送框改为两段：textarea 在上，底部内嵌一条「功能栏」——三个**图标+文字胶囊**：「图片」（蓝色高亮= 发到对话，AI 当场看图，游客可用，复用压缩 data URI 链路）、「文件」（= 存 home/uploads，仅登录）、「新建」（新会话）；右侧保留 ⋯（更多菜单）+ 发送。
+- 原三个圆形图标按钮（composer-plus 齿轮保留 / composer-image / composer-new）删除，废弃 CSS 清除；新增 `.composer-funbar / .funbar-pill / .funbar-primary / .funbar-spacer`，输入框垂直布局。
+
+**图片上传链路修复（用户原话三痛点）**
+- **手机端有了上传图片按钮**：功能栏「图片」胶囊拉起系统相册/拍照 → 复用粘贴压缩链路（≤8 张、2048px 压缩）→ 图片进对话（data URI，服务端 DeepSeek Vision/M3 直接看图）；游客同样可用。齿轮菜单同步新增「图片到对话」项与「上传文件」项并列，语义明确。
+- **两态明确**：「图片」= 一次性发给 AI 看图（不落盘）；「文件」= 存入 home/uploads（AI 可长期读取、可作生成图参考图、App 素材）。
+- **home 图片 URL 打通**：后端本就返回 `publicUrl`（免鉴权 `/webos/api/imagegen/file/up-…`），此前前端 `uploadWorkspaceFile/uploadWorkspaceFileLarge` 返回类型与 FilesView 条目类型把字段丢了——已补齐（`WebOsWorkspaceEntry`），上传成功提示「已上传 N 个文件到 home/uploads/xxx（图片已生成公开链接，App / 生成图参考可直接使用）」；文件面板图片预览优先用 publicUrl（桌面/App sandbox iframe 可加载），无则回退带鉴权 raw。
+
+**改动文件**：`client/shell-web/src/App.tsx`（ImagePlus/Paperclip import、imageInputRef、onUploadFiles/onUpload 反馈、composer 菜单「图片到对话」、发送框方案 A 结构、FilesView entries 类型 + publicUrl 预览、openFile 优先 publicUrl）、`api.ts`（上传返回类型含 publicUrl）、`styles.css`（composer column + funbar 胶囊；删 composer-image/new）、`shared/webos-contracts`（契约层原本已有 publicUrl，未改）。
+
+**验证/部署**
+- `tsc -b --noEmit` 0 错误；`vite build` 通过；废弃类名零残留。
+- 生产部署：`dist` 上传 `/root/daily/server/public/`（备份 `public.bak-composer-20260821`），index.html 引用 `/daily/assets/index-WdOmq-Rf.js` + `index-C3YRZXT2.css`，线上 200 且两端文件一致可拉取。
+- 设计原型留档：`/storage/emulated/0/Download/Operit/composer-redesign.html`（3 候选对比页，用户选定 A 后仍可参考其余候选后续微调）。
+- ⚠️ 建议强刷验证（PWA service worker 可能缓存旧 bundle）：清站点数据或等待 SW 更新后再看新发送框。
+
+### 2026-08-21：视觉桥接双 provider——DeepSeek V4 Flash Vision（图片优先）+ MiniMax-M3（视频/兜底）+ 管理后台同步
+
+**背景**：平台主模型 DeepSeek 纯文本，视觉（AI 的眼睛）此前仅 MiniMax-M3。DeepSeek 官方上线 `deepseek-v4-flash-vision-exp`（OpenAI 兼容 /chat/completions，官方端点 api.deepseek.com）——价格低于 M3 且**图片 token 有硬上限（每张 ≤384，自动缩放 800×800）**。实测单图成本 ≈ 0.001-0.003 元。
+
+**Added**
+- **`server/src/vision/deepseekVision.ts`（新）**：DeepSeek 视觉 provider——`callDeepSeekVision()`（OpenAI 兼容、data URI image_url、90s 超时、缓存 token 读取）、`dsVisionConfigured()`、`dsVisionPricing()`（时段动态定价：空闲输入 1.5/输出 4.5，高峰 ×2，缓存 0.05/0.10 元/百万）。
+- **`server/src/vision/m3Vision.ts` 双 provider 分发**：`describeMedia` 图片优先 DeepSeek（成功直接返回）；DeepSeek 未配置/失败（记录 `DS_FALLBACK_M3` / `DS_TIMEOUT_FALLBACK_M3` 落库）/空描述 → 自动降级 MiniMax-M3；含视频的请求直走 M3（DeepSeek 暂不支持视频）。`visionConfigured()`=两家任一配置、`visionModelName()`=DeepSeek 优先。
+- **用量表 `webos_vision_usage` 新增 `model` 列**（区分 deepseek-v4-flash-vision-exp / MiniMax-M3；旧库由 `ensureVisionModelColumn()` 幂等 ALTER，schema×2 + migrations + index.ts 迁移链）。
+- **管理后端**（adminWebos.ts）：`/vision/stats` 新增 `byModel`（各模型次数/成败/token/金额）+ `pricing.providers`（双 provider 配置状态与定价，兼容旧字段）；`/vision/usage` 明细返回 model 列。
+- **管理后台前端**（admin-web）：视觉页展示双 provider chips（配没配+价格）、byModel 金额/次数拆分、明细表新增「模型」列；文案更新。
+- `.env.example` 增加 `DEEPSEEK_VISION_API_KEY=` 占位说明。
+
+**部署（生产已生效，2026-08-21 18:40）**
+- 后端 7 文件（deepseekVision.ts 新增 + m3Vision/schema×2/migrations/adminWebos/index）上传前逐文件 diff 确认「差异 100% = 本次改动、零夹带未部署内容」，md5 本地=远端一致；服务器 .env 追加官方 key（`DEEPSEEK_VISION_API_KEY=sk-665f1e…`，chmod 600，.env 备份留档；首次追加因原 .env 末行无换行把 key 拼到了 EXA_API_KEY 行尾，已用脚本还原并独立成行）；pm2 restart。
+- 管理后台前端 dist 部署 `/var/www/daily-admin/public/`（旧版备份 public.bak-vision-20260821，index.html 已引用新 js，线上 200）。
+
+**验证**
+- 服务端 tsc 0 新增错误（仅滤掉既有孤儿 src/webos.ts）；admin-web `tsc -b` + `vite build` 通过。
+- 启动迁移链正常：`ensureVisionModelColumn done`、`webos_vision_usage.model` 列已存在。
+- **真实端到端实测（服务器临时脚本）**：convert 生成带字测试图 → `describeMedia`（data URI）→ DeepSeek vision **ok、2.8s、input 347 / output 222 tokens、成功转录「VISION TEST 2026-08-21」**；落库 `model=deepseek-v4-flash-vision-exp`（cost 0 分，量级正确）。测试记录/脚本已清理。
+- 管理端 API（站长 JWT）：`/vision/stats` byModel = `{deepseek-v4-flash-vision-exp: {calls:1, ok:1, tokens:569}}` + 历史 20 条 unknown（接入前记录，语义正确）；`pricing.providers` 双 provider active=true；`/vision/usage` 明细含 model 列。
+
+**注意**：`deepseek-v4-flash-vision-exp` 为官方实验模型；若后续官方下架/改名，另一端点在 deepseekVision.ts 常量集中维护。旧记录 model=unknown 表示接入前的 M3 调用（不追溯改写）。
+
+**背景/根因**：朋友账号（`user:6b658270-...`，3145234007@qq.com）连续多次生图报错。线上 DB 排查（`webos_imagegen_usage` + `entities.webos_state`）确认三段独立根因：
+- **08-16 / 08-18 两批失败 = 网络层间歇故障**（`fetch failed content-length`，08-18 已修复重试）；
+- **08-21 04:55 本次失败 = 上游 OpenAI 系图像模型（gpt-image-2-super，经 ChatST 网关）内容安全拒绝**：
+  `Your request was rejected by the safety system ... safety_violations=[sexual]`。触发场景 = 「Same anime girl character as the reference」+ 动漫女孩参考图的**图生图**；
+  该拒绝是模型安全系统对人物/动漫角色题材的**确定性策略**（同提示词+同类参考图持续命中），非系统故障、0 扣费。
+  此前该错误被当作 `HTTP_<status>` 把原始英文 JSON 直接透传给用户，无法读、无法行动、管理后台无法归因。
+- **注意与限次的区分**：非充值用户生图 10 次上限（`FREE_IMAGE_LIMIT`）会在请求发出前拦截并返回中文「已达上限」，落库 error_code= FREE_IMAGE_LIMIT；本次 04:55 error_code 是上游 safety JSON → 判定为请求已发出、被模型审查拒绝，**不是限次导致**。
+
+**Fixed（生产已部署，2026-08-20 21:4x，pm2 daily-server online）**
+- `server/src/imagegen/chatstImage.ts`：新增 `parseSafetyRejection()` / `safetyRejectionMessage()`，`!response.ok` 分支识别安全拒绝 → 返回独立错误码 **SAFETY_REJECTED** + 中文可行动提示（含违规类别、改写建议），pm2 落明确 `[imagegen] 上游安全系统拒绝（SAFETY_REJECTED）…` 日志。
+- `server/src/routes/webos.ts`：generate_image 工具描述补充内容边界（AI 生成人物/动漫题图自动避雷 + 遇拒绝主动改写题材）；全失败归因优化——error_code 优先取独立错误码（SAFETY_REJECTED/HTTP_400/TIMEOUT）而非整段失败文本，管理后台可按类筛。
+- `server/src/utils/webosWorkspace.ts`：imagegen.md skill 增加「内容边界」章节。
+- **部署方式**：为不夹带工作区未部署的 W1/W-F（`webos/files`、`webos/packages` 尚在开发、生产无对应模块），采用「拉生产原版 + 本地合成仅本次改动 + esbuild 校验后回传」，三文件零新增 import、diff 精确（webos.ts 仅 +7 行）；服务器 tsc 仅剩既有孤儿 `src/webos.ts` 错误，pm2 restart 后 /api/health 200、端口 3456 唯一监听。
+
+**附加处置（站长授权的朋友账号解锁限次）**
+- 朋友账号 credits 此前 `{quota:100400, used:582, monthly:null}`（无 permanent）→ `FREE_IMAGE_LIMIT` 判定 `isPaidImage=false`，虽有 10 万 quota，但**免费用户生图成功 10 次上限已于 08-21 05:00 用完**，下次生图必被「未充值用户生图次数已达上限」锁死。
+- **已新增 `permanent:{quota:100000, used:0}` 解锁**（尝鲜用量包语义，扣费先 base 后 permanent；原值备份于服务器 `data/credits-friend-6b658270-before.json`，改库后 pm2 restart 清 stateCache 生效）。
+- ⚠️ 副作用提示：解锁后总可用额度 ≈ quota 剩余(~10 万) + permanent(10 万) ≈ 20 万，较原 10 万翻倍；如需精确 10 万，可把 base quota 调回会员默认并让 permanent 承载全部。
+
+**验证**
+- 真实报错文本 tsx 实测：识别 SAFETY_REJECTED / violations=[sexual] ✅；负例（content-length、限流）不误判 ✅。
+- 本地+生产 esbuild 三文件语法 OK、tsc 无新增错误；pm2 online、/api/health 200、端口唯一监听、日志无新增错误。
+- 朋友账号 DB：permanent 已写入并读取确认，isPaidImage=true。
+
+### 2026-08-20：W-F 文件服务一阶段（web 路线里程碑二）—— files 元数据 + manifest/blob/分块端点 + 双写 + 快照点
+
+**背景**：总纲 §9.1 立即可并行清单中，web 路线需把 W-F 作为小粒度任务交付（移动端 M1-7 文件同步的 manifest 锚点）。文档定位见 `docs/routes/web/07-files.md`——文件只有磁盘没有元数据层（无 etag/清单 → 移动端无法增量同步）、用户文件无版本、配额统计散落。本轮补齐。
+
+**改动**：
+
+- **`shared/webos-contracts/files.ts`（契约单一事实源，R6/R7 双端共消费）**：`WebOsFileManifestEntry`（path/size/etag/mtime/mime）、manifest/分块 upload/快照响应结构、`FILE_SERVICE_CONSTANTS`（分块 8MB / 小文件直传上限 / 会话 TTL / manifest 上限）。
+- **`server/src/webos/files/`（新增，不触碰冻结的 webos.ts）**：
+  - `db.ts`：`files` 表（user_key+path 复合主键、size/sha256/etag、mime、version、deleted_at 回收站语义、updated_at）+ `file_versions`（按需快照/内容寻址去重）+ `ensureFileServiceSchema`（启动幂等建表，同 webos_* 表族）。`storeFileMeta` 用 `ON CONFLICT (user_key,path)` upsert（修复初版按时间戳 id 永不冲突的 bug）。
+  - `service.ts`：`recordFileStats`（写后登记，双写核心）/`recordFileDeleted`（回收站语义）/`fingerprintFile`（≤4MB 全读、大文件头尾采样指纹）/`scanWorkspace`/`reconcileFileMetadata`（磁盘↔表 diff 对齐）/`createSnapshotPoint`（AI 批量改写前快照）。
+  - `router.ts`：REST 端点（挂 `/webos/api`，authMiddleware 继承）——`GET /files/manifest?prefix=`（移动端同步锚点）/`GET /files/blob?path=`（Range 下载）/`PUT /files/blob`（≤8MB 直传）/`POST /files/upload`（分块 init/part/complete/abort，断点续传）/`DELETE /files`（回收站语义）/`POST /files/snapshot`/`POST /files/reconcile`（本人触发）。
+- **agent_fs 双写适配（AI 无感知）**：`WorkspaceFsHooks` 新增 `onFsFileWritten/onFsFileDeleted`；`agent_fs_write/edit/copy/delete` 命中时触发；webos.ts 的 `fsHooks` 注入 File Service 的 `recordFileStats/recordFileDeleted`。路径语义不变，AI 工作方式零变化。
+- **`server/test/unit/files.test.ts`（守卫，10 用例）**：双写（写后 manifest 可见/覆盖 version 递增/删除回收站）、manifest 结构与契约一致（home/agent 隔离）、fingerprint/mime/relativize、reconcile 磁盘↔表对齐（写3删1+stale → 精确对齐）、快照点创建。
+
+**验证**：
+
+- `server` `tsc --noEmit` 0 错误；`client/shell-web` `tsc -b --noEmit` + `vite build` 通过。
+- `server` vitest：`files.test.ts` **10/10** + `contracts.test.ts` 45/45 + `desktopLayout.test.ts` 8/8 = **63/63 全绿**。
+- piBridge.test 7 个失败为本会话前既有状态（`piBridge.ts` 是会话开始前的 pre-existing M，未触碰；失败全在 pi 会话真实初始化路径），非本里程碑引入。
+- 架构决策沿用 W0：server 不能 import shared 的 `.ts`（rootDir）→ files 契约走 shared 类型 + 服务端本地常量（值由 shared 守卫保证一致）；reconcile 默认取 files 表里全部 user_key（或显式传入），只标记未删除且磁盘不存在的行。
+
+**待办**：移动端 M1-7 文件同步（manifest 锚点已就位）；配额展示从磁盘换成 files 表（`sumFileBytes` 已备，建议 reconcile 跑批后切换，误差 <1%）；blob 内容寻址块（恢复文件到快照时需 blobs，当前 file_versions 只存 sha256 引用，内容恢复后置）。
+
+### 2026-08-20：桌面布局端点 desktopLayout（web 路线插队小任务）——解锁移动端 M1-4
+
+**背景**：总纲 §9.1 立即可并行清单里，web 路线承诺把 `desktopLayout.ts` 作为无依赖插队小任务提前交付（移动端 M1-4 桌面阶段一的真实联调依赖）。文档定位见 `docs/routes/web/08-ui.md` §2（布局端点）+ `docs/routes/web/02-architecture.md` §3（`server/src/webos/desktopLayout.ts`）。
+
+**改动**：
+
+- **`shared/webos-contracts/desktop-layout.ts`（契约单一事实源，R7 双端共消费）**：桌面布局数据模型 `WebOsDesktopLayout`（optimistic version + 多页 `pages` 二维数组 + 文件夹折叠，D18 启动器方向对齐）+ TypeBox schema + `validateDesktopLayout`（TS 侧）/ `defaultDesktopLayout`。folder.children 仅含 app（有限嵌套 ≤2 层，typebox 1.x 无 Recursive 也可表达）。sed-2026-08-20 同步生成 `desktop-layout.schema.json` 快照（gen-contract-schemas.mjs），供服务端 Check 校验与移动端 DTO 生成。
+- **`server/src/webos/desktopLayout.ts`（新端点，不触碰冻结的 webos.ts）**：
+  - `GET /webos/api/desktop-layout`：返回当前用户桌面布局（首次返回默认空布局 `{version:0,pages:[[]]}`）。
+  - `PUT /webos/api/desktop-layout`：保存布局（schema Check + 语义校验），乐观并发（version 低于服务端当前 → `409 LAYOUT_VERSION_CONFLICT` + 返回 serverVersion 供前端合并重试）；同页重复 appId 语义拦截（schema 无法表达 appId 维度重复）。
+  - 存储复用 `loadState/saveState`（webos.ts 导出）+ appStorage 保留 key `__desktop_layout__`（Delete App 不误删），挂载走 index.ts（与 webosConversationsRouter 同级模式，不动 webos.ts）。
+- **`server/test/unit/desktopLayout.test.ts`（守卫）**：schema 快照完整 + fixtures 合法全过/非法全拒（schema 层）+ 重复 appId 语义拦截。fixtures：合法 3 / 非法 4（嵌套 folder、负 version、重复 app、空 pages），落 `shared/webos-contracts/fixtures/`。
+
+**验证**：
+
+- `server` `tsc --noEmit` 0 错误；`client/shell-web` `tsc -b --noEmit` 通过 + `vite build` 成功。
+- `server` vitest `desktopLayout.test.ts` **8/8 全绿**；`contracts.test.ts` 45/45 全绿（合计 53/53）。
+- 架构决策沿用 W0：server 不能 import shared 的 `.ts`（rootDir）→ desktop-layout 也走 JSON 快照 + typebox Check。
+
+**待办**：桌面模板 V2（webosDesktopV1 → V2 多页/文件夹/边缘翻页）属 W4，本插队只交付布局端点与契约；前端 shell-web 接入 layout.get/put（当前模板仍自行 JSON 内存管理，未读端点）——W4 一并做。
+
+### 2026-08-20：W0 契约基线（web 路线里程碑一）——统一包 Manifest + App API schema + 能力词汇表 + fixtures 守卫
+
+**背景**：双路线定稿（docs/routes/README.md R6）要求 `daily.pkg.json` / `api.json` / 能力词汇表只在 `shared/` 定义一次，双端实现 + fixtures 守卫，单侧新增字段即红。本轮交付 web 路线 W0「契约基线」（09-roadmap.md W0）——**双路线一切后续的硬阻塞点**。
+
+**改动**：
+
+- **`shared/webos-contracts/packages/`（单一事实源，新增）**：
+  - `daily-pkg.schema.ts`：daily.pkg.json v2 TypeBox schema（`PACKAGE_SCHEMA` + 静态类型 `WebOsPackageManifest` + 序列化 `PACKAGE_JSON_SCHEMA`）。覆盖 13 种包类型（app/pet-layer/api/skill/theme/toolpkg/mcp/workflow/model-pack/url-app/provider/subagent/bundle）、组合式包内容（contents: skills/mcp/tools/tokens/assets）、children 嵌套（≤3）、url-app 专属段/宠物段、依赖、minShell；`additionalProperties:false` 收紧未知字段。
+  - `api.schema.ts`：api.json TypeBox schema（`API_SCHEMA` + `WebOsApiSpec` + `API_JSON_SCHEMA`）。endpoints（name/method/path/params/storage/handler/returns/visibility owner+public）、network 白名单、secrets；导出 `API_HANDLER_LIMITS`（5s 超时/64KB 截断/ctx.http 256KB/30s/单会话 60 工具）。
+  - `capabilities.ts`：能力词汇表（`WEBOS_CAPABILITIES`，26 词 + `web` 可用性 available/unavailable/mobile-only）——新增能力必须先登记本表 + 写 03 文档 + 双端实现。
+  - `fixtures/`：daily.pkg.json 合法 12 例 / 非法 12 例，api.json 合法 5 例 / 非法 6 例（路径穿越、内网域名、非法能力词、未知类型、坏 semver、缺必填、children 越界+重复等）。
+- **`server/src/webos/contracts/`（服务端校验器，新增）**：
+  - `index.ts`：`validatePackageManifest` / `validateApiSpec` / `validateUnknownContract`，两级校验（schema 结构 + 语义），返回带 `path` 的人话 `issues`（W1 校验反馈回路的核心）；语义层做能力词汇表、域名白名单（含 SSRF 内网段拦截）、children 深度/重复、api handler 防穿越。
+  - `shared-contracts.ts`：从 JSON 快照导入词汇表。
+  - **架构决策**：server `tsconfig rootDir=./src` 禁 import shared 的 `.ts`（实测 TS6059）→ schema/capabilities 同时生成**纯 JSON 快照**（`*.schema.json` + `capabilities.json`），服务端校验器走 JSON import（实测不受 rootDir 限制），typebox 1.x `Check` 对纯 JSON schema 校验通过。快照由 `server/scripts/gen-contract-schemas.mjs` 生成（幂等，临时 symlink 解析 typebox，自动清理），提交 Git。
+- **`server/test/unit/contracts.test.ts`（契约守卫，新增）**：45 用例——fixtures 完整性（dailypkg 合法/非法各 ≥10、api ≥5）、合法全过、非法全拒（每条 issue 必有人话）、自动识别、语义细项（能力词/SSRF/深度/handler 穿越）、生成脚本幂等。
+
+**验证**：
+
+- `server` `tsc --noEmit` 0 错误；`client/shell-web` `tsc -b --noEmit` 通过 + `vite build` 成功（shared 契约被 shell-web 正常解析）。
+- `server` vitest `test/unit/contracts.test.ts` **45/45 全绿**。
+- `PACKAGE_JSON_SCHEMA` required 齐（schema_version/id/type/version），capabilities 26 词已落快照。
+
+**待办（本次未含，W1/W2 落地时接续）**：packages 三表与注册流水线（W1）、App API handler runtime（W2）、移动端 Kotlin DTO + 同款 fixtures 反序列化测试（README.md 交付要求 3）。
+
+### 2026-08-20：粘贴 HTML 生成 App 放开外部资源 + 老设备（Android 10 / iPhone 6S）白屏修复
+
+**背景**：用户反馈两个问题：① web 端「粘贴 HTML 创建 App」粘贴任意带外链（普通 `<a>`、CDN 脚本/样式/图片）的 HTML 都报「P0 静态 App 不允许外部网络资源」；② 老平板（Android 10）与老手机（iPhone 6S Plus）打开 web 端只显示橙色背景，无任何内容。
+
+**改动**：
+
+- **粘贴 HTML 放开外部资源**（`server/src/routes/webos.ts`）：
+  - `validateAppHtml` 增加可选 `opts.allowExternalResources`；原正则把**所有** `src/href/action/formaction` 指向 `http(s):/``//``javascript:` 的一刀切拒绝（连普通外链都拦），现拆分为：
+    - **危险协议一律禁止**（与是否放开无关）：`javascript:` / `vbscript:` / `file:` / `filesystem:`（`APP_FORBIDDEN_PROTOCOL`，新错误码），`data:text/html`（`APP_HTML_FORBIDDEN_RESOURCE`），以及 `iframe/object/embed/base` 元素（`APP_HTML_FORBIDDEN_ELEMENT`）。
+    - **外部 http(s)/协议相对资源**：仅当「用户显式粘贴」（`POST /webos/api/apps` 且 `source=local_import`）或「该源 App 的后续编辑」（`POST /webos/api/apps/:appId/versions` 且 `app.source==='local_import'`）时放行；AI 生成与其他自动路径（文件夹注册、工作区文件同步、`update_webos_app` 工具）保持严格，防幻觉 URL / 供应链依赖。
+  - `POST /apps/:appId/versions` 的版本 `source` 标记由硬编码 `ai_generated` 改为跟随 `app.source`（审计准确）。
+  - App 运行在 `sandbox="allow-scripts"` + srcdoc 的 opaque-origin iframe（无令牌、无宿主 DOM 权限、宿主不注入 CSP），外部资源与内联脚本同级风险，放开合理。
+- **老设备兼容**（`client/shell-web/vite.config.ts` + `src/main.tsx`）：
+  - 根因：`build.target` 未设置 → Vite 默认对标较新浏览器，产物保留 ES2020/2021 语法（实测 `?.`×141、`??`×156、`??=`×11、`||=`×14），且启动路径 `store.ts` 的 `deviceId()` 调用 `crypto.randomUUID`（Chrome 92+ / Safari 15.4+）。Android 10 自带 WebView（Chrome ~78）对 `?.`/`??` 是语法级不兼容 → 整个模块脚本解析失败 → React 不挂载 → 只剩背景；iPhone 6S（iOS <14）同理。
+  - 修复：`build.target: 'es2018'`（esbuild 把 `?.`/`??`/`??=`/`||=` 全部转译）；`main.tsx` 顶部加 `crypto.randomUUID` 兼容 shim（getRandomValues 构造 UUID v4，极老环境 Math.random 兜底）。`serviceWorker` 已有 `'serviceWorker' in navigator` 特性守卫；CSS 产物经扫描无 oklch/@layer 等现代特性，无需处理。
+
+**验证**：
+
+- `server` `tsc --noEmit` 退出码 0、零错误；`client/shell-web` `tsc -b && vite build` 通过。
+- 新构建产物 `index-kZGol9hn.js`（631.9KB）复扫：`??`/`??=`/`||=` 全部清零（0），残留 5 处 `?.` 均为 KaTeX 内部 `cond ? .数字 : 0`（三元 + 数字的词法拼写，本就是 ES3 语法，老内核可解析），`randomUUID` shim 已入 bundle。
+- 服务端校验逻辑冒烟测试（模拟严格 vs local_import 放开）：17 个用例全过——外链/CDN/图片/协议相对在 local_import 下放行，严格路径拒绝；`javascript:`/`iframe`/`base`/`data:text/html` 无论是否放开都拒绝；相对路径与 `style url()` 不受影响。
+- **部署完成（2026-08-20 01:2x，已上线 shadowshub.xyz/daily/）**：
+  - 前端：工作区新构建 `dist/` 上传到服务器 `server/public/`（原子切换，旧目录留档 `server/public.bak-20260820`），线上 `index.html` 已引用新产物 `index-kZGol9hn.js`（631KB，es2018 转译版），md5 与本地构建一致。
+  - 后端：服务器 `server/src/routes/webos.ts` 已打补丁（备份 `webos.ts.bak-20260820`）+ `pm2 restart daily-server`（pm2 跑 TS 源码，重启即生效）。
+  - 验证：`/api/health` 200；`/daily/` 返回新 index.html、新 JS 可拉取（631987B）；端到端 curl 实测——`source=local_import` 含外链/CDN script/img → **201 创建成功**；`ai_generated` 含外链 → **400 `APP_EXTERNAL_RESOURCE`**；local_import 含 `javascript:` → **400 `APP_FORBIDDEN_PROTOCOL`**；local_import 含 `iframe` → **400 `APP_HTML_FORBIDDEN_ELEMENT`**。Playwright 打开线上页面渲染正常、控制台零错误。
+  - 测试残留：一个挂在临时游客下的 `deploy-verify-local` App，已被服务器 retention 定期清理，不影响真实用户。
+  - 遗留观察点：`DELETE /webos/api/apps/:appId` 端点读取 `Authorization` header（前端删除走 cookie 也报缺 header）——既有行为，未在本次范围内改动，待后续排查。
+  - 用户请在 Android 10 老平板 / iPhone 6S 上重开 `https://shadowshub.xyz/daily/` 复核：应不再只显示橙色背景，而是正常进入 AI 助手页。
+
+**追加修复（第二轮，`AbortSignal.timeout` 根因）**：
+
+- 用户实测：iPhone 6S（iOS 15.8.4，Safari 与 QQ WKWebView 均试）部署第一轮后**仍然白屏**。nginx 访问日志确认 iPhone 已 200 拉到新版 `index-kZGol9hn.js`（排除缓存/服务端未更新），进而深挖运行时 API，锁定真凶：构建产物里 `getBootstrap()` 调用 `AbortSignal.timeout(ms)`（`client/shell-web/src/api.ts:78`）——该 API 需 Chrome 103+ / Safari 17.4+（iOS 17.4+），**iOS 15.8 的 Safari 没有**；而 bootstrap 是启动必经路径 → 直接 `TypeError` → 启动崩溃 → 白屏只剩背景。这也解释了为何第一轮把 target 降到 es2018 无效——iOS 15.8 语法层面能解析 es2018 产物，坏在运行时 API 而非语法。
+- 修复：`api.ts` 新增 `createTimeoutSignal()`——优先 `AbortSignal.timeout`，缺失时回退 `AbortController` + `setTimeout`（AbortController 为 Chrome 66+ / iOS 12.1+，安全）；`main.tsx` 另加「启动崩溃可视化」兜底（纯 DOM、不用任何新 API，仅在 `#root` 为空时把 error/unhandledrejection 或「疑似内核过旧」提示显示成可见条，避免老设备下次再遇到隐形崩溃时无从排查）。
+- 重构建 `index-IR8muFuF.js`（633,270B）：复扫 `AbortSignal.timeout` 仅剩 `typeof AbortSignal.timeout === 'function'` 守卫内两处引用，**无裸调用**；已部署上线（public 原子切换，备份 `public.bak-20260820b`）。
+- 验证：`/api/health` 200；`/daily/` 引用 `index-IR8muFuF.js`（200 / 633,270B，md5 与本地一致）；Playwright 打开线上渲染正常（rootChildren=1、控制台零错误、无兜底提示条），并在页面内模拟删除 `AbortSignal.timeout` 确认 fallback 基建（AbortController）可用。请用户 iPhone 6S / Android 10 平板强刷复测（若仍有缓存残留，Safari 清除 shadowshub.xyz 网站数据后重试）。
+
+**追加修复（第三轮，决定性根因：正则 lookbehind）**：
+
+- 用户复测 iPhone 仍白屏。nginx 日志确认 iPhone 已 200 拿到第二轮新版 `index-IR8muFuF.js` 但**从不发 `/webos/api/bootstrap`**（React 未挂载）。加装「先于主 bundle 的内联诊断兜底」（index.html 顶部 ES5 脚本，捕获 window error/unhandledrejection + `<img>` 上报 `/daily/__booterr?m=…` 到 nginx 日志 + 页顶红条显示）。
+- **根因（已由 iPhone 自动上报+截图坐实）**：`client/shell-web/src/App.tsx` 的 `inlineMarkdown` 行内 LaTeX 匹配用了**正则 lookbehind `(?<!\$)`**，而 **Safari 16.4 之前（iOS 15.8）不支持 lookbehind** → 整段 bundle 解析 `SyntaxError: Invalid regular expression: invalid group specifier name` → 整页白屏。此前本地反复只扫描 `?.`/`??`/`ApiList` 等 API 与 JS 语法，**漏了「es.target 不会转译正则特性」这一点**（esbuild 只降级 JS 语法，正则 lookbehind 由各引擎决定），且第一轮扫 lookbehind 因 shell 转义误报为 0。
+- 修复：
+  1. `App.tsx` 该正则改为**两步法**（先用私有占位 `\uE000` 临时收走连续 `$$` 块级定界 → 再匹配单对 `$` → 恢复 `$$`），语义与原正则等价，删除 lookbehind。
+  2. 主脚本由 `<script type="module" crossorigin>` 改为 **`<script defer src>` 普通脚本加载**（产物是单文件 IIFE、无 import.meta，普通脚本等价且绕开 iOS 15 对 module script 加载的坑）。
+  3. nginx `sites-enabled/default` 的 `gzip_types` 移除 `text/javascript/application/javascript`（JS 明文传输，规避老内核/部分链路 gzip 解压异常；CSS 仍 gzip）。备份 `default.bak-20260820`（注意：备份勿放 `sites-enabled/` 会被 include）。
+- 新产物 `index-Bk7tAM3_.js`（633,316B）：复扫 `(?<` **清零**；已部署（`index.html` 引用 `?v=20260820e`，明文 200，md5 一致）；Playwright 线上回归正常（rootChildren=1、零 console 错误、无红条）。**请用户 iPhone 6S / Android 10 平板复测**。教训记录：老设备兼容排查顺序应为「语法 target → 正则特性（lookbehind/命名组/`\p{}`）→ 运行时 API（AbortSignal.timeout/randomUUID 等）→ 传输层（gzip/module/cache）」，正则特性是此前盲区。
+
+### 2026-08-19：web 端三项体验修复（用户消息换行 / 文件管理器看 AI 工作区 / 刷新消息不再重跑上下文）
+
+**背景**：用户反馈三个问题：① 用户消息内的换行被折叠成一段；② 文件管理器只能看 home 区，想直接看 AI 工作区内容要反复让 AI 转述、耗 tokens；③ 刷新/重发消息（编辑/回退重来 rebuild）会像「会话第一条消息」一样重跑整个上下文 + 重新执行开场 skill（读记忆/存快照等一次性运算），一次多花上万 tokens（用户实测：中间消息几百、刷新第一条上万）。
+
+**改动**：
+
+- **用户消息换行**（`client/shell-web/src/styles.css`）：`.user-row .chat-text` 增加 `white-space: pre-wrap`——用户消息是纯文本节点，默认 `normal` 会把 `\n` 折叠成空格导致堆成一段；AI 消息走 markdown HTML 不受影响。
+- **文件管理器新增 AI 工作区只读浏览**：
+  - 后端（`server/src/routes/webos.ts`）新增 `GET /webos/api/workspace/agent-files?path=`（列表）与 `GET /webos/api/workspace/agent-files/raw?path=`（只读读字节，≤100MB 才允许 inline 预览），路径走 `resolveWorkspacePath`（防穿越），只读不提供上传/删除/编辑。
+  - 前端（`client/shell-web/src/api.ts` + `src/App.tsx`）：文件页新增「我的文件 home/ ↔ AI 工作区根目录」切换 tab；AI 工作区从根浏览（home/ agent/ apps/ shared/ skills/ system/ logs 等），文件点击可打开：图片内联预览、文本（md/js/html/…）只读查看、其它新窗口打开；只读区隐藏上传/删除按钮。
+- **刷新/重发消息不再重跑上下文**（`server/src/routes/webos.ts` chat/stream rebuild 分支）：
+  - 旧实现：`disposeWebosSessions` 删除会话与 JSONL 文件 → 全新 session 重新加载 skills 并重新执行开场流程，且 `historyContext` 把整段历史文本重放一遍 = 「上下文没有损失但事实上跑了两遍」。
+  - 新实现：rebuild 时**不再 dispose、不再重放历史**——复用当前会话上下文（内存缓存或 JSONL 持久化恢复），只发送最新消息并附一句提示（开场初始化已完成、忽略旧回复），token 消耗回到普通消息水平。
+  - `formatHistoryContext` 删除实际调用（函数保留以免影响其它引用）。
+
+**验证**：
+
+- `server` 与 `client/shell-web` `tsc --noEmit` 零错误；`vite build` 通过。
+- 文件管理器：切换「AI 工作区」列出根目录（home/agent/apps/…），进入目录、打开文本/图片均正常（代码 + 类型检查 + build 验证）。
+- 服务端类型检查覆盖新端点与 rebuild 分支改动（未部署，待合并后重启 daily-server 验证线上行为）。
+
+### 2026-08-19：web 端 AI 换新 DeepSeek Key + 标题生成（chat/title）修复
+
+**背景**：旧 Key（sk-300k9j...，opencode.ai 网关）触发 **429 Weekly usage limit reached（周用量上限，4 天后重置）**，对话 Agent 报错（error log 有 `agent_end transient error (429 ...)`）→ 用户紧急要求换新 Key。
+
+**改动**：
+
+- 换 Key：`DEEPSEEK_API_KEY=sk-8jZ3cw0iR05kIct1SlV7sVvmcfgZZC0sTKdQXQdy4eNqK81HuLjMpeKPDFOQAhlF`（`server/.env` 本地 + 服务器，模型 `deepseek/deepseek-v4-flash` 与 Base URL `https://opencode.ai/zen/go/v1` 不变；服务器 `.env` 已备份 `.env.bak-20260819` + `pm2 restart daily-server`）。
+- **顺带修复标题生成永远 null**（2026-08-17 曾修过一次，仍复现）：根因是 opencode 网关的 `deepseek-v4-flash` **总是先输出一长段 reasoning**（几百 token），而 `generateConversationTitle` 设了 `maxTokens: 64`——64 token 被推理耗尽，`content` 文本还没输出就被截断 → `completeSimple` 返回的 text 块为空 → `title null`（前端回退截取标题；无异常日志，排查难）。**修复：`maxTokens: 64 → 384`**（`server/src/piBridge.ts`，本地+服务器；标题 ≤20 字，成本极小）。排查路径：直连网关非流式同参返回正常 → 内联复刻 `completeSimple`（不传 maxTokens）成功 → 真实函数复现 null → 打印完整 result 发现 reasoning 占满 64 token → sed 修复。
+
+**验证**：
+
+- 新 Key 直连 opencode.ai `/chat/completions`：200，model `deepseek-v4-flash`，usage 正常，无余额错误。
+- `POST /webos/api/chat/stream`（thinking=low/medium）：SSE delta 正常返回（"连接正常 ✅..."），`agent_end stop=stop`，无 429。
+- `POST /webos/api/chat/title`：`{"title":"今日安排与浇花提醒"}` ✅（修复前稳定 null）。
+- 服务器 `pm2 ls` daily-server online、端口 3456 唯一监听；error log 仅启动日志，无异常。
+
+### 2026-08-18：web 端市场（system.store）支持技能发布（补齐缺口）
+
+**背景**：web 端应用商店此前只支持浏览/安装技能（系统级全局 `skills-webos/`），**不支持把用户自己工作区 `skills/` 下的 skill 发布到市场**。本次补齐「发布 → 市场 → 他人安装」完整闭环（对齐 App 商店的发布/下架/我的链路）。
+
+**Added**
+- 新表 `webos_store_skills`（`schema.ts` / `schema-sqlite.ts`）：用户发布技能条目（id=`sk-` 前缀、skill_id 目录名、owner_key、name/description、size_bytes、status）；`CREATE TABLE IF NOT EXISTS` 每次启动幂等执行，存量库自动建表。
+- 服务端新端点（`server/src/routes/webos.ts`）：
+  - `POST /webos/api/store/skills`：把自己的工作区 `skills/<id>/` 发布到市场（重复发布 = 更新快照、条目 id 不变）；2MB 上限、`myself` 隐私记忆目录禁发、`SKILL.md` 的 name 需与目录名一致。
+  - `GET /webos/api/store/skills/mine`：我的可用技能（发布选择用，标注是否已发布）。
+  - `GET /webos/api/store/skills/my`：我的已发布技能（发布者视角管理/下架）。
+  - `DELETE /webos/api/store/skills/:id`：下架（仅发布者本人）。
+- 发布素材归档 `store-skill-assets/<id>/`（与发布者工作区解耦——发布者删技能后商店/他人仍可安装）。
+- StoreSDK 新增 `skills.mine / skills.my / skills.publish / skills.unpublish`（`api.ts` + `runtime.ts` + `App.tsx` adapters）。
+
+**Changed**
+- `GET /webos/api/store/skills` 列表合并两源：系统级全局 + 用户发布条目（用户条目带 `ownerName` 标注、`system:false`、可安装）。
+- `POST /webos/api/store/skills/:skillId/install` 支持来源二选一：① 用户发布条目（传条目 id=`sk-xxx` 或 skill_id，归档优先、发布者工作区回退）→ ② 系统级全局。
+- 商店 UI 模板（`server/src/webosStoreV1.ts`）：技能市场列表展示用户发布技能（发布者标注）；「我的」页新增「技能发布」统计与列表、可下架；发布弹层改为「应用/技能」双 tab（技能发布选自己的 skill，已发布的标注）；技能页提示可发布自己的技能。
+
+**验证**
+- `server npx tsc --noEmit`：0 错误（exit 0）；esbuild 对 webos.ts / webosStoreV1.ts / 两个 schema 文件语法校验通过。
+- `client/shell-web npx tsc -b` + `vite build`：通过（仅存量 chunk size 提示）。
+- 部署后存量账号打开市场时 `system.store` 自动升级到新模板（未被 AI 改过形态的账号；AI 定制版保留不覆盖）。
+
+### 2026-08-18：图生图（改图）间歇失败修复 + 生图失败观测性补齐（用户 3145234007@qq.com 报障排查）
+
+**根因**：api.chatst.org `/v1/images/edits`（图生图/改图）端点**间歇性**返回非法响应（`fetch failed (cause: UND_ERR_INVALID_ARG invalid content-length header)`，undici 层 content-length 校验错误，非超时、非业务错误、**0 扣费**）。该用户 08-15（6 次）与 08-18（4 次）改图请求全败；同库 77 条文生图（generations，JSON 分支）全部成功、08-02 img2img 曾成功、故障后真实 key 复现同一 edits 请求成功（HTTP 200 / 49s / ~2917 tokens）→ 判定为上游端点间歇故障，非代码必然错误。故障窗口内 3 次连接尝试仅 ~12ms（其余 2400ms 为重试退避），说明错误发生在请求/响应解析阶段而非网络超时/慢。当时 3 次快速重试（800/1600ms）不足以覆盖持续数分钟的故障窗口。
+
+**Fixed**
+- `server/src/imagegen/chatstImage.ts`：去掉 edits multipart 请求的手动 `Content-Length` 头（Buffer 体由 undici 自动计算，消除该类请求侧 content-length 校验隐患）。
+- 网络/响应解析类错误重试 2→3 次（共 4 次尝试），重试退避拉长为 800/2000/5000ms；`isRetryableNetworkError` 纳入 `UND_ERR_INVALID_ARG`（含 `invalid content-length header` 文本匹配）。
+- **观测性**：生图/改图最终失败不再静默——`console.warn` 落 pm2 日志（含 hasRef、实际尝试次数、完整 error.cause）。此前失败不写任何日志，pm2 一条都没有，导致只能从被截断的 DB error_code 反推。
+- `server/src/routes/webos.ts`：失败原因落库截断 60→300 字符（此前仅 60 字符，cause 名被拦腰截断，`fetch failed (ca…` 根本无法定性）。
+
+**验证**
+- `server npx tsc --noEmit` 0 错误（exit 0）。
+- 已部署生产（scp chatstImage.ts + webos.ts + pm2 restart daily-server）：md5 与本地一致、启动日志 boot 完成无错、`/api/auth/guest` HTTP 200、新日志行已就位。
+- 故障已即时解除：该用户可直接重试「去掉眼镜的变体」；如再遇同类间歇失败，新重试策略（最长 ~8s 窗口 ×4 次）与全量日志将显著缓解并留下完整证据。
+
+### 2026-08-17：搜索供应商替换——秘塔 + GitHub 下线，Exa + ArXiv 上线（用户拍板）
+
+**决策**：对比评测（秘塔 vs Exa vs DeepSeek 原生 web_search vs ArXiv，覆盖网页获取/最新时事/论文/技术博客）后，用户最终选定 **Exa + ArXiv** 作为唯一搜索后端，替换掉秘塔（web_search/read_webpage/metaso_qa 底层）与 GitHub 搜索。
+
+**Added**
+- 新建 `server/src/utils/searchApiExa.ts`：Exa 调用层（`/search` 语义搜索 + AI 摘要、`/contents` 抓网页正文、`/findSimilar` 相似内容），带 30s 超时/错误格式化/批次上限 5 URL。
+- 新增 AI 工具 `exa_find_similar`（Exa 独有能力：按已知 URL 找语义相似论文/文章/竞品文）。
+- `web_search` / `read_webpage` 底层替换为 Exa；`academic_search`（ArXiv）保留。
+- 新增环境变量 `EXA_API_KEY`（优先于 DB 存储），已配置服务器 .env；`.env.example` 同步。
+
+**Changed**
+- `searchApi.ts` 大幅瘦身：删除秘塔（callMetaso/callMetasoReader+缓存）与 GitHub 搜索（7 mode），保留通用 fetch/重试、ArXiv、以及 githubProxy 下载代理依赖的 `extractFileName`/`buildGithubProxyUrl`/`extractRepoFullName`（github_proxy 路由仍保留，仅无搜索工具入口）。
+- `aiSettingsStore.ts`：`SearchProvider` 从 `'metaso'|'github'` → `'exa'|'github'`；新增 `SEARCH_KEY_EXA`；`getSearchKey('exa')` 优先读 `EXA_API_KEY` 环境变量。
+- `routes/searchKeys.ts`：VALID_PROVIDERS = exa/github；`testExaKey`（调 /search 校验证书）。
+- `routes/admin.ts` / `adminWebos.ts` / `client/admin-web` / `client/web Admin`：引擎名与统计 label 同步（秘塔→Exa，移除 GitHub 搜索）。
+- `billing/pricing.ts`：搜索 fixedPrice 0.05 → 0.08 元/次（覆盖 Exa 成本 $0.007-0.013/次）。
+- `schema.ts` / `schema-sqlite.ts`：search_engines 种子 metaso/github → exa。
+- 前端 `searchKeys.ts`/`SearchKeysConfig.tsx`/`SearchEngineConfig.tsx`：provider 从秘塔→Exa。
+
+**Fixed**
+- `searchTools.ts` 新工具 execute 的 params 类型断言（未知类型访问），通过 tsc。
+
+**验证**
+- 服务器 `npx tsc --noEmit`：改动文件 0 错误（仅服务器既有孤儿文件 `src/webos.ts`/`src/m3Vision.ts` 残留报错，无人 import、不影响 pm2/tsx 运行时）。
+- 冒烟测试（服务器 tsx）：`callExaSearch` 命中 Kimi K2 论文（category=research paper，cost=$0.01）、`callExaContents` 抓取 DSH GitHub 首页成功（500 字符）、`callExaFindSimilar` 正常返回。
+- 单元测试重写：`server/test/unit/searchTools.test.ts`（Exa/ArXiv 四工具 11 用例）、`client/desktop searchKeys.test.ts`（provider→exa）。
+- ⚠️ 待重启：服务为 pm2 tsx 常驻进程，需重启（或 tsx watch 自动）后新工具才生效；秘塔 METASO_API_KEY 虽不再被搜索使用，但视频生成（MiniMax-H3 渠道）仍依赖，保留。
 
 ## [1.0.0] - 2026-06-30
 
@@ -621,6 +1057,36 @@ Phase 14「AI 基础设施解放」阶段性版本：Skill CLI + Docker 化部�
 - 文件：`client/shell-web/src/{store.ts, App.tsx, styles.css}` + `client/desktop/.../PdfViewer.tsx`（同类修复）。
 - 部署：shell-web 重新构建上传 `server/public/`（daily 200 验证）；tsc 双端零错误。
 
+### 2026-08-16（追加）：商店发布页遮盖层级修复 + 商店彻查（Operit 直接处理，含 1 个隐藏 bug）
+
+**① 发布页被「我的」层盖住（用户主诉）**
+- 根因：webosStoreV1.ts 中 `#publish-overlay` 与 `#my-overlay` 都是 `.overlay`（z-index:30），DOM 顺序 my-overlay 在后；从「我的」点「发布应用」只显示 publish-overlay 未先关 my-overlay → 同 z 后层覆盖，发布表单被遮挡点不到。
+- 修复：① 打开发布页前先 `$('my-overlay').classList.remove('show')`；② 给发布弹层独立 `#publish-overlay { z-index: 50; }`（高于预览 40、低于 toast 60），保持底部弹层视觉不变；模板注释写明层级规则防 AI 改坏。
+- 站长账号 store v1.0.9（多版本不自动升级）→ 按重置纪律停服直改建 v2.0.10 并写回工作区镜像，已生效。
+
+**② 商店彻查发现隐藏 bug：列表「已安装」标记恒为 false（服务端）**
+- 根因：安装的 App id 带 `store:` 前缀（如 `store:s-abc123`），而列表用 `row.id`（`s-abc123`）比对 → installedIds 永不匹配。
+- 修复：收集时去掉 `store:` 前缀（`app.id.startsWith('store:') ? app.id.slice(6) : app.id`）。
+- 线上验证：游客装「锁屏效果包」前 installed:false → 安装后 **installed:true**，发布者 +100 积分正常。
+
+**③ 彻查其余结论（健壮，未改）**
+- 模板 esc() 覆盖全部用户可控字段（name/description/ownerName）、预览用 textContent → 无 XSS；bundle 上架页 ownerName/App 名已转义。
+- 服务端：list 排序走白名单、全参数化查询；publish 快照 + 素材归档解耦（发布者删 App 商店仍可用）；install 空间校验/去重奖励；skill 安装 skillId 正则白名单 + frontmatter 名校验；serveStoreRaw 路径越界 startsWith 校验。
+- 观察项（低）：store list 固定 LIMIT 100 无分页（条目增多截断，后续可加分页）；visit 记账 status 流转未深究。
+- 前端指引：模板顶部注释补充发布层与素材 URL 规范；`app-dev` skill 与现有能力一致无需改。
+- 部署：webosStoreV1.ts + webos.ts（+ searchTools.ts 配套保持一致，供运行时依赖）上传生产 + pm2 重启，health 200。
+
+### 2026-08-17（追加）：web 端「思考与回答杂糅」+「标题生成失败」——改对话模型（关闭推理流）
+
+- 现象（用户反馈，两问题同源）：① AI 输出中思考(reasoning)与回答(content)杂糅在一起，之前没有；② 会话标题生成失败（保留截取标题，AI 标题不覆盖）。
+- 根因：ChatST/推理网关切换（deepseek-v4-flash-0731，`reasoning:true` + four-level thinkingLevelMap）后，推理流 `reasoning_effort` 在网关侧返回结构不稳 → 前端 thinking/delta 混排 + 标题生成 `completeSimple(reasoning:'minimal')` 被 clamp 到 low 仍走推理、拿不到 content → 标题 null 失败。
+- 修复（用户决定改**对话模型**，server/src/piBridge.ts `registerDeepseekModels`）：
+  - 全部 DeepSeek 模型注册 `reasoning: false` + `thinkingLevelMap: {}`（+ `requiresReasoningContentOnAssistantMessages:false`）→ pi 不再请求 reasoning_effort → 网关返回纯 content 流；
+  - `DEEPSEEK_MODEL`/`DEEPSEEK_BASE_URL`（opencode.ai/zen/go/v1）不变，保留原模型名定义便于回退。
+- 部署：piBridge.ts 上传生产 + pm2 重启（PID 312774）。
+- 验证（生产实测）：发消息 SSE 事件流 = `start→delta(纯回答)→done`，**无 thinking 事件**，回答纯净；`POST /webos/api/chat/title` 返回 200 + 正常标题「杭州周末游与西湖日出推荐」。
+- 注意：此后 UI 思考档位（low/medium/high/max）对该对话模型不生效（原样保留前端，模型侧已关闭推理）；如需恢复深度推理可在 `registerDeepseekModels` 里把 `reasoning` 改回 true 并配好稳定兼容的推理网关。
+
 ### 2026-08-17：web 端 AI 切换 ChatST 网关（deepseek-v4-flash-0731）
 
 - 背景：用户紧急要求 web 端 AI 从 DeepSeek 官方直连切换到 ChatST 聚合网关：模型 `deepseek-v4-flash-0731`、Key `sk-XPxx...PatJm`、Base URL `https://api.chatst.org/v1`。
@@ -649,6 +1115,53 @@ Phase 14「AI 基础设施解放」阶段性版本：Skill CLI + Docker 化部�
   - `.env.example` / `.env.prod.example`：注释更新为通用网关说明（ChatST / opencode.ai 两种示例）。
 - 验证：opencode.ai 端点直连——**当前 Key 余额不足**（`CreditsError: Insufficient balance`，非流式/流式均返回，需到 https://opencode.ai/workspace/wrk_01KY7V0XC0J2DZH8ATMS9WTPM8/billing 充值）；线上 chat/stream 链路正常（SSE start → 因余额不足 pi 空响应 → 服务端 `WEBOS_AI_EMPTY_RESPONSE` 自动重置会话，服务不崩，充值后即可用）。
 - 部署：服务器 `.env` 三项已更新 + `pm2 restart daily-server`（PID 287218）online、端口唯一监听。
+
+### 2026-08-17（追加）：web 端 AI 三次切换 opencode.ai（新 Key sk-300k…，余额已充）
+
+- 背景：用户反馈 opencode.ai Key 余额已于早上 8 点恢复；要求换最终新 Key：`sk-300k9j73...`（`DEEPSEEK_API_KEY`）。
+- 改动：仅配置层——`server/.env`（本地 + 服务器，Key 入 .env 被 .gitignore 保护）：
+  - `DEEPSEEK_API_KEY=sk-300k9j73...`、`DEEPSEEK_MODEL=deepseek/deepseek-v4-flash`、`DEEPSEEK_BASE_URL=https://opencode.ai/zen/go/v1`（备份 `.env.bak-20260817c`）。
+- 验证：新 Key 直连 opencode 网关 200；**标题生成线上实测返回 `{"title":"开发待办清单App"}`**（此前常失败，见下方 cost 根因）；对话链路正常。
+- 部署：服务器 .env 三项更新 + `pm2 restart daily-server`。
+
+### 2026-08-17：会话持久化全面修复（服务端文件持久化 + 历史 API + 前端历史同步）
+
+**背景**：用户反馈「换设备看不到聊天记录」+「重启服务器丢上下文（同会话 AI 说自己没上下文）」。根因：
+- A) 会话列表 100% 只在浏览器 localStorage（服务端 `webos_chat_logs/webos_chat_sessions` 只写不读）；
+- B) pi 会话上下文只在进程内存（重启即丢）；附：思考档切换也丢上下文（缓存 key 含 thinking）。
+
+**服务端（已部署上线并验证）**：
+- `server/src/piBridge.ts`：`SessionManager.inMemory → create(cwd, sessionDir)` 文件持久化（JSONL，`data/webos-sessions/<scope>/<conversationId>/`）；缓存 key 从 `webos:scope:convId:thinking` 改为 `webos:scope:convId`（**切思考档不丢上下文**）；`disposeWebosSessions` 删除会话文件。
+- 新增 `server/src/routes/webosConversations.ts`（**不碰冻结的 webos.ts**），挂载 `/webos/api`：
+  - `GET /webos/api/conversations`：当前身份历史会话列表（按 conversation_id 聚合，窗口 200，标题取首条 user 消息截断 40 字，updated_at 倒序）；
+  - `GET /webos/api/conversations/:id/messages`：单会话完整消息（按时间升序重建，限 1000 条）；
+  - 鉴权：`req.user.guestDeviceId`（游客，key=`guest:<deviceId>`）或 `req.user.userId`（账号，key=`user:<id>`）。
+- 验证（线上实测）：重启后 AI 记得秘密数字（「会话也能想起来。」）；历史 API 返回正确结构（`{"conversations":[{"conversationId":"conv-hist-final","messageCount":2,"title":"你好"}]}` + 消息序列）。
+
+**前端 shell-web（2026-08-17 完成并上线）**：
+- `api.ts`：新增 `getServerConversations()` / `getServerConversationMessages(id)`。
+- `store.ts`：新增 `syncServerConversations()` —— hydrate 身份变化（换设备/登录/注册/登出）+ boot 页面加载后各触发一次；只**补服务端独有 id**（本地已有保留权威缓存：完整 segments + AI 标题，不被纯文本覆盖）；拉回消息组装成 ChatConversation（assistant 单 text 段气泡），按 updatedAt 倒序合并；新设备无激活会话时激活最新历史；静默失败不阻塞。
+- **防并发重复**（首版实测发现 hydrate+boot 两次 sync 并发都基于空态拉取 → 会话 id 重复 ×2）：`syncServerConversationsInFlight` 防重入锁 + 合并前按 id 去重 + `loadConversations` 恢复时防脏缓存去重。
+- 部署：shell-web `tsc` 零错误 + `vite build`；dist 上传 `server/public/`（线上引用 `index-Bvb8WXwV.js`）。
+- **线上端到端验证（Playwright + 站长账号 JWT，模拟换设备登录）**：干净上下文注入站长 cookie → boot → sync 把 **39 个历史会话**全部拉回 localStorage 与侧边栏（今天/昨天/更早分组正常），无 JS 错误。
+
+### 2026-08-17：其他修复收口 + 管理后台能力（全部上线）
+
+**① 标题生成频繁失败（根因 + 修复）**：`generateConversationTitle` 用 `completeSimple`，若模型注册缺 `cost` 字段，`calculateCost`（models.js:26 `usage.cost.input`）抛 `Cannot read properties of undefined (reading 'input')` → 内容已生成但被丢弃、接口返回 `{"title":}`。修复：flashModel/pro 补 `cost`（`{input:0.14,output:0.28,cacheRead:0.0028,cacheWrite:0}`）+ 统一默认 modelRef 为 `deepseek/deepseek-v4-flash`。线上实测 `{"title":"开发待办清单App"}`。
+
+**② 视觉模型 HTTP 400（根因 + 修复）**：`extractMediaRefs` 贪婪正则把正文代码路径尾巴（如「webos.ts:2862，支持」）吞进 URL 发给 MiniMax → `400 invalid param: image format ".ts:2862，支持"`。修复：正则遇中文标点/全角括号/反引号立即截断（6 组样例验证）；`m3Vision.ts resolveMediaSource` 对未知扩展名/空 rest 不再兜底成 image 而返回 null；imagegen/videogen 严格校验真实文件名。
+
+**③ 生图 fetch failed 加固**：根因是 8/15 瞬时网络故障（fetch failed 仅 9-35ms，非持续）；`chatstImage.ts` 加网络层重试（2 次退避 800/1600ms，仅网络错误重试）+ 错误记录 `error.cause.code`。
+
+**④ 管理后台移动端优化**（`client/admin-web/`）：底部导航/卡片化/44px+ 触控目标/自愈守护 cron。
+
+**⑤ DAU/MAU 统计**：`GET /api/admin/webos/stats/activity?days=30`（DAU 序列/MAU/趋势/游客会员拆分，UTC+8 切日）+ 后台「日活/月活」卡片。
+
+**⑥ 搜索 API 状态可视化**：`/api/admin/webos/search-stats?days=7`（各引擎调用次数/成功率/平均耗时/失败样例）+ 搜索调用落 `webos_search_logs` 表（7 天 114 次、成功率 99.1%）+ 后台「搜索状态」tab。
+
+**⑦ 管理后台打不开排查**：服务器端 `/var/www/daily-admin/public` 静态产物 + Playwright 实测登录页渲染全 200 正常；诊断为用户浏览器缓存旧 JS（并发部署多次覆盖），建议 Ctrl+Shift+R 强刷。
+
+**部署**：服务端更新 `server/src/{piBridge.ts, routes/webos.ts, routes/webosConversations.ts(新), routes/adminWebos.ts, index.ts, vision/m3Vision.ts, imagegen/chatstImage.ts, db/{schema.ts,schema-sqlite.ts,apiUsageLog.ts}, utils/{searchTools.ts,webosWorkspace.ts}}` + 前端 admin-web/shell-web dist + 服务器 `pm2 restart daily-server`。
 
 
 

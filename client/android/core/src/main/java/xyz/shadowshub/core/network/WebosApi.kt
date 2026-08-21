@@ -6,6 +6,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -160,6 +162,60 @@ class WebosApi(
             val req = Request.Builder().url("$baseUrl/webos/api/apps/${appId}/storage/${key}").delete().build()
             client.newCall(req).execute().use { it.isSuccessful }
         } catch (_: Exception) { false }
+    }
+
+    /** 删除 App：DELETE /webos/api/apps/:appId */
+    suspend fun deleteApp(appId: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder().url("$baseUrl/webos/api/apps/${appId}").delete().build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) { false }
+    }
+
+    /** 回滚 App 版本：POST /webos/api/apps/:appId/rollback */
+    suspend fun rollbackApp(appId: String, versionId: String? = null): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val bodyObj = buildJsonObject { versionId?.let { put("versionId", it) } }
+            val body = bodyObj.toString().toRequestBody(JSON)
+            val req = Request.Builder().url("$baseUrl/webos/api/apps/${appId}/rollback").post(body).build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) { false }
+    }
+
+    /** 获取桌面多页布局：GET /webos/api/desktop-layout */
+    suspend fun getDesktopLayout(): JsonObject? = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder().url("$baseUrl/webos/api/desktop-layout").get().build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                val root = json.parseToJsonElement(resp.body?.string() ?: "{}") as? JsonObject
+                root?.get("layout") as? JsonObject ?: root
+            }
+        } catch (_: Exception) { null }
+    }
+
+    /** 保存桌面多页布局：PUT /webos/api/desktop-layout */
+    suspend fun putDesktopLayout(layout: JsonObject): JsonObject? = withContext(Dispatchers.IO) {
+        try {
+            val body = layout.toString().toRequestBody(JSON)
+            val req = Request.Builder().url("$baseUrl/webos/api/desktop-layout").put(body).build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                json.parseToJsonElement(resp.body?.string() ?: "{}") as? JsonObject
+            }
+        } catch (_: Exception) { null }
+    }
+
+    /** 调用 App API：POST /webos/api/appapi/:namespace/:endpoint */
+    suspend fun invokeAppApi(namespace: String, endpoint: String, params: JsonObject = buildJsonObject {}): JsonObject? = withContext(Dispatchers.IO) {
+        try {
+            val body = params.toString().toRequestBody(JSON)
+            val req = Request.Builder().url("$baseUrl/webos/api/appapi/${namespace}/${endpoint}").post(body).build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                json.parseToJsonElement(resp.body?.string() ?: "{}") as? JsonObject
+            }
+        } catch (_: Exception) { null }
     }
 
     companion object {

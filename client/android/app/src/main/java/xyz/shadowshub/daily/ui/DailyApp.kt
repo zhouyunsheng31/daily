@@ -1,102 +1,171 @@
 package xyz.shadowshub.daily.ui
 
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.app.Application
+import android.content.Context
+import android.view.ViewGroup
+import android.webkit.CookieManager
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import kotlinx.coroutines.launch
-import xyz.shadowshub.core.network.AppDetail
-import xyz.shadowshub.daily.ui.apps.AppRunScreen
-import xyz.shadowshub.daily.ui.chat.ChatScreen
-import xyz.shadowshub.daily.ui.desktop.DesktopHostScreen
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
+import org.koin.android.ext.android.getKoin
+import xyz.shadowshub.appruntime.DailyJsBridge
+import xyz.shadowshub.core.network.WebosApi
+import xyz.shadowshub.daily.BuildConfig
+import xyz.shadowshub.daily.ui.theme.LoadingView
 
 /**
- * 沉浸式宿主骨架（M1-1 · D18 方案 A 横滑导航，替代旧 4 Tab）。
+ * 沉浸式 Daily Web 同构客户端宿主。
  *
- * 页面序列：[ 💬 AI 对话页（宿主 Compose）| 🖥 桌面页 1..N（HTML WebView）]
- * - 初始页 = 桌面（index 1）；桌面继续右滑 → 露出对话页（负一屏）
- * - App 运行页（AppRunScreen）= 全屏覆盖层（无顶栏，沉浸）
- * - 无底部 Tab 栏 / 无 Scaffold 顶栏；壁纸透底（MainActivity enableEdgeToEdge）
- * - M1-1 降级：桌面页 WebView 拦截横滑，桌面→对话用顶部按钮（M1-4 做手势让渡）
+ * 核心架构：
+ * - 纯双端同构：直接消费 Web 端 HTML 模板与完整 Shell（对话页、桌面、应用商店全部统一）；
+ * - 本地持久化：DOMStorage + CookieManager 同步；
+ * - 沉浸全屏：edge-to-edge，无浏览器地址栏和工具栏；
+ * - 原生手势与返回键支持：优雅响应 __dailySystemBack 钩子。
  */
+@SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun DailyApp() {
-    // 初始页 = 桌面（index 1）：直接以桌面为第一帧，避免冷启动先闪对话页再跳转
-    val pagerState = rememberPagerState(initialPage = 1, pageCount = { 2 })
-    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val appScope = rememberCoroutineScope()
+    val api: WebosApi = remember {
+        (context.applicationContext as Application).getKoin().get()
+    }
 
-    // 桌面 WebView 实例提升到宿主级：跨 Pager 页面切换保持（避免来回滑动反复重载卡顿）
-    val savedDesktopWebView = remember { mutableStateOf<WebView?>(null) }
-    // 桌面 AppDetail 同样提升到宿主级：页面重建不重拉（避免"加载中"闪烁）
-    val savedDesktopDetail = remember { mutableStateOf<AppDetail?>(null) }
+    var webViewInstance by remember { mutableStateOf<WebView?>(null) }
+    var pageRendered by remember { mutableStateOf(false) }
 
-    // 打开的 App（全屏运行页，覆盖主 UI）
-    var openApp by remember { mutableStateOf<Pair<String, String>?>(null) }
-
-    /** App 运行页/桌面里的 apps.open（图标点击）→ 宿主分发：
-     *  daily.ai → 对话页（Pager page 0）；其余 → 全屏运行页 */
-    val handleOpenApp: (String, String) -> Unit = { id, name ->
-        when (id) {
-            "daily.ai" -> {
-                openApp = null
-                scope.launch { pagerState.animateScrollToPage(0) }
+    // 物理返回键处理：拦截并转发给 Web 端的 __dailySystemBack 钩子
+    BackHandler(enabled = true) {
+        val wv = webViewInstance
+        if (wv != null) {
+            wv.evaluateJavascript("window.__dailySystemBack ? __dailySystemBack() : false") { result ->
+                if (result != "true") {
+                    if (wv.canGoBack()) {
+                        wv.goBack()
+                    } else {
+                        (context as? Activity)?.finish()
+                    }
+                }
             }
-            else -> { openApp = id to name }
+        } else {
+            (context as? Activity)?.finish()
         }
     }
 
-    /** system.navigate → 关闭运行页 + 切 Pager 页（assistant→对话，其余→桌面） */
-    val handleNavigate: (String) -> Unit = { view ->
-        openApp = null
-        scope.launch { pagerState.animateScrollToPage(if (view == "assistant") 0 else 1) }
+    DisposableEffect(Unit) {
+        onDispose {
+            webViewInstance?.destroy()
+            webViewInstance = null
+        }
     }
 
-    if (openApp != null) {
-        AppRunScreen(
-            appId = openApp!!.first,
-            appName = openApp!!.second,
-            onBack = { openApp = null },
-            onOpenApp = handleOpenApp,
-            onNavigate = handleNavigate,
+    Box(Modifier.fillMaxSize().imePadding()) {
+        AndroidView(
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                    setBackgroundColor(0xFFF8F7F3.toInt())
+
+                    settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        databaseEnabled = true
+                        setSupportZoom(false)
+                        builtInZoomControls = false
+                        displayZoomControls = false
+                        useWideViewPort = true
+                        loadWithOverviewMode = true
+                        cacheMode = WebSettings.LOAD_DEFAULT
+                        mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    }
+
+                    val cookieManager = CookieManager.getInstance()
+                    cookieManager.setAcceptCookie(true)
+                    cookieManager.setAcceptThirdPartyCookies(this, true)
+
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                            val url = request.url.toString()
+                            val host = request.url.host ?: ""
+                            // 站内或相对路径放行，外部链接使用系统浏览器打开
+                            return if (host.contains("shadowshub.xyz") || host == "localhost" || host == "127.0.0.1") {
+                                false
+                            } else {
+                                runCatching {
+                                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, request.url)
+                                    ctx.startActivity(intent)
+                                }
+                                true
+                            }
+                        }
+
+                        override fun onPageFinished(view: WebView, url: String?) {
+                            super.onPageFinished(view, url)
+                            android.util.Log.d("AppRuntime", "Shell Web onPageFinished: $url")
+                            // 页面首帧渲染完成后撤下品牌启动图
+                            pageRendered = true
+                        }
+                    }
+
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onConsoleMessage(msg: android.webkit.ConsoleMessage): Boolean {
+                            android.util.Log.d("AppRuntime", "webOS Console[${msg.messageLevel()}]: ${msg.message()}")
+                            return true
+                        }
+                    }
+
+                    // 注入 Native 增强桥
+                    addJavascriptInterface(
+                        DailyJsBridge(
+                            appId = "system.shell",
+                            api = api,
+                            scope = appScope,
+                            onResponse = { json ->
+                                post {
+                                    val escaped = json.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "")
+                                    evaluateJavascript("window.__dailySdkDispatch('$escaped');", null)
+                                }
+                            },
+                        ),
+                        "dailyBridge",
+                    )
+
+                    // 启动加载 WebOS 移动端主站
+                    val targetUrl = "${BuildConfig.API_BASE_URL}/daily/"
+                    android.util.Log.d("AppRuntime", "Loading WebOS Shell: $targetUrl")
+                    loadUrl(targetUrl)
+                }.also {
+                    webViewInstance = it
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
         )
-        return
-    }
 
-    // 初始页 = 桌面（index 1）
-    // （initialPage=1 已保证第一帧在桌面，无需 scrollToPage）
-
-    // 系统返回语义：对话页（page 0）返回 → 回桌面；桌面页返回 → 默认退出 Daily
-    BackHandler(enabled = pagerState.currentPage == 0) {
-        scope.launch { pagerState.animateScrollToPage(1) }
-    }
-
-    HorizontalPager(
-        state = pagerState,
-        // 关键（2026-08-16 桌面点击随机失败根因修复）：桌面页（page 1）禁用 Pager 滑动——
-        // Pager 会在 down 后参与触摸竞争（横向 slop 判定），手指有小位移时拦截事件序列，
-        // WebView 只收到 down（点击动画）收不到 up（JS 不触发）→ 图标点不开。
-        // 桌面页的翻页完全交给 WebView OnTouchListener 的右滑让渡（onSwipeToChat）；
-        // 对话页（page 0）保留 Pager 滑动（对话→桌面）。
-        userScrollEnabled = pagerState.currentPage == 0,
-        modifier = Modifier,
-    ) { page ->
-        when (page) {
-            0 -> ChatScreen()
-            1 -> DesktopHostScreen(
-                onOpenApp = handleOpenApp,
-                onNavigate = handleNavigate,
-                savedWebView = savedDesktopWebView,
-                savedDetail = savedDesktopDetail,
-                onSwipeToChat = { scope.launch { pagerState.animateScrollToPage(0) } },
-            )
+        // 品牌冷启动过渡图（首屏渲染完毕前平滑展示）
+        if (!pageRendered) {
+            LoadingView()
         }
     }
 }
