@@ -6,6 +6,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-21：全屏壁纸通透一体化沉浸 + 消除按钮方形蓝色高亮 + 登录/注册表单零延迟平滑切换
+
+**背景**：针对用户提出的审美与交互优化：① 全局壁纸通顶通底铺满，消除黑白断层，同时内容精准避让状态栏；② 移除 WebView 默认廉价方形蓝色点击框；③ 解决登录卡片切换至注册卡片时的 DOM 重绘卡顿。
+
+**改动**
+1. **壁纸通体铺满 + 动态安全区注入（`DailyApp.kt` & `styles.css`）**：
+   - 宿主容器恢复全屏 `fillMaxSize().imePadding()`，确保壁纸从 (0, 0) 无缝覆盖至屏幕最底部；
+   - 在 WebView 页面渲染完成后，将原生系统的状态栏高度与底部手势高度作为 CSS 变量 `--safe-top`、`--safe-bottom` 注入页面；
+   - 顶栏信息与小卡片通过 CSS 变量在状态栏下方自然排布，避免重合的同时保持全屏壁纸完整统一。
+2. **彻底移除方形蓝色高亮块（`styles.css`）**：
+   - 全局重置 `* { -webkit-tap-highlight-color: transparent !important; -webkit-touch-callout: none; }`；
+   - 为圆角按钮、桌面卡片与 Dock 图标配置细腻的 `:active` 触感缩放。
+3. **登录/注册卡片极速流畅切换（`App.tsx` & `styles.css`）**：
+   - 将登录、注册、忘记密码表单由条件销毁重构为 DOM 预挂载 + `display: flex/none` 切换，彻底避免切换模式时的 DOM 大量析构与重建；
+   - 为弹窗启用 GPU 硬件加速（`transform: translateZ(0)` 与 `contain: paint layout`），解决 backdrop-filter 模糊重绘导致的掉帧卡顿。
+
+**验证**
+- Web 前端重新构建并部署至线上服务器，资源哈希同步更新。
+- 香港云端 Gradle 构建 `BUILD SUCCESSFUL`（产出 23MB APK，`f223854f...`）。
+- 真机安装验证：全屏壁纸连贯通透无黑边，点击圆角按钮零蓝色框，登录/注册切换丝滑秒开。
+
+---
+
+### 2026-08-21：修复 Android 端文件/图片选择器交互 + 彻底封堵 data URI 正则溢出崩溃 + 优化状态栏沉浸安全区避让
+
+**背景**：解决用户反馈的三个核心体验问题：① AI 对话页文件/图片上传按钮点击无反应；② 会话上传图片后 AI 无法回复（后端抛出 `Regular expression too large` 崩溃）；③ 桌面与状态栏信息重合。
+
+**改动**
+1. **Android 原生文件/图片选择器接入（`DailyApp.kt`）**：
+   - 实现 `WebChromeClient.onShowFileChooser` 结合 `rememberLauncherForActivityResult(StartActivityForResult)`；
+   - 支持从系统相册与文件管理器多选图片与文件，并安全将 `Uri` 数组回传给 WebView，解决对话框与设置页上传无响应。
+2. **服务端 data URI 正则超长安全封堵（`server/src/routes/webos.ts`）**：
+   - 依据 PM2 错误日志精准定位 `replaceDataUriMediaRefs` 中的动态 `new RegExp` 缺陷（大图 base64 导致 V8 正则溢出）；
+   - 重构为静态通用 Markdown 正则与字符串直接切分替换，彻底解决传图后服务端崩溃导致的 AI 无法回复。
+3. **系统状态栏沉浸安全区适配（`DailyApp.kt`）**：
+   - 为宿主容器添加 `statusBarsPadding()` 与 `navigationBarsPadding()`，精确避让系统自带的时间、电量、通知栏及底部手势条，彻底消除桌面与系统信息重合。
+
+**验证**
+- 服务端 `tsc --noEmit` 0 错，热重载 PM2 进程已生效。
+- 香港云端 Gradle 构建 `BUILD SUCCESSFUL`（产出 23MB APK，`592f1ba2...`）。
+- 真机安装验证：`xyz.shadowshub.daily` 顶栏避让正常无重叠，WebView 内部 `<input type="file">` 正常调起原生选择器，SSE 对话平稳。
+
+---
+
 ### 2026-08-21：Android 端 M2 里程碑全线达成 —— 统一包市场消费 + 服务即包云端托管生产 + 账号资产漫游
 
 **背景**：完成 M2 任务卡体系（M2-1 至 M2-3）全部功能要求。移动端具备完整的包市场消费、端侧创建受限 API 并一键发布云端托管、脱敏 secrets 配置，以及邮箱验证码登录与资产漫游能力。

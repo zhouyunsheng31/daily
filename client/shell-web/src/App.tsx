@@ -38,6 +38,8 @@ import {
   Plus,
   QrCode,
   RotateCcw,
+  ImagePlus,
+  Paperclip,
   Settings,
   Share2,
   ShieldCheck,
@@ -54,10 +56,10 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import type { WebOsApp, WebOsPayOrder, WebOsThinkingLevel } from '@shared/webos-contracts'
-import { blobToBase64, changePassword, createApp, createPayOrder, createSystemShare, deleteWorkspaceFile, fetchShareMeta, getAppDetail, getAppStorage, getCreditsHistory, getEmailPuzzle, getPayOrder, listWorkspaceFiles, loginWithEmail, redeemAfdianCode, registerWithEmail, resetPassword, sendAuthEmailCodeWithPuzzle, shareAppToFriend, storeExportUrl, storeGet, storeInstall, storeList, storeMy, storePublish, storeSkillInstall, storeSkillsList, storeUnpublish, storeVisit, updateDisplayName, uploadAvatar, uploadWorkspaceFile, uploadWorkspaceFileLarge, workspaceFileRawUrl, type CreditsHistoryItem, type RedeemResult, type StoreAppItem } from './api'
+import { blobToBase64, agentWorkspaceFileRawUrl, changePassword, createApp, createPayOrder, createSystemShare, deleteWorkspaceFile, fetchShareMeta, getAppDetail, getAppStorage, getCreditsHistory, getEmailPuzzle, getPayOrder, listAgentWorkspaceFiles, listWorkspaceFiles, loginWithEmail, readAgentWorkspaceTextFile, redeemAfdianCode, registerWithEmail, resetPassword, sendAuthEmailCodeWithPuzzle, shareAppToFriend, storeExportUrl, storeGet, storeInstall, storeList, storeMy, storePublish, storeSkillInstall, storeSkillPublish, storeSkillsList, storeSkillsMine, storeSkillsMy, storeSkillUnpublish, storeUnpublish, storeVisit, updateDisplayName, uploadAvatar, uploadWorkspaceFile, uploadWorkspaceFileLarge, workspaceFileRawUrl, invokeAppApi, getAppApiSpec, listPackages, marketList, marketDetail, marketInstall, marketMine, marketApps, type CreditsHistoryItem, type RedeemResult, type StoreAppItem, type WebOsPackageListItem, type WebOsWorkspaceEntry } from './api'
 import type { ChatConversation, UiChatMessage, UiSegment } from './store'
 import { createRuntimeChannel, createDesktopRuntime, createStoreRuntime, setRuntimeOpenApp, type DesktopRuntimeHandle, type StoreRuntimeHandle, type StoreSdkAdapters, type WebOsRuntimeHandle } from './runtime'
-import { useShellStore } from './store'
+import { copyTextToClipboard, useShellStore } from './store'
 import './styles.css'
 
 type IconType = LucideIcon
@@ -624,12 +626,19 @@ function inlineMarkdown(value: string): string {
   let text = escapeHtmlText(value)
   // 行内代码最先处理（避免其中的 ** / $ 等被二次解析）
   text = text.replace(/`([^`]+)`/g, (_match, code: string) => `<code>${code}</code>`)
-  // 行内 LaTeX：$...$（排除 $$ 块级与已转义 \$）
-  text = text.replace(/(?<!\$)\$([^$\n]+)\$(?!\$)/g, (_match, tex: string) => {
-    const trimmed = tex.trim()
-    if (!trimmed) return _match
-    return `<span class="md-latex">${renderLatex(trimmed, false)}</span>`
-  })
+  // 行内 LaTeX：$...$（排除 $$ 块级与已转义 \$）。
+  // 2026-08-20 老设备兼容：原正则用了 lookbehind (?!...$)，Safari 16.4 之前（iOS 15.8）
+  // 不支持 → 整段 bundle SyntaxError 白屏。改为两步法：先临时收走连续 $$（块级定界），
+  // 再匹配单对 $（此时已无连续 $$ 干扰），最后恢复占位 → 语义与原正则等价。
+  const MATH_DOLLAR = '\uE000'
+  text = text
+    .replace(/\$\$/g, `${MATH_DOLLAR}${MATH_DOLLAR}`)
+    .replace(/\$([^$\n]+)\$(?!\$)/g, (_match, tex: string) => {
+      const trimmed = tex.trim()
+      if (!trimmed) return _match
+      return `<span class="md-latex">${renderLatex(trimmed, false)}</span>`
+    })
+    .replace(`${MATH_DOLLAR}${MATH_DOLLAR}`, () => '$$')
   // 粗体 / 斜体
   text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
   text = text.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
@@ -1158,70 +1167,64 @@ function LoginPanel({ onClose }: { onClose: () => void }) {
         <button type="button" role="tab" aria-selected={mode === 'register'} className={mode === 'register' ? 'active' : ''} onClick={() => switchMode('register')}>注册</button>
       </div>
 
-      {mode === 'login' && (
-        <form className="login-step" onSubmit={(event) => void submitLogin(event)}>
-          <label className="login-label" htmlFor="login-email">邮箱地址</label>
-          <input id="login-email" className="login-input" type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} disabled={busy} />
-          <label className="login-label" htmlFor="login-password">密码</label>
-          <div className="login-password-row">
-            <input id="login-password" className="login-input" type={showPassword ? 'text' : 'password'} autoComplete="current-password" placeholder="输入密码" value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy} />
-            <button type="button" className="login-password-toggle" aria-label={showPassword ? '隐藏密码' : '显示密码'} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
-          </div>
-          <button type="submit" className="os-button os-button-primary login-submit" disabled={busy || !email.trim() || !password}>{busy ? <LoaderCircle className="spin" size={15} /> : <KeyRound size={15} />}登录</button>
-          <div className="login-actions"><button type="button" className="login-link" onClick={() => switchMode('forgot')}>忘记密码？</button><button type="button" className="login-link" onClick={() => switchMode('register')}>没有账号？去注册</button></div>
-        </form>
-      )}
+      <form className={`login-step ${mode === 'login' ? 'active' : 'hidden'}`} style={{ display: mode === 'login' ? 'flex' : 'none' }} onSubmit={(event) => void submitLogin(event)}>
+        <label className="login-label" htmlFor="login-email">邮箱地址</label>
+        <input id="login-email" className="login-input" type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} disabled={busy} />
+        <label className="login-label" htmlFor="login-password">密码</label>
+        <div className="login-password-row">
+          <input id="login-password" className="login-input" type={showPassword ? 'text' : 'password'} autoComplete="current-password" placeholder="输入密码" value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy} />
+          <button type="button" className="login-password-toggle" aria-label={showPassword ? '隐藏密码' : '显示密码'} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+        </div>
+        <button type="submit" className="os-button os-button-primary login-submit" disabled={busy || !email.trim() || !password}>{busy ? <LoaderCircle className="spin" size={15} /> : <KeyRound size={15} />}登录</button>
+        <div className="login-actions"><button type="button" className="login-link" onClick={() => switchMode('forgot')}>忘记密码？</button><button type="button" className="login-link" onClick={() => switchMode('register')}>没有账号？去注册</button></div>
+      </form>
 
-      {mode === 'register' && (
-        <form className="login-step" onSubmit={(event) => void submitRegister(event)}>
-          <label className="login-label" htmlFor="reg-email">邮箱地址</label>
-          <input id="reg-email" className="login-input" type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} disabled={busy} />
-          <label className="login-label" htmlFor="reg-code">验证码（用于验证邮箱归属）</label>
-          <div className="login-code-row">
-            <input id="reg-code" className="login-input login-code-input" type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="000000" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} disabled={busy} />
-            {puzzle ? <button type="button" className="os-button os-button-quiet login-sendcode" disabled={puzzleBusy} onClick={() => void submitPuzzleAnswer()}>{puzzleBusy ? '验证中…' : '提交答案'}</button>
-              : <button type="button" className="os-button os-button-quiet login-sendcode" disabled={busy || cooldown > 0 || !email.trim()} onClick={() => void sendCode()}>{cooldown > 0 ? `${cooldown}s` : '获取验证码'}</button>}
-          </div>
-          {puzzle ? <div className="puzzle-box"><ShieldCheck size={14} /><span>人机验证：<b>{puzzle.question}</b></span><input className="puzzle-answer" inputMode="numeric" placeholder="输入答案" value={puzzleAnswer} onChange={(event) => setPuzzleAnswer(event.target.value.replace(/[^\d-]/g, ''))} autoFocus /></div> : null}
-          <label className="login-label" htmlFor="reg-password">设置密码（至少 8 位，含 3 类字符）</label>
-          <div className="login-password-row">
-            <input id="reg-password" className="login-input" type={showPassword ? 'text' : 'password'} autoComplete="new-password" placeholder="设置登录密码" value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy} />
-            <button type="button" className="login-password-toggle" aria-label={showPassword ? '隐藏密码' : '显示密码'} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
-          </div>
-          <PasswordMeter password={password} />
-          <label className="login-label" htmlFor="reg-password-confirm">再次输入密码</label>
-          <input id="reg-password-confirm" className="login-input" type={showPassword ? 'text' : 'password'} autoComplete="new-password" placeholder="再次输入密码" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} disabled={busy} />
-          {confirmPassword && confirmPassword !== password ? <p className="login-error">两次输入的密码不一致</p> : null}
-          <label className="terms-row"><input type="checkbox" checked={agree} onChange={(event) => setAgree(event.target.checked)} disabled={busy} /><span>我已阅读并同意<a href="/daily/terms.html" target="_blank" rel="noreferrer">《服务条款与隐私政策》</a></span></label>
-          <button type="submit" className="os-button os-button-primary login-submit" disabled={busy || !email.trim() || code.length !== 6 || password.length < 8 || confirmPassword !== password || !agree}>{busy ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}注册并登录</button>
-          <div className="login-actions"><span className="login-hint">已有账号？</span><button type="button" className="login-link" onClick={() => switchMode('login')}>去登录</button></div>
-        </form>
-      )}
+      <form className={`login-step ${mode === 'register' ? 'active' : 'hidden'}`} style={{ display: mode === 'register' ? 'flex' : 'none' }} onSubmit={(event) => void submitRegister(event)}>
+        <label className="login-label" htmlFor="reg-email">邮箱地址</label>
+        <input id="reg-email" className="login-input" type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} disabled={busy} />
+        <label className="login-label" htmlFor="reg-code">验证码（用于验证邮箱归属）</label>
+        <div className="login-code-row">
+          <input id="reg-code" className="login-input login-code-input" type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="000000" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} disabled={busy} />
+          {puzzle ? <button type="button" className="os-button os-button-quiet login-sendcode" disabled={puzzleBusy} onClick={() => void submitPuzzleAnswer()}>{puzzleBusy ? '验证中…' : '提交答案'}</button>
+            : <button type="button" className="os-button os-button-quiet login-sendcode" disabled={busy || cooldown > 0 || !email.trim()} onClick={() => void sendCode()}>{cooldown > 0 ? `${cooldown}s` : '获取验证码'}</button>}
+        </div>
+        {puzzle ? <div className="puzzle-box"><ShieldCheck size={14} /><span>人机验证：<b>{puzzle.question}</b></span><input className="puzzle-answer" inputMode="numeric" placeholder="输入答案" value={puzzleAnswer} onChange={(event) => setPuzzleAnswer(event.target.value.replace(/[^\d-]/g, ''))} autoFocus /></div> : null}
+        <label className="login-label" htmlFor="reg-password">设置密码（至少 8 位，含 3 类字符）</label>
+        <div className="login-password-row">
+          <input id="reg-password" className="login-input" type={showPassword ? 'text' : 'password'} autoComplete="new-password" placeholder="设置登录密码" value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy} />
+          <button type="button" className="login-password-toggle" aria-label={showPassword ? '隐藏密码' : '显示密码'} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+        </div>
+        {mode === 'register' ? <PasswordMeter password={password} /> : null}
+        <label className="login-label" htmlFor="reg-password-confirm">再次输入密码</label>
+        <input id="reg-password-confirm" className="login-input" type={showPassword ? 'text' : 'password'} autoComplete="new-password" placeholder="再次输入密码" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} disabled={busy} />
+        {confirmPassword && confirmPassword !== password ? <p className="login-error">两次输入的密码不一致</p> : null}
+        <label className="terms-row"><input type="checkbox" checked={agree} onChange={(event) => setAgree(event.target.checked)} disabled={busy} /><span>我已阅读并同意<a href="/daily/terms.html" target="_blank" rel="noreferrer">《服务条款与隐私政策》</a></span></label>
+        <button type="submit" className="os-button os-button-primary login-submit" disabled={busy || !email.trim() || code.length !== 6 || password.length < 8 || confirmPassword !== password || !agree}>{busy ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}注册并登录</button>
+        <div className="login-actions"><span className="login-hint">已有账号？</span><button type="button" className="login-link" onClick={() => switchMode('login')}>去登录</button></div>
+      </form>
 
-      {mode === 'forgot' && (
-        <form className="login-step" onSubmit={(event) => void submitForgot(event)}>
-          <label className="login-label" htmlFor="forgot-email">邮箱地址</label>
-          <input id="forgot-email" className="login-input" type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} disabled={busy} />
-          <label className="login-label" htmlFor="forgot-code">验证码</label>
-          <div className="login-code-row">
-            <input id="forgot-code" className="login-input login-code-input" type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="000000" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} disabled={busy} />
-            {puzzle ? <button type="button" className="os-button os-button-quiet login-sendcode" disabled={puzzleBusy} onClick={() => void submitPuzzleAnswer()}>{puzzleBusy ? '验证中…' : '提交答案'}</button>
-              : <button type="button" className="os-button os-button-quiet login-sendcode" disabled={busy || cooldown > 0 || !email.trim()} onClick={() => void sendCode()}>{cooldown > 0 ? `${cooldown}s` : '获取验证码'}</button>}
-          </div>
-          {puzzle ? <div className="puzzle-box"><ShieldCheck size={14} /><span>人机验证：<b>{puzzle.question}</b></span><input className="puzzle-answer" inputMode="numeric" placeholder="输入答案" value={puzzleAnswer} onChange={(event) => setPuzzleAnswer(event.target.value.replace(/[^\d-]/g, ''))} autoFocus /></div> : null}
-          <label className="login-label" htmlFor="forgot-password">新密码（至少 8 位，含 3 类字符）</label>
-          <div className="login-password-row">
-            <input id="forgot-password" className="login-input" type={showPassword ? 'text' : 'password'} autoComplete="new-password" placeholder="设置新密码" value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy} />
-            <button type="button" className="login-password-toggle" aria-label={showPassword ? '隐藏密码' : '显示密码'} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
-          </div>
-          <PasswordMeter password={password} />
-          <label className="login-label" htmlFor="forgot-password-confirm">再次输入新密码</label>
-          <input id="forgot-password-confirm" className="login-input" type={showPassword ? 'text' : 'password'} autoComplete="new-password" placeholder="再次输入新密码" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} disabled={busy} />
-          {confirmPassword && confirmPassword !== password ? <p className="login-error">两次输入的密码不一致</p> : null}
-          <button type="submit" className="os-button os-button-primary login-submit" disabled={busy || !email.trim() || code.length !== 6 || password.length < 8 || confirmPassword !== password}>{busy ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}重置密码并登录</button>
-          <div className="login-actions"><button type="button" className="login-link" onClick={() => switchMode('login')}>返回登录</button></div>
-        </form>
-      )}
+      <form className={`login-step ${mode === 'forgot' ? 'active' : 'hidden'}`} style={{ display: mode === 'forgot' ? 'flex' : 'none' }} onSubmit={(event) => void submitForgot(event)}>
+        <label className="login-label" htmlFor="forgot-email">邮箱地址</label>
+        <input id="forgot-email" className="login-input" type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} disabled={busy} />
+        <label className="login-label" htmlFor="forgot-code">验证码</label>
+        <div className="login-code-row">
+          <input id="forgot-code" className="login-input login-code-input" type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="000000" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} disabled={busy} />
+          {puzzle ? <button type="button" className="os-button os-button-quiet login-sendcode" disabled={puzzleBusy} onClick={() => void submitPuzzleAnswer()}>{puzzleBusy ? '验证中…' : '提交答案'}</button>
+            : <button type="button" className="os-button os-button-quiet login-sendcode" disabled={busy || cooldown > 0 || !email.trim()} onClick={() => void sendCode()}>{cooldown > 0 ? `${cooldown}s` : '获取验证码'}</button>}
+        </div>
+        {puzzle ? <div className="puzzle-box"><ShieldCheck size={14} /><span>人机验证：<b>{puzzle.question}</b></span><input className="puzzle-answer" inputMode="numeric" placeholder="输入答案" value={puzzleAnswer} onChange={(event) => setPuzzleAnswer(event.target.value.replace(/[^\d-]/g, ''))} autoFocus /></div> : null}
+        <label className="login-label" htmlFor="forgot-password">新密码（至少 8 位，含 3 类字符）</label>
+        <div className="login-password-row">
+          <input id="forgot-password" className="login-input" type={showPassword ? 'text' : 'password'} autoComplete="new-password" placeholder="设置新密码" value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy} />
+          <button type="button" className="login-password-toggle" aria-label={showPassword ? '隐藏密码' : '显示密码'} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+        </div>
+        {mode === 'forgot' ? <PasswordMeter password={password} /> : null}
+        <label className="login-label" htmlFor="forgot-password-confirm">再次输入新密码</label>
+        <input id="forgot-password-confirm" className="login-input" type={showPassword ? 'text' : 'password'} autoComplete="new-password" placeholder="再次输入新密码" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} disabled={busy} />
+        {confirmPassword && confirmPassword !== password ? <p className="login-error">两次输入的密码不一致</p> : null}
+        <button type="submit" className="os-button os-button-primary login-submit" disabled={busy || !email.trim() || code.length !== 6 || password.length < 8 || confirmPassword !== password}>{busy ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}重置密码并登录</button>
+        <div className="login-actions"><button type="button" className="login-link" onClick={() => switchMode('login')}>返回登录</button></div>
+      </form>
 
       {message ? <p className="login-message">{message}</p> : null}
       {error ? <p className="login-error">{error}</p> : null}
@@ -1331,18 +1334,20 @@ const MessageBubble = memo(function MessageBubble({ message, messageIndex, isLas
   const editMessageAt = useShellStore((state) => state.editMessageAt)
   const regenerateAt = useShellStore((state) => state.regenerateAt)
   // 复制按钮内反馈：消息复制 / 错误卡片复制共用（按 segment index 区分）
-  const [copyDone, setCopyDone] = useState<boolean | null>(null)
-  const [errorCopyIdx, setErrorCopyIdx] = useState<number | null>(null)
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'done' | 'failed'>('idle')
+  const [errorCopyStatus, setErrorCopyStatus] = useState<{ index: number; status: 'done' | 'failed' } | null>(null)
   const copyTimerRef = useRef<number | null>(null)
-  const flashCopyDone = (): void => {
-    setCopyDone(true)
+  const flashCopy = (status: 'done' | 'failed'): void => {
+    setCopyStatus(status)
+    setErrorCopyStatus(null)
     if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current)
-    copyTimerRef.current = window.setTimeout(() => setCopyDone(false), 1600)
+    copyTimerRef.current = window.setTimeout(() => setCopyStatus('idle'), 1600)
   }
-  const flashErrorCopy = (index: number): void => {
-    setErrorCopyIdx(index)
+  const flashErrorCopy = (index: number, status: 'done' | 'failed'): void => {
+    setErrorCopyStatus({ index, status })
+    setCopyStatus('idle')
     if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current)
-    copyTimerRef.current = window.setTimeout(() => setErrorCopyIdx(null), 1600)
+    copyTimerRef.current = window.setTimeout(() => setErrorCopyStatus(null), 1600)
   }
   // 思考过程折叠状态：按 segment index 独立（2026-08-03 修复"点一个全部联动"）
   const [thinkingOpen, setThinkingOpen] = useState<Record<number, boolean>>({})
@@ -1367,7 +1372,7 @@ const MessageBubble = memo(function MessageBubble({ message, messageIndex, isLas
   }
   const cancelEdit = (): void => setEditing(false)
   const doCopy = (): void => {
-    void copyMessageAt(messageIndex).then((ok) => { if (ok) flashCopyDone() })
+    void copyMessageAt(messageIndex).then((ok) => { flashCopy(ok ? 'done' : 'failed') })
   }
   const doRegenerate = (): void => {
     if (window.confirm('回退重来：此消息及其之后的内容将被删除，AI 会基于前面的对话重新生成。')) {
@@ -1380,7 +1385,7 @@ const MessageBubble = memo(function MessageBubble({ message, messageIndex, isLas
   // 避免"复制/回退重来"出现在还在生成的 AI 回复下方，等生成完成再出现。
   const streamingNow = Boolean(isLast && streaming)
   const actions = streamingNow ? null : <div className="chat-actions">
-    <button type="button" className={`chat-action ${copyDone ? 'chat-action-done' : ''}`} onClick={doCopy} aria-label="复制消息">{copyDone ? <Check size={12} /> : <Copy size={12} />}<span>{copyDone ? '已复制' : '复制'}</span></button>
+    <button type="button" className={`chat-action ${copyStatus === 'done' ? 'chat-action-done' : copyStatus === 'failed' ? 'chat-action-fail' : ''}`} onClick={doCopy} aria-label="复制消息">{copyStatus === 'done' ? <Check size={12} /> : <Copy size={12} />}<span>{copyStatus === 'done' ? '已复制' : copyStatus === 'failed' ? '复制失败' : '复制'}</span></button>
     {message.role === 'user' && !editing
       ? <button type="button" className="chat-action" onClick={startEdit} aria-label="编辑消息"><Pencil size={12} /><span>编辑</span></button>
       : null}
@@ -1466,11 +1471,11 @@ const MessageBubble = memo(function MessageBubble({ message, messageIndex, isLas
               return <div className="chat-notice" key={index}><LoaderCircle className="spin" size={12} /><span>{segment.content}</span></div>
             }
             if (segment.type === 'error') {
-              const errorCopied = errorCopyIdx === index
+              const errorCopy = errorCopyStatus?.index === index ? errorCopyStatus.status : null
               return <div className="chat-error" key={index}>
                 <span className="chat-error-icon"><AlertCircle size={14} /></span>
                 <div className="chat-error-body"><strong>出错了</strong><pre>{segment.content}</pre></div>
-                <button type="button" className={`chat-error-copy ${errorCopied ? 'chat-action-done' : ''}`} aria-label="复制错误信息" onClick={() => { void navigator.clipboard.writeText(segment.content).then(() => flashErrorCopy(index)).catch(() => { /* ignore */ }) }}>{errorCopied ? <Check size={11} /> : <Copy size={11} />}{errorCopied ? '已复制' : '复制'}</button>
+                <button type="button" className={`chat-error-copy ${errorCopy === 'done' ? 'chat-action-done' : errorCopy === 'failed' ? 'chat-error-copy-fail' : ''}`} aria-label="复制错误信息" onClick={() => { void copyTextToClipboard(segment.content).then((ok) => flashErrorCopy(index, ok ? 'done' : 'failed')) }}>{errorCopy === 'done' ? <Check size={11} /> : <Copy size={11} />}{errorCopy === 'done' ? '已复制' : errorCopy === 'failed' ? '复制失败' : '复制'}</button>
               </div>
             }
             return null
@@ -1767,11 +1772,7 @@ function AssistantHome({ onOpenLogin }: { onOpenLogin: () => void }) {
     try {
       const result = await createSystemShare()
       const fullUrl = `${window.location.origin}${result.url}`
-      let copied = false
-      try {
-        await navigator.clipboard.writeText(fullUrl)
-        copied = true
-      } catch { /* 剪贴板不可用时降级提示 */ }
+      const copied = await copyTextToClipboard(fullUrl)
       setShareDone(true)
       setComposerMenu(false)
       setNotice(copied ? '分享链接已复制：别人打开即可体验你的整套系统' : `分享链接：${fullUrl}`)
@@ -1788,6 +1789,9 @@ function AssistantHome({ onOpenLogin }: { onOpenLogin: () => void }) {
   const [uploadFailed, setUploadFailed] = useState(false)
   const uploadDoneTimerRef = useRef<number | null>(null)
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
+  // 2026-08-21 图片到对话（移动端友好）：输入框旁「图片」按钮 → 相册/拍照 →
+  // 复用压缩 data URI 附件（游客可用，一次性看图不落盘）
+  const imageInputRef = useRef<HTMLInputElement | null>(null)
   // 头像更换面板（点击用户消息头像打开）
   const [avatarPanel, setAvatarPanel] = useState(false)
   // 多会话：会话侧边栏（2026-08-05）
@@ -1811,17 +1815,23 @@ function AssistantHome({ onOpenLogin }: { onOpenLogin: () => void }) {
     setUploadFailed(false)
     try {
       let uploaded = 0
+      let lastEntry: WebOsWorkspaceEntry | null = null
       for (const file of Array.from(files)) {
         // 2026-08-13 大文件（>20MB）走分片上传（8MB/片，断点续传）；小文件走单请求
-        if (file.size > 20 * 1024 * 1024) {
-          await uploadWorkspaceFileLarge(file.name, file, 'uploads')
-        } else {
-          const base64 = await blobToBase64(file)
-          await uploadWorkspaceFile(file.name, base64, 'uploads')
-        }
+        // 2026-08-21 保留返回的 file（含 publicUrl，图片的免鉴权公开链接）
+        const result = file.size > 20 * 1024 * 1024
+          ? await uploadWorkspaceFileLarge(file.name, file, 'uploads')
+          : await uploadWorkspaceFile(file.name, await blobToBase64(file), 'uploads')
+        lastEntry = result.file
         uploaded += 1
       }
       setUploadDone(uploaded)
+      // 2026-08-21 反馈：提示落盘位置 + 图片公开链接（此前只给相对路径，图片功能无法直接访问）
+      const fileName = lastEntry?.name ?? (Array.from(files)[0]?.name ?? '')
+      const publicUrl = lastEntry?.publicUrl ?? ''
+      setNotice(publicUrl
+        ? `已上传 ${uploaded} 个文件到 home/uploads/${fileName}（图片已生成公开链接，App / 生成图参考可直接使用）`
+        : `已上传 ${uploaded} 个文件到 home/uploads/${fileName}（AI 可直接读取；${files.length > 1 ? '共 ' + uploaded + ' 个' : ''}）`)
       if (uploadDoneTimerRef.current) window.clearTimeout(uploadDoneTimerRef.current)
       uploadDoneTimerRef.current = window.setTimeout(() => { setUploadDone(null); setComposerMenu(false) }, 1600)
     } catch (caught) {
@@ -1954,6 +1964,8 @@ function AssistantHome({ onOpenLogin }: { onOpenLogin: () => void }) {
       {composerMenu ? <>
       <div className="composer-menu-backdrop" onClick={() => setComposerMenu(false)} aria-hidden="true" />
       <div className="composer-menu" role="menu" aria-label="更多功能">
+        <input ref={imageInputRef} type="file" accept="image/*" multiple hidden onChange={(event) => { if (event.target.files && event.target.files.length > 0) void addImageFiles(event.target.files); if (imageInputRef.current) imageInputRef.current.value = ''; setComposerMenu(false) }} />
+        <button type="button" className="composer-menu-item" role="menuitem" onClick={() => imageInputRef.current?.click()}><ImagePlus size={16} /><span><strong>图片到对话</strong><small>选图发给 AI 看（不落盘，游客可用）</small></span></button>
         <input ref={uploadInputRef} type="file" multiple hidden onChange={(event) => void onUploadFiles(event.target.files)} />
         <button type="button" className="composer-menu-item" role="menuitem" onClick={() => { setConvSidebar(true); setComposerMenu(false) }}><MessageSquareText size={16} /><span><strong>会话列表</strong><small>切换 · 新建 · 管理历史对话</small></span></button>
         <button type="button" className={`composer-menu-item ${uploadFailed ? 'composer-menu-item-fail' : uploadDone !== null ? 'composer-menu-item-done' : ''}`} role="menuitem" onClick={() => uploadInputRef.current?.click()} disabled={uploading}>{uploading ? <LoaderCircle className="spin" size={16} /> : uploadDone !== null ? <Check size={16} /> : uploadFailed ? <X size={16} /> : <Upload size={16} />}<span><strong>{uploading ? '上传中…' : uploadDone !== null ? `已上传 ${uploadDone} 个` : uploadFailed ? '上传失败' : '上传文件'}</strong><small>{uploadFailed ? '请稍后重试' : '图片 / 文档 / 音频 / 视频，AI 可直接使用'}</small></span></button>
@@ -1974,11 +1986,17 @@ function AssistantHome({ onOpenLogin }: { onOpenLogin: () => void }) {
         </div>
       ) : null}
       <form className="assistant-composer" onSubmit={submit} onDrop={handleComposerDrop} onDragOver={handleComposerDragOver}>
-        <button type="button" className={`composer-plus ${composerMenu ? 'composer-plus-active' : ''}`} aria-label="更多功能" onClick={() => setComposerMenu((value) => !value)}><Settings size={17} /></button>
-        {/* 【bug 修复 2026-08-16】新建对话按钮直接放在输入框左侧（用户建议：
-           齿轮→会话列表→新建 太深）。复用 createConversation；与 ➕ 相邻，视觉一致。 */}
-        <button type="button" className="composer-new" aria-label="新建对话" title="新建对话" onClick={() => { setComposerMenu(false); createConversation() }}><Plus size={17} /></button>
-        <textarea ref={composerRef} aria-label="输入消息" value={draft} onChange={(event) => { setDraft(event.target.value); resizeComposer() }} onPaste={handleComposerPaste} placeholder="告诉 Daily 你想做什么…（支持粘贴/拖拽图片）" rows={1} />{streaming ? <Button variant="danger" onClick={stopStreaming}><Square size={13} fill="currentColor" /> 停止</Button> : <button className="send-button" aria-label="发送消息" disabled={!draft.trim() && pastedImages.length === 0} type="submit"><ArrowRight size={17} /></button>}
+        <textarea ref={composerRef} aria-label="输入消息" value={draft} onChange={(event) => { setDraft(event.target.value); resizeComposer() }} onPaste={handleComposerPaste} placeholder="告诉 Daily 你想做什么…" rows={1} />
+        {/* 2026-08-21 方案 A（用户选定）：功能内嵌输入框，图标+文字胶囊一眼看懂——
+            图片 = 发到对话（AI 当场看图，游客可用）；文件 = 存入 home/uploads；新建 = 新会话 */}
+        <div className="composer-funbar">
+          <button type="button" className="funbar-pill funbar-primary" onClick={() => imageInputRef.current?.click()}><ImagePlus size={13} />图片</button>
+          <button type="button" className="funbar-pill" onClick={() => uploadInputRef.current?.click()}><Paperclip size={13} />文件</button>
+          <button type="button" className="funbar-pill" onClick={() => { setComposerMenu(false); createConversation() }}><Plus size={13} />新建</button>
+          <span className="funbar-spacer" />
+          <button type="button" className={`composer-plus ${composerMenu ? 'composer-plus-active' : ''}`} aria-label="更多功能" onClick={() => setComposerMenu((value) => !value)}><Settings size={16} /></button>
+          {streaming ? <Button variant="danger" onClick={stopStreaming}><Square size={13} fill="currentColor" /> 停止</Button> : <button className="send-button" aria-label="发送消息" disabled={!draft.trim() && pastedImages.length === 0} type="submit"><ArrowRight size={17} /></button>}
+        </div>
       </form>
     </div>
       {showHtmlImport ? <HtmlImportPanel onClose={() => setShowHtmlImport(false)} onCreated={onCreateAppFromHtml} /> : null}
@@ -1994,11 +2012,11 @@ function ShareAppPanel({ share, onClose }: { share: { name: string; url: string 
   const [copied, setCopied] = useState(false)
   const [busy, setBusy] = useState(false)
   const doCopy = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(share.url)
+    const ok = await copyTextToClipboard(share.url)
+    if (ok) {
       setCopied(true)
       window.setTimeout(() => onClose(), 1200)
-    } catch { /* 剪贴板不可用 */ }
+    }
   }
   const doSystemShare = async (): Promise<void> => {
     if (busy) return
@@ -2250,6 +2268,25 @@ function buildStoreAdapters(): StoreSdkAdapters {
       void useShellStore.getState().refreshBootstrap()
       return result
     },
+    // 2026-08-18 技能发布（对齐 App 商店链路：我的可用 / 我的发布 / 发布 / 下架）
+    skillsMine: async () => {
+      const result = await storeSkillsMine()
+      return { items: result.items as unknown as Array<Record<string, unknown>> }
+    },
+    skillsMy: async () => {
+      const result = await storeSkillsMy()
+      return { items: result.items as unknown as Array<Record<string, unknown>> }
+    },
+    skillsPublish: async (skillId, description) => storeSkillPublish(skillId, description),
+    skillsUnpublish: async (id) => storeSkillUnpublish(id),
+    // 2026-08-21（W3 统一包市场 R14）：type 维度浏览/详情/安装/我的/App 适配
+    // 返回的强类型与 StoreSdkAdapters 的 Record<string, unknown> 契约对齐
+    // （与上方 skills* 适配一致的 as unknown as 桥接模式）
+    marketList: async (params) => marketList(params) as unknown as Promise<{ entries: Array<Record<string, unknown>> }>,
+    marketDetail: async (packageId) => marketDetail(packageId) as unknown as Promise<Record<string, unknown>>,
+    marketInstall: async (packageId) => marketInstall(packageId),
+    marketMine: async () => marketMine() as unknown as Promise<{ items: Array<Record<string, unknown>> }>,
+    marketApps: async () => marketApps() as unknown as Promise<{ apps: Array<Record<string, unknown>> }>,
   }
 }
 
@@ -2388,8 +2425,13 @@ function FilesView() {
   const session = useShellStore((state) => state.session)
   const apps = useShellStore((state) => state.apps)
   const setView = useShellStore((state) => state.setView)
+  const setNotice = useShellStore((state) => state.setNotice)
+  // 2026-08-18 双区浏览：user = 用户可见区（home/，可上传/删除）
+  //               agent = AI 工作区（工作区根，含 home/ agent/ apps/ shared/
+  //                       skills/ system/ logs 等，只读浏览+打开文件）
+  const [zone, setZone] = useState<'user' | 'agent'>('user')
   const [dir, setDir] = useState('')
-  const [entries, setEntries] = useState<Array<{ name: string; type: 'dir' | 'file'; size: number; modifiedAt: number }>>([])
+  const [entries, setEntries] = useState<Array<{ name: string; type: 'dir' | 'file'; size: number; modifiedAt: number; publicUrl?: string }>>([])
   const [workspaceBytes, setWorkspaceBytes] = useState(0)
   const [workspaceLimitBytes, setWorkspaceLimitBytes] = useState(200 * 1024 * 1024)
   const [loading, setLoading] = useState(true)
@@ -2398,12 +2440,18 @@ function FilesView() {
   const uploadDoneTimerRef = useRef<number | null>(null)
   const [error, setErrorMsg] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  // 2026-08-18 文件内容预览（AI 工作区只读打开文本/图片）
+  const [preview, setPreview] = useState<{ name: string; kind: 'text' | 'image'; text?: string; url?: string } | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState<string | null>(null)
 
-  const refresh = useCallback(async (nextDir = dir): Promise<void> => {
+  const refresh = useCallback(async (nextDir = dir, nextZone = zone): Promise<void> => {
     setLoading(true)
     setErrorMsg(null)
     try {
-      const result = await listWorkspaceFiles(nextDir)
+      const result = nextZone === 'agent'
+        ? await listAgentWorkspaceFiles(nextDir)
+        : await listWorkspaceFiles(nextDir)
       setEntries(result.entries)
       setDir(result.path)
       setWorkspaceBytes(result.workspaceBytes)
@@ -2413,12 +2461,21 @@ function FilesView() {
     } finally {
       setLoading(false)
     }
-  }, [dir])
+  }, [dir, zone])
 
   useEffect(() => {
-    void refresh('')
+    void refresh('', zone)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [zone])
+
+  const switchZone = (nextZone: 'user' | 'agent'): void => {
+    if (nextZone === zone) return
+    setZone(nextZone)
+    setDir('')
+    void refresh('', nextZone)
+    setPreview(null)
+    setPreviewError(null)
+  }
 
   const onUpload = async (files: FileList | null): Promise<void> => {
     if (!files || files.length === 0) return
@@ -2431,17 +2488,23 @@ function FilesView() {
     setErrorMsg(null)
     try {
       let uploaded = 0
+      let lastEntry: WebOsWorkspaceEntry | null = null
       for (const file of Array.from(files)) {
         // 2026-08-13 大文件（>20MB）走分片上传（8MB/片，断点续传）；小文件走单请求
-        if (file.size > 20 * 1024 * 1024) {
-          await uploadWorkspaceFileLarge(file.name, file, 'uploads')
-        } else {
-          const base64 = await blobToBase64(file)
-          await uploadWorkspaceFile(file.name, base64, 'uploads')
-        }
+        // 2026-08-21 保留返回的 file（含 publicUrl，图片的免鉴权公开链接）
+        const result = file.size > 20 * 1024 * 1024
+          ? await uploadWorkspaceFileLarge(file.name, file, 'uploads')
+          : await uploadWorkspaceFile(file.name, await blobToBase64(file), 'uploads')
+        lastEntry = result.file
         uploaded += 1
       }
       setUploadDone(uploaded)
+      // 2026-08-21 反馈：提示落盘位置 + 图片公开链接（此前只给相对路径，图片功能无法直接访问）
+      const fileName = lastEntry?.name ?? (Array.from(files)[0]?.name ?? '')
+      const publicUrl = lastEntry?.publicUrl ?? ''
+      setNotice(publicUrl
+        ? `已上传 ${uploaded} 个文件到 home/uploads/${fileName}（图片已生成公开链接，App / 生成图参考可直接使用）`
+        : `已上传 ${uploaded} 个文件到 home/uploads/${fileName}（AI 可直接读取）`)
       if (uploadDoneTimerRef.current) window.clearTimeout(uploadDoneTimerRef.current)
       uploadDoneTimerRef.current = window.setTimeout(() => setUploadDone(null), 1600)
       await refresh()
@@ -2465,47 +2528,101 @@ function FilesView() {
     }
   }
 
-  const used = workspaceBytes
-  const limit = workspaceLimitBytes
-  const usedPercent = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0
   const isImage = (name: string): boolean => /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(name)
+  const isText = (name: string): boolean => /\.(txt|md|markdown|json|js|mjs|cjs|ts|tsx|jsx|html|htm|css|scss|less|xml|yml|yaml|toml|ini|conf|log|csv|svg|env|sh|bat|py|java|c|h|cpp|sql|properties|gitignore|npmrc|editorconfig|lock)$/i.test(name)
   const previewPath = (name: string): string => (dir ? `${dir}/${name}` : name)
   // 游客不支持上传（2026-08-03）：登录后获得 10GB 空间
   const loggedIn = session && !session.guest
+  const agentZone = zone === 'agent'
 
-  return <section className="os-screen system-screen"><ScreenHeader title="文件" subtitle="我的工作区" onBack={() => setView('desktop')} right={<MoreHorizontal size={18} />} /><div className="system-scroll"><div className="system-intro"><Eyebrow>FILE MANAGER</Eyebrow><h1>文件工作区</h1><p>上传图片、文档和素材，AI 助手可以直接读取使用。每个账号的工作区相互隔离。</p></div><div className="metric-grid"><Surface className="metric-card"><HardDrive size={18} /><span>存储用量</span><strong>{formatBytes(used)}</strong><small>上限 {formatBytes(limit)}（{loggedIn ? '已登录' : '游客'}）</small></Surface><Surface className="metric-card"><Database size={18} /><span>App 数据</span><strong>{apps.filter((app) => app.source !== 'builtin').length} 个</strong><small>私有空间隔离</small></Surface><Surface className="metric-card"><Layers3 size={18} /><span>版本归档</span><strong>{apps.reduce((total, app) => total + app.versions.length, 0)} 个</strong><small>可回滚</small></Surface></div>
-    <Surface className="file-list-card"><div className="card-heading"><div><Eyebrow>PRIVATE WORKSPACE</Eyebrow><h2>我的文件</h2></div><Folder size={18} /></div>
-      <div className="file-upload-bar">
+  /** 2026-08-18 打开文件：图片/文本内联预览，其它浏览器打开（下载/查看） */
+  const openFile = async (entry: { name: string; type: 'dir' | 'file'; publicUrl?: string }): Promise<void> => {
+    if (entry.type !== 'file') return
+    const pathName = previewPath(entry.name)
+    // 2026-08-21：图片优先用免鉴权公开 URL（App iframe / 生成图参考可直接复用），无则回退带鉴权 raw
+    const url = agentZone
+      ? agentWorkspaceFileRawUrl(pathName)
+      : (entry.publicUrl ?? workspaceFileRawUrl(pathName))
+    if (isImage(entry.name)) {
+      setPreview({ name: entry.name, kind: 'image', url })
+      return
+    }
+    if (isText(entry.name)) {
+      setPreviewLoading(true)
+      setPreviewError(null)
+      setPreview({ name: entry.name, kind: 'text' })
+      try {
+        const text = agentZone
+          ? await readAgentWorkspaceTextFile(pathName)
+          : await (await fetch(url, { credentials: 'include' })).text()
+        setPreview({ name: entry.name, kind: 'text', text })
+      } catch (caught) {
+        setPreviewError(caught instanceof Error ? caught.message : '文件读取失败')
+      } finally {
+        setPreviewLoading(false)
+      }
+      return
+    }
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  const used = workspaceBytes
+  const limit = workspaceLimitBytes
+  const usedPercent = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0
+
+  return <section className="os-screen system-screen"><ScreenHeader title="文件" subtitle={agentZone ? 'AI 工作区' : '我的工作区'} onBack={() => setView('desktop')} right={<MoreHorizontal size={18} />} /><div className="system-scroll"><div className="system-intro"><Eyebrow>FILE MANAGER</Eyebrow><h1>{agentZone ? 'AI 工作区' : '文件工作区'}</h1><p>{agentZone ? '浏览 AI 在你工作区里维护的全部文件（含 home/ agent/ apps/ shared/ skills/ system 等），文件可打开查看，只读。' : '上传图片、文档和素材，AI 助手可以直接读取使用。每个账号的工作区相互隔离。'}</p></div>
+    <div className="file-zone-switch" role="tablist" aria-label="文件区切换">
+      <button type="button" role="tab" aria-selected={!agentZone} className={!agentZone ? 'active' : ''} onClick={() => switchZone('user')}><UserRound size={14} />我的文件<small>home/</small></button>
+      <button type="button" role="tab" aria-selected={agentZone} className={agentZone ? 'active' : ''} onClick={() => switchZone('agent')}><Code2 size={14} />AI 工作区<small>根目录</small></button>
+    </div>
+    <div className="metric-grid"><Surface className="metric-card"><HardDrive size={18} /><span>存储用量</span><strong>{formatBytes(used)}</strong><small>上限 {formatBytes(limit)}（{loggedIn ? '已登录' : '游客'}）</small></Surface><Surface className="metric-card"><Database size={18} /><span>App 数据</span><strong>{apps.filter((app) => app.source !== 'builtin').length} 个</strong><small>私有空间隔离</small></Surface><Surface className="metric-card"><Layers3 size={18} /><span>版本归档</span><strong>{apps.reduce((total, app) => total + app.versions.length, 0)} 个</strong><small>可回滚</small></Surface></div>
+    <Surface className="file-list-card"><div className="card-heading"><div><Eyebrow>{agentZone ? 'AGENT WORKSPACE' : 'PRIVATE WORKSPACE'}</Eyebrow><h2>{agentZone ? 'AI 工作区文件（只读）' : '我的文件'}</h2></div><Folder size={18} /></div>
+      {!agentZone ? <div className="file-upload-bar">
         <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => void onUpload(event.target.files)} />
         {loggedIn
           ? <button type="button" className={`os-button os-button-primary file-upload-button ${uploadDone !== null ? 'os-button-done' : ''}`} disabled={uploading || uploadDone !== null} onClick={() => fileInputRef.current?.click()}>{uploadDone !== null ? <Check size={15} /> : uploading ? <LoaderCircle className="spin" size={15} /> : <Upload size={15} />} {uploadDone !== null ? `已上传 ${uploadDone} 个` : uploading ? '上传中…' : '上传文件'}</button>
           : <button type="button" className="os-button file-upload-button" onClick={() => setView('profile')}><KeyRound size={15} /> 登录后上传</button>}
         <small>{loggedIn ? `图片 / 文档 / 音频 / 视频 / 压缩包（无单文件大小限制，工作区共 ${formatBytes(limit)}；大量存储需求可联系站长单独扩容）` : `游客暂不支持上传；登录后获得 ${formatBytes(limit)} 工作区空间，AI 可直接读取你上传的文件。`}</small>
-      </div>
+      </div> : <p className="muted-copy plan-hint" style={{ margin: '0 0 8px' }}><Eye size={12} style={{ verticalAlign: -2 }} /> AI 工作区为只读浏览：文件可打开查看，修改/上传请通过对话让 AI 完成。</p>}
       <div className="token-bar workspace-bar"><span style={{ width: `${usedPercent}%` }} /></div>
       <p className="muted-copy plan-hint"><HardDrive size={12} style={{ verticalAlign: -2 }} /> 已用 {formatBytes(used)} / 共 {formatBytes(limit)}。空间不够？订阅月卡可获得 10GB 以上工作区，或联系站长单独扩容（微信 fangyan876）。</p>
       {error ? <p className="html-import-error">{error}</p> : null}
       {loading ? <div className="empty-file"><LoaderCircle className="spin" size={20} /></div>
-        : entries.length === 0 ? <div className="empty-file"><span className="empty-file-icon"><Folder size={24} /></span><strong>这里还很安静</strong><p>上传第一张图片或第一个文档，AI 就能读到它。上传后的文件在 home/uploads/，AI 可直接使用。</p></div>
+        : entries.length === 0 ? <div className="empty-file"><span className="empty-file-icon"><Folder size={24} /></span><strong>{agentZone ? '这个目录还是空的' : '这里还很安静'}</strong><p>{agentZone ? 'AI 还没有在这个目录留下文件。' : '上传第一张图片或第一个文档，AI 就能读到它。上传后的文件在 home/uploads/，AI 可直接使用。'}</p></div>
           : <div className="file-list">{dir ? <button type="button" className="file-row file-row-up" onClick={() => void refresh(dir.split('/').slice(0, -1).join('/'))}><Folder size={16} /><span>..（返回上级）</span></button> : null}
             {entries.map((entry) => (
               <div className="file-row" key={entry.name}>
                 {entry.type === 'dir'
                   ? <button type="button" className="file-row-main" onClick={() => void refresh(dir ? `${dir}/${entry.name}` : entry.name)}><Folder size={16} /><span>{entry.name}</span><small>目录</small></button>
-                  : <div className="file-row-main">
+                  : <button type="button" className="file-row-main" onClick={() => void openFile(entry)}>
                     {isImage(entry.name)
-                      ? <img className="file-thumb" src={workspaceFileRawUrl(previewPath(entry.name))} alt={entry.name} loading="lazy" />
+                      ? <img className="file-thumb" src={agentZone ? agentWorkspaceFileRawUrl(previewPath(entry.name)) : workspaceFileRawUrl(previewPath(entry.name))} alt={entry.name} loading="lazy" onError={(event) => { (event.currentTarget).style.display = 'none' }} />
                       : <FileText size={16} />}
                     <span title={entry.name}>{entry.name}</span>
                     <small>{formatBytes(entry.size)}</small>
-                  </div>}
-                {entry.type === 'file' ? <a className="file-action" href={workspaceFileRawUrl(previewPath(entry.name))} target="_blank" rel="noreferrer" aria-label="下载"><Download size={15} /></a> : null}
-                <button type="button" className="file-action file-action-danger" aria-label="删除" onClick={() => void onDelete(entry.name, entry.type)}><Trash2 size={15} /></button>
+                  </button>}
+                {entry.type === 'file' ? <a className="file-action" href={agentZone ? agentWorkspaceFileRawUrl(previewPath(entry.name)) : workspaceFileRawUrl(previewPath(entry.name))} target="_blank" rel="noreferrer" aria-label="打开/下载"><Download size={15} /></a> : null}
+                {!agentZone ? <button type="button" className="file-action file-action-danger" aria-label="删除" onClick={() => void onDelete(entry.name, entry.type)}><Trash2 size={15} /></button> : null}
               </div>
             ))}
           </div>}
-      <div className="file-hint"><Sparkles size={14} /> 上传后直接对 AI 说「用我上传的图片做壁纸 / 做个相册 App」，它会自动读取 home/uploads/ 里的文件。</div>
-    </Surface></div></section>
+      <div className="file-hint"><Sparkles size={14} /> {agentZone ? '目录：home/（用户可见区） agent/（AI 草稿） apps/（App 源码） shared/（跨 App 共享） skills/（记忆技能） system/（系统素材） logs/（执行日志）' : '上传后直接对 AI 说「用我上传的图片做壁纸 / 做个相册 App」，它会自动读取 home/uploads/ 里的文件。'}</div>
+    </Surface>
+    {preview ? <div className="file-preview-overlay" role="dialog" aria-modal="true" onClick={() => { setPreview(null); setPreviewError(null) }}>
+      <div className="file-preview" onClick={(event) => event.stopPropagation()}>
+        <div className="file-preview-head">
+          <span title={preview.name}>{preview.name}</span>
+          <button type="button" className="file-preview-close" aria-label="关闭预览" onClick={() => { setPreview(null); setPreviewError(null) }}><X size={16} /></button>
+        </div>
+        <div className="file-preview-body">
+          {previewLoading ? <div className="empty-file"><LoaderCircle className="spin" size={20} /></div>
+            : previewError ? <p className="html-import-error">{previewError}</p>
+              : preview.kind === 'image' && preview.url ? <img src={preview.url} alt={preview.name} />
+                : <pre className="file-preview-text">{preview.text ?? ''}</pre>}
+        </div>
+      </div>
+    </div> : null}
+    </div></section>
 }
 
 function formatBytes(value: number): string {
@@ -2812,6 +2929,8 @@ function ProfileView({ onOpenLogin }: { onOpenLogin: () => void }) {
   const [redeemError, setRedeemError] = useState<string | null>(null)
   const [redeemResult, setRedeemResult] = useState<RedeemResult | null>(null)
   const redeemInputRef = useRef<HTMLInputElement | null>(null)
+  // 2026-08-21 W2：我的 API 包 → 文档/在线调试（owner 级全屏页）
+  const [apiCenterOpen, setApiCenterOpen] = useState<boolean>(false)
   useEffect(() => {
     let cancelled = false
     getCreditsHistory(30)
@@ -2939,14 +3058,202 @@ function ProfileView({ onOpenLogin }: { onOpenLogin: () => void }) {
     </Surface>
 
     {afdianOpen ? <AfdianView onBack={() => setAfdianOpen(false)} /> : null}
+    {apiCenterOpen ? <AppApiCenter onBack={() => setApiCenterOpen(false)} /> : null}
 
     <Surface className="settings-card"><div className="card-heading"><div><Eyebrow>CONTACT</Eyebrow><h2>联系站长 · 分享讨论</h2></div><MessageCircle size={18} /></div><p className="muted-copy">遇到问题、想要更多额度，或想一起交流玩法与想法，欢迎加站长：</p><div className="contact-row"><span className="setting-icon ink"><MessageCircle size={16} /></span><span className="setting-copy"><strong>QQ</strong><small>2893334965 · 加好友时备注「Daily」</small></span></div><div className="contact-row"><span className="setting-icon blue"><MessageCircle size={16} /></span><span className="setting-copy"><strong>微信</strong><small>fangyan876 · 额度 / 购买相关</small></span></div></Surface>
 
     <Surface className="settings-card"><div className="card-heading"><div><Eyebrow>SYSTEM SERVICES</Eyebrow><h2>系统入口</h2></div><Grid2X2 size={18} /></div><button className="link-row" onClick={() => setView('files')}><span className="setting-icon blue"><Folder size={16} /></span><span className="setting-copy"><strong>文件工作区</strong><small>上传文件与素材，AI 可直接使用（{apps.filter((app) => app.source !== 'builtin').length} 个 App）</small></span><ChevronRight size={16} /></button>{session?.user.role === 'admin' ? <a className="link-row" href="https://admin.shadowshub.xyz" target="_blank" rel="noreferrer"><span className="setting-icon ink"><TerminalSquare size={16} /></span><span className="setting-copy"><strong>管理后台</strong><small>用户、用量与额度管理（admin.shadowshub.xyz）</small></span><ExternalLink size={15} /></a> : null}</Surface>
 
+    {loggedIn ? <Surface className="settings-card"><div className="card-heading"><div><Eyebrow>MY API</Eyebrow><h2>我的 API 包</h2></div><Code2 size={18} /></div><p className="muted-copy" style={{ marginTop: 8, marginBottom: 2 }}>自己或别人装给你的 api 包：端点文档 + 在线调试，每次调用扣 1 积分。</p><button className="link-row" onClick={() => setApiCenterOpen(true)}><span className="setting-icon blue"><Code2 size={16} /></span><span className="setting-copy"><strong>API 文档 / 在线调试</strong><small>列出本账号 type=api 的包，逐端点看参数与 storage 范围并试调（游客不参与 API 互通体系，R13）</small></span><ChevronRight size={16} /></button></Surface> : null}
     <Surface className="settings-card privacy-card"><div className="card-heading"><div><Eyebrow>PRIVACY</Eyebrow><h2>权限边界</h2></div><ShieldCheck size={18} /></div><div className="privacy-row"><ShieldCheck size={15} /><span>第三方 App 仅可申请 <code>app.storage.private</code></span><Check size={14} /></div><div className="privacy-row"><TerminalSquare size={15} /><span>无 JWT、宿主 DOM 或真实文件路径暴露</span><Check size={14} /></div><div className="privacy-row"><Square size={15} /><span>首版只提供文字交互</span><Check size={14} /></div></Surface>
     {redeemResult ? <RedeemCelebration result={redeemResult} onClose={() => setRedeemResult(null)} /> : null}
   </div></section>
+}
+
+/* ============================================================================ */
+/* W2 API 文档 / 在线调试（2026-08-21）：『我的 API 包』owner 级入口             */
+/*   列表：GET /webos/api/packages?type=api（PackageListItem 摘要）             */
+/*   文档：GET /webos/api/appapi/:namespace（端点清单，不含 handler 代码体）     */
+/*   调试：POST /webos/api/appapi/:ns/:ep（受限 vm 执行，成功扣 1 积分）         */
+/* ============================================================================ */
+interface ApiEndpointDoc {
+  name: string
+  method?: string
+  path: string
+  description?: string
+  params?: unknown
+  storage?: { read?: string[]; write?: string[] }
+  visibility?: string
+}
+interface ApiNamespaceSpec {
+  ok?: boolean
+  namespace?: string
+  displayName?: string
+  network?: { domains?: string[] }
+  secrets?: string[]
+  endpoints?: ApiEndpointDoc[]
+}
+
+/** 端点 params JSON Schema → 调试参数默认值（只取带 default 的字段） */
+function apiDefaultParams(params: unknown): Record<string, unknown> {
+  const p = params as { properties?: Record<string, { type?: string; default?: unknown }> } | undefined
+  if (!p || typeof p !== 'object' || !p.properties) return {}
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(p.properties)) {
+    if (v && typeof v === 'object' && 'default' in v) out[k] = (v as { default?: unknown }).default
+  }
+  return out
+}
+
+/** 单端点在线调试：参数 JSON 编辑 + 调用端点（扣 1 积分） */
+function ApiEndpointDebug({ namespace, endpoint }: { namespace: string; endpoint: ApiEndpointDoc }) {
+  const [paramsText, setParamsText] = useState(() => JSON.stringify(apiDefaultParams(endpoint.params), null, 2))
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<{ result: unknown; costMinor: number } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const run = async (): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    setResult(null)
+    setError(null)
+    try {
+      const parsed: Record<string, unknown> = paramsText.trim() ? JSON.parse(paramsText) as Record<string, unknown> : {}
+      const res = await invokeAppApi(namespace, endpoint.name, parsed)
+      setResult(res)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '调用失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return <div className="api-debug">
+    <div className="api-debug-label">在线调试<small>每次成功调用扣 1 积分（kind='api'）</small></div>
+    <textarea value={paramsText} onChange={(e) => setParamsText(e.target.value)} spellCheck={false} placeholder='{ "参数": "值" }' aria-label={`调试 ${endpoint.name} 参数`} />
+    <div className="api-debug-actions">
+      <button type="button" className="os-button os-button-primary" disabled={busy} onClick={() => { void run() }}>{busy ? <LoaderCircle className="spin" size={13} /> : null}{busy ? '调用中…' : '调用端点'}</button>
+      <button type="button" className="os-button" onClick={() => setParamsText('{}')}>清空</button>
+    </div>
+    {error ? <pre className="api-code api-debug-error">{error}</pre> : null}
+    {result ? <pre className="api-code api-debug-result">{JSON.stringify(result, null, 2)}</pre> : null}
+  </div>
+}
+
+/** 端点卡片：方法徽标 + 名称 + visibility + params/storage 文档，展开后可调试 */
+function ApiEndpointCard({ namespace, endpoint, open, onToggle }: {
+  namespace: string
+  endpoint: ApiEndpointDoc
+  open: boolean
+  onToggle: () => void
+}) {
+  const method = endpoint.method ?? 'GET'
+  const vis = endpoint.visibility ?? 'owner'
+  const read = endpoint.storage?.read ?? []
+  const write = endpoint.storage?.write ?? []
+  return <div className="api-endpoint api-card">
+    <button type="button" className="api-ep-head" onClick={onToggle} aria-expanded={open}>
+      <span className={`api-method api-method-${method.toLowerCase()}`}>{method}</span>
+      <span className="api-ep-name">{endpoint.name}</span>
+      <span className={`api-vis api-vis-${vis}`}>{vis === 'public' ? 'PUBLIC' : 'OWNER'}</span>
+      <span className={`api-ep-chev ${open ? 'api-ep-chev-open' : ''}`}><ChevronRight size={15} /></span>
+    </button>
+    <div className="api-ep-path">{endpoint.path}</div>
+    {endpoint.description ? <p className="api-ep-desc">{endpoint.description}</p> : null}
+    {(read.length > 0 || write.length > 0) ? <div className="api-scope"><Database size={12} /><span>数据范围 · 读：{read.length ? read.join('、') : '—'} / 写：{write.length ? write.join('、') : '—'}</span></div> : null}
+    {open ? <div className="api-ep-more">
+      <div className="api-meta-label">params（params JSON Schema）</div>
+      <pre className="api-code">{JSON.stringify(endpoint.params ?? {}, null, 2)}</pre>
+      <ApiEndpointDebug namespace={namespace} endpoint={endpoint} />
+    </div> : null}
+  </div>
+}
+
+/** 命名空间文档页：namespace 切换 + 端点清单 + 每端点在线调试 */
+function ApiNamespaceDoc({ item }: { item: WebOsPackageListItem }) {
+  const [nsInput, setNsInput] = useState(item.id)
+  const [ns, setNs] = useState(item.id)
+  const [spec, setSpec] = useState<ApiNamespaceSpec | null | 'loading'>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [openEp, setOpenEp] = useState<string | null>(null)
+  const load = (n: string): void => {
+    const target = n.trim() || item.id
+    setNs(target)
+    setSpec('loading')
+    setLoadError(null)
+    getAppApiSpec(target)
+      .then((r) => setSpec(r as unknown as ApiNamespaceSpec))
+      .catch((e) => { setSpec(null); setLoadError(e instanceof Error ? e.message : '加载失败') })
+  }
+  useEffect(() => {
+    load(item.id)
+    // 首次进入自动加载一次；切换 namespace 走「重新加载」按钮
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.id])
+  const ready = spec && spec !== 'loading' ? spec : null
+  return <div className="system-intro">
+    <div className="api-ns-bar">
+      <div className="api-ns-field">
+        <label>namespace</label>
+        <input value={nsInput} onChange={(e) => setNsInput(e.target.value)} spellCheck={false} aria-label="命名空间" />
+      </div>
+      <button type="button" className="os-button" onClick={() => load(nsInput)}>重新加载</button>
+    </div>
+    {loadError ? <div className="api-warn">{loadError}<span>（确认 api.json 里的 namespace 与包 id 一致；或手动输入后重新加载）</span></div> : null}
+    {spec === 'loading' ? <div className="api-loading"><LoaderCircle className="spin" size={15} /> 读取 {ns} 的端点清单…</div> : null}
+    {ready ? <div className="api-ns-meta">
+      <div className="api-meta-line">
+        <span><strong>{ready.displayName ?? ready.namespace ?? ns}</strong></span>
+        {ready.network?.domains?.length ? <span>network：{ready.network.domains.join('、')}</span> : null}
+        <span>secrets：{ready.secrets?.length ? ready.secrets.join('、') : '无'}</span>
+      </div>
+      <div className="api-meta-count">{ready.endpoints?.length ?? 0} 个端点 · PUBLIC 端点可在 W3 市场发布后供他人安装调用</div>
+    </div> : null}
+    {ready && ready.endpoints && ready.endpoints.length > 0 ? ready.endpoints.map((ep) => (
+      <ApiEndpointCard key={ep.name} namespace={ns} endpoint={ep} open={openEp === ep.name} onToggle={() => setOpenEp(openEp === ep.name ? null : ep.name)} />
+    )) : null}
+    {ready && !(ready.endpoints?.length) ? <div className="empty-file"><div className="empty-file-icon"><Code2 size={22} /></div><strong>该命名空间没有端点</strong><p>确认 api.json 里有 endpoints 声明，并已通过契约校验。</p></div> : null}
+  </div>
+}
+
+/** 「我的 API 包」入口页：列出本人 type=api 包 → 进入命名空间文档/调试 */
+function AppApiCenter({ onBack }: { onBack: () => void }) {
+  const [items, setItems] = useState<WebOsPackageListItem[] | null | 'error'>(null)
+  const [selected, setSelected] = useState<WebOsPackageListItem | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    listPackages('api')
+      .then((res) => { if (!cancelled) setItems(res.items ?? []) })
+      .catch(() => { if (!cancelled) setItems('error') })
+    return () => { cancelled = true }
+  }, [])
+  return <section className="os-screen system-screen">
+    <ScreenHeader
+      title={selected ? 'API 端点文档' : '我的 API 包'}
+      subtitle={selected ? selected.displayName : 'owner 级 · 文档与在线调试'}
+      onBack={() => { if (selected) setSelected(null); else onBack() }}
+      right={selected ? null : <Code2 size={18} />}
+    />
+    <div className="system-scroll">
+      {selected
+        ? <ApiNamespaceDoc item={selected} />
+        : <div className="system-intro">
+            <Eyebrow>MY API PACKAGES</Eyebrow>
+            <h1>你的 API 包</h1>
+            <p>「AI 造了 App 却不知道里面有什么」的解法：每个 api 包声明端点（参数 / storage 读写范围），系统自动生成可调用端点与文档。这里逐端点查看并在线调试（每次成功调用扣 1 积分）。</p>
+            {items === null ? <div className="api-loading"><LoaderCircle className="spin" size={15} /> 正在加载…</div> : null}
+            {items === 'error' ? <div className="api-warn">获取 API 包列表失败，请稍后重试。</div> : null}
+            {items && items.length === 0 ? <div className="empty-file"><div className="empty-file-icon"><Code2 size={22} /></div><strong>还没有 API 包</strong><p>在对话里让 AI 按「文件夹即包」创建 <code>packages/&lt;id&gt;/daily.pkg.json</code>（type=api）+ <code>api.json</code> 与 handler，系统会自动注册并建立版本。</p></div> : null}
+            {items && typeof items !== 'string' && items.length > 0 ? <div className="api-list">
+              {items.map((p) => (
+                <button key={p.id} type="button" className="link-row api-list-row" onClick={() => setSelected(p)}>
+                  <span className="setting-icon blue"><Code2 size={16} /></span>
+                  <span className="setting-copy"><strong>{p.displayName}</strong><small>{p.id}{p.version ? ` · v${p.version}` : ''}</small></span>
+                  <ChevronRight size={16} />
+                </button>
+              ))}
+            </div> : null}
+          </div>}
+    </div>
+  </section>
 }
 
 function AppRuntime({ app }: { app: WebOsApp }) {

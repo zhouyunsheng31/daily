@@ -31,6 +31,9 @@ import {
   isAllowedUploadName,
   workspaceDirName,
   APP_ID_PATTERN,
+  PUBLIC_IMAGES_DIR,
+  ensurePublicImageCopy,
+  removePublicImageCopy,
   type WorkspaceFsHooks,
 } from '../utils/webosWorkspace.js'
 import { getSandboxRoot } from '../sandbox/index.js'
@@ -66,6 +69,22 @@ import { searchTools } from '../utils/searchTools.js'
 import { afdianConfigured, AFDIAN_TIERS, handleAfdianOrder, redeemAfdianCode } from '../payment/afdian.js'
 // 2026-08-16 系统时间能力：北京时间换算 + 对话时间前缀 + GET /webos/api/time
 import { beijingTimePrefix } from './webosTime.js'
+// 2026-08-20（W-F File Service 一阶段）：agent_fs_* 双写 files 元数据（manifest 锚点）
+import { recordFileStats, recordFileDeleted } from '../webos/files/index.js'
+// 2026-08-21（W1 包体系）：文件夹即包 + 校验反馈回路 + 全量扫描（apps/、packages/ 双轨）
+import { syncPackageFromFs, syncAllPackagesFromWorkspace } from '../webos/packages/index.js'
+// 2026-08-21（W2 App API）：handler 受限 vm + 动态工具 + owner 级端点（deps 由本文件注入防循环）
+import { setAppApiDeps, registerDynamicTools } from '../webos/appapi/index.js'
+// 2026-08-21（W3 统一包市场 R14）：AI 找包/装包工具（search_market_packages / install_market_package）
+import { registerMarketTools } from '../webos/market/index.js'
+
+// W2 App API 依赖注入：loadState/saveState/chargeCredits 均为本文件函数声明（已提升），
+// 模块加载时注册，供 appapi-service 在 invoke 时访问 appStorage/扣积分（避免循环依赖）
+setAppApiDeps({
+  loadState: loadState as never,
+  saveState: saveState as never,
+  chargeCredits: chargeCredits as never,
+})
 
 // ---------------------------------------------------------------------------
 // webOS 专用 skills（.pi/skills-webos/）：受控 skill 目录，AI 可读/写
@@ -649,6 +668,11 @@ async function loadState(principal: Principal): Promise<StoredState> {
   await ensureSystemTrash(principal, state)
   // 「文件夹即 App」（2026-08-06）：扫描 apps/ 新文件夹（含 index.html）自动注册
   if (syncAppsFromWorkspaceFolders(principal, state)) await saveState(principal, state)
+  // 「文件夹即包」（2026-08-21，W1）：全量扫描 packages/ 注册非 app 类型包（幂等；
+  // 覆盖手动复制文件夹 / 回收站恢复 / 钩子未触发的历史目录），失败不阻断已有功能
+  try { await syncAllPackagesFromWorkspace(principal.key) } catch (error) {
+    console.warn('[webos] syncAllPackagesFromWorkspace failed:', describeHookError(error))
+  }
   return state
 }
 
@@ -1717,7 +1741,7 @@ function markChatRecentDone(key: string, content: string): void {
 // ---------------------------------------------------------------------------
 // AI 链路：pi agent session（pi-coding-agent）+ DeepSeek 内置 provider
 // 2026-07-31 架构修正：不再自研 DeepSeek HTTP 直连，复用 piBridge 的
-// createWebosSession（pi 内置 deepseek/deepseek-v4-flash，DEEPSEEK_API_KEY 认证）。
+// createWebosSession（pi 内置 deepseek/deepseek-v4-flash-0731，DEEPSEEK_API_KEY 认证）。
 // ---------------------------------------------------------------------------
 
 // piBridge 懒加载：与 index.ts 一致，避免模块加载阶段 import pi-coding-agent 挂起
@@ -1902,7 +1926,10 @@ function extractMediaRefs(text: string): string[] {
   // Markdown 图片语法：![alt](url) 里的 url 即使没有扩展名也按媒体引用处理
   for (const m of text.matchAll(/!\[[^\]]*\]\(([^)\s]+)\)/gi)) addMarkdownImage(m[1] ?? '')
   // 平台内部 URL（/webos/api/...）
-  for (const m of text.matchAll(/\/webos\/api\/(?:apps\/[^\s"'<>()]+?\/files\/raw[^\s"'<>()]*|imagegen\/file\/[^\s"'<>()]+|videogen\/file\/[^\s"'<>()]+|workspace\/files\/raw[^\s"'<>()]*)/g)) add(m[0])
+  // 2026-08-17 修复：贪婪匹配会把正文尾巴吞进 URL（如「webos.ts:2862，支持」），
+  // 导致把代码/描述文本误当媒体发给 M3 → HTTP 400 invalid param: image format。
+  // 遇到中文标点/全角括号/反引号等正文分隔符立即截断。
+  for (const m of text.matchAll(/\/webos\/api\/(?:apps\/[^\s"'<>()，。；：！？、（）【】「」『』`]+?\/files\/raw[^\s"'<>()，。；：！？、（）【】「」『』`]*|imagegen\/file\/[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*(?:\.(?:png|jpe?g|webp|gif))?|videogen\/file\/[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*(?:\.(?:mp4|webm))?|workspace\/files\/raw[^\s"'<>()，。；：！？、（）【】「」『』`]*)/g)) add(m[0])
   // 公网 URL（带媒体扩展名，或 URL 中带 image/video 的扩展名缺失地址）
   for (const m of text.matchAll(/https?:\/\/[^\s"'<>()]+/gi)) {
     const raw = m[0]
@@ -1916,12 +1943,15 @@ function extractMediaRefs(text: string): string[] {
 /** 把消息里的 data URI 图片替换成短占位符，避免把 base64 原文喂给纯文本 DeepSeek */
 function replaceDataUriMediaRefs(text: string, mediaRefs: string[]): string {
   let output = text
+  // 1. 先用静态通用正则替换 ![] (data:image/...) Markdown 语法
+  let counter = 1
+  output = output.replace(/!\[([^\]]*)\]\((data:image\/[a-zA-Z0-9+.-]+;base64,[^)]+)\)/gi, () => {
+    return `[图片${counter++}]`
+  })
+  // 2. 对于可能裸露存在的 data URI 字符串，使用非正则的 split/join 替换，彻底规避 RegExp 超长崩溃
   mediaRefs.forEach((ref, index) => {
     if (!/^data:image\//i.test(ref)) return
     const placeholder = `[图片${index + 1}]`
-    const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const markdownRe = new RegExp(`!\\[[^\\]]*\\]\\(${escaped}\\)`, 'g')
-    output = output.replace(markdownRe, placeholder)
     output = output.split(ref).join(placeholder)
   })
   return output
@@ -2023,7 +2053,7 @@ function validateGeneratedHtml(html: string): string {
   return html
 }
 
-function validateAppHtml(value: unknown): string {
+function validateAppHtml(value: unknown, opts?: { allowExternalResources?: boolean }): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw createError(400, 'INVALID_APP_HTML', 'App 必须提供非空 HTML')
   }
@@ -2033,11 +2063,19 @@ function validateAppHtml(value: unknown): string {
   if (/<\s*(iframe|object|embed|base)\b/i.test(value)) {
     throw createError(400, 'APP_HTML_FORBIDDEN_ELEMENT', 'App 不允许嵌套 iframe、object、embed 或 base')
   }
-  if (/(?:src|href|action|formaction)\s*=\s*["']?\s*(?:https?:|https?%3A|\x2f\x2f|javascript:)/i.test(value)) {
-    throw createError(400, 'APP_EXTERNAL_RESOURCE', 'P0 静态 App 不允许外部网络资源')
+  // 危险协议一律禁止（可执行/逃逸/本地读取向量），与是否放开外部资源无关
+  if (/(?:src|href|action|formaction)\s*=\s*["']?\s*(?:javascript:|vbscript:|file:|filesystem:)/i.test(value)) {
+    throw createError(400, 'APP_FORBIDDEN_PROTOCOL', 'App 不允许 javascript: / vbscript: / file: 等危险协议资源')
   }
   if (/\s(?:src|href)\s*=\s*["']?\s*data:text\/html/i.test(value)) {
     throw createError(400, 'APP_HTML_FORBIDDEN_RESOURCE', 'App 不允许 data:text/html 资源')
+  }
+  // 外部网络资源（2026-08-20）：仅「用户显式粘贴的 HTML」（source=local_import / 该源 App 的后续编辑）
+  // 放开 http(s) 与 // 引用（允许 CDN 脚本/样式/图片/普通外链，App 运行在 sandbox iframe、无令牌无宿主
+  // DOM 权限，外部资源与内联脚本同级风险）；AI 生成与其他自动路径保持严格（防幻觉 URL / 供应链依赖）。
+  if (!opts?.allowExternalResources
+    && /(?:src|href|action|formaction)\s*=\s*["']?\s*(?:https?:|https?%3A|\x2f\x2f)/i.test(value)) {
+    throw createError(400, 'APP_EXTERNAL_RESOURCE', '系统生成的静态 App 不允许外部网络资源')
   }
   return value.trim()
 }
@@ -2673,7 +2711,6 @@ function imagesRoot(key: string): string {
  *  cookie（SameSite 第三方上下文）→ 鉴权图片端点返回 401 被 Chrome ORB 拦截，
  *  图片无法显示。生图文件名含不可枚举 UUID（timestamp_uuid8），按公开资源处理
  *  （与分享链接同级风险），额外复制一份到全局目录供免鉴权读取。 */
-const PUBLIC_IMAGES_DIR = path.join(process.cwd(), 'data', 'webos-public-images')
 
 /** 保存生成的图片（PNG buffer → 工作区文件；size 传入时强制缩放后再存；outputDir 指定输出目录，默认 agent/images/），返回 { path, url, width?, height? } */
 async function saveImageFile(key: string, buffer: Buffer, tag: string, size?: string, outputDir?: string): Promise<{ path: string; url: string; width?: number; height?: number }> {
@@ -2994,7 +3031,7 @@ function generateImageTool(principal: Principal): ToolDefinition {
   return {
     name: 'generate_image',
     label: '生成图片',
-    description: '用 AI 生成图片并保存到工作区（模型 gpt-image-2-super）。两种用法：①prompt + n：同一提示词的多张变体；②prompts：**给每张图单独设定提示词的批量生成**（1-6 张，每张不同内容，如一套饮品图/多张壁纸——一次调用全部生成，对话里一个工具卡片展示全部图片）。传 reference_image（工作区图片路径）则基于参考图生成变体/改图。返回图片路径、访问 URL **与真实像素尺寸 width/height**（写游戏碰撞判定/布局时务必用返回的真实尺寸，不要猜）。size 强制生效（生成后服务端缩放，如 512x512 / 1024x1024 / 1280x720，默认 1024x1024）。生成后可用 agent_fs_* 管理，App 素材放 apps/<appId>/assets/。',
+    description: '用 AI 生成图片并保存到工作区（模型 gpt-image-2-super）。两种用法：①prompt + n：同一提示词的多张变体；②prompts：**给每张图单独设定提示词的批量生成**（1-6 张，每张不同内容，如一套饮品图/多张壁纸——一次调用全部生成，对话里一个工具卡片展示全部图片）。传 reference_image（工作区图片路径）则基于参考图生成变体/改图。返回图片路径、访问 URL **与真实像素尺寸 width/height**（写游戏碰撞判定/布局时务必用返回的真实尺寸，不要猜）。size 强制生效（生成后服务端缩放，如 512x512 / 1024x1024 / 1280x720，默认 1024x1024）。生成后可用 agent_fs_* 管理，App 素材放 apps/<appId>/assets/。⚠️内容边界（2026-08-20）：底层 OpenAI 系图像模型对「人物/动漫角色」题材审查极严，图生图（reference_image 为动漫/女性角色）极易被安全系统拒绝（错误码 SAFETY_REJECTED，违规类别多为 sexual）——这是上游内容审查的确定性策略，非系统故障、不扣费。生成人物类图请避免 anime girl、少女/女仆/校服、身材或衣着描写；遇 SAFETY_REJECTED 应主动改写题材（改场景/物品/动物等非人物主体）或更换参考图后重试，**不要用同一触雷提示词反复重试**。',
     parameters: Type.Object({
       prompt: Type.Optional(Type.String({ description: '图像内容描述（英文效果最佳；图生图时描述对参考图要做的修改）' })),
       prompts: Type.Optional(Type.Array(Type.String({ description: '每张图独立的提示词（1-6 个；传了则忽略 prompt/n，一次调用生成多张不同内容的图）' }), { description: '多张不同图片各自的提示词（如 ["抹茶拿铁","冰拿铁","珍珠奶茶"]）' })),
@@ -3109,7 +3146,7 @@ function generateImageTool(principal: Principal): ToolDefinition {
       for (let i = 0; i < results.length; i += 1) {
         const r = results[i]
         if (!r.ok || r.images.length === 0) {
-          failures.push(`#${i + 1} ${prompts[i]?.slice(0, 40) ?? ''}${r.errorMessage ? `（${r.errorMessage.slice(0, 80)}）` : ''}`)
+          failures.push(`#${i + 1} ${prompts[i]?.slice(0, 40) ?? ''}${r.errorMessage ? `（${r.errorMessage.slice(0, 220)}）` : ''}`)
           continue
         }
         for (const buffer of r.images) {
@@ -3121,11 +3158,16 @@ function generateImageTool(principal: Principal): ToolDefinition {
       // 扣减积分（1 积分 = 1 分钱；按生图定价表折算，不足 clamp 不超扣）
       const actual = chargeCredits(state, totalCostMinor)
       await saveState(principal, state)
+      // 2026-08-20 归因优化：全部失败时 errorCode 优先取第一个失败结果的独立错误码
+      // （如 SAFETY_REJECTED / HTTP_400 / TIMEOUT），便于管理后台按类型筛选，不再
+      // 把整段失败文本塞进 error_code（此前 SAFETY_REJECTED 被吞成原始 JSON 无法归类）。
+      const failCode = results.find((r) => !r.ok)?.errorCode
+        ?? (failures[0]?.slice(0, 300) ?? 'GENERATION_FAILED')
       await recordImageGenUsage({
         userKey: principal.key, userEmail: principal.email ?? null, kind: principalKind(principal, state),
         prompt: summaryPrompt, n: prompts.length, images,
         inputTokens: totalInput, outputTokens: totalOutput, costMinor: totalCostMinor,
-        status: images > 0 ? 'ok' : 'failed', errorCode: images > 0 ? undefined : (failures[0]?.slice(0, 60) ?? 'GENERATION_FAILED'),
+        status: images > 0 ? 'ok' : 'failed', errorCode: images > 0 ? undefined : failCode,
         durationMs: totalDuration,
       })
       if (images === 0) {
@@ -3392,9 +3434,10 @@ function generateVideoTool(principal: Principal): ToolDefinition {
 }
 
 // ============================================================================
-// 2026-08-06 视频处理工具（edit_video，FFmpeg）
+// 2026-08-06 媒体处理工具（edit_video，FFmpeg + ImageMagick）
 // 参考 frameronin.com 类网站能力：抽帧/序列帧、精灵图（帧动画）、GIF、去背景、
-// 裁剪/缩放/倍速/音频提取/静音/拼接、首帧封面。产物落工作区 agent/media/。
+// 裁剪/缩放/倍速/音频提取/静音/拼接、首帧封面；另支持图片滤镜/旋转/翻转/格式转换/
+// 水印/拼图/音量。产物落工作区 agent/media/。
 // - 权限：游客禁止（与视频生成一致）
 // - 计费：免费（CPU 成本低，鼓励用于 App 制作）；每次落库 webos_video_usage
 //   task_type='video_edit' 供后台统计
@@ -3403,11 +3446,13 @@ function generateVideoTool(principal: Principal): ToolDefinition {
 function editVideoTool(principal: Principal): ToolDefinition {
   return {
     name: 'edit_video',
-    label: '处理视频',
+    label: '处理媒体',
     description: [
-      '处理工作区里的视频/动图（FFmpeg + ImageMagick，系统内置）。inputs 传视频的工作区路径（如 agent/videos/xxx.mp4），产物写到 agent/media/ 并返回公开 URL **与真实像素尺寸 width/height**（写游戏碰撞判定/布局时务必用返回的真实尺寸，不要猜）。',
+      '处理工作区里的视频/图片/音频（FFmpeg + ImageMagick，系统内置）。inputs 传工作区路径（如 agent/videos/xxx.mp4、agent/images/a.png、agent/audio/a.mp3），产物写到 agent/media/ 并返回公开 URL **与真实像素尺寸 width/height**（写游戏碰撞判定/布局时务必用返回的真实尺寸，不要猜）。处理壁纸/图片素材/加字/拼图/格式转换都可以用它。',
       '**to-sprite（推荐，一键完成「视频→透明精灵图」）**：抽帧 → 自动检测背景色（绿幕/蓝幕/白底/黑底）→ 抠图（容差+羽化+抑色 despill 去边缘背景色溢）→ 逐帧裁剪到角色包围盒 → 统一画布 → 拼成一行 Sprite Sheet。做游戏角色动画/跑酷 App 直接用这一个操作即可，参数 frames（帧数 4-16，默认 8）、size（角色高度像素，默认 128）、duration（采样时长）。',
-      '其他操作：extract-frames（抽帧为图片序列）、sprite-sheet（拼精灵图，不抠图）、to-gif（转 GIF）、poster（提取首帧封面）、trim（裁剪片段 start/duration）、crop（画面裁剪）、scale（缩放）、extract-audio（提取 mp3）、mute（静音）、speed（倍速 0.5-4x）、remove-bg（绿幕/纯色背景抠除 → 透明 webm，**仅限纯色背景**，复杂背景做不到）、concat（拼接多个视频，inputs 传数组）。',
+      '**新增图片/媒体操作**：filter（图片/视频帧滤镜：contrast/brightness/saturation/gamma/blur/alpha/darken/hue/negate，结构化参数，不做任意 filter 注入）；rotate（旋转 degrees，90/180/270 无损 transpose，其他角度黑底）；flip（翻转 direction=horizontal/vertical）；convert（格式转换 to=png/jpg/webp/gif/mp4/webm，quality 仅 jpg/webp）；watermark（水印：watermarkPath 图片水印或 text 文字水印，position=tl/tr/bl/br/center，margin/scale/fontsize/color，支持 #RRGGBBAA 半透明）；tile（网格拼图：2-12 张图片，columns/gap/background）；volume（音频音量 level=0-3）。',
+      '其他既有操作：extract-frames（抽帧为图片序列）、sprite-sheet（拼精灵图，不抠图）、to-gif（转 GIF）、poster（提取首帧封面）、trim（裁剪片段 start/duration）、crop（画面裁剪）、scale（缩放）、extract-audio（提取 mp3）、mute（静音）、speed（倍速 0.5-4x）、remove-bg（绿幕/纯色背景抠除 → 透明 webm，**仅限纯色背景**，复杂背景做不到）、concat（拼接多个视频，inputs 传数组）。',
+      '示例：把壁纸调半透明 60% 并暗化 20% 用 filter（alpha=0.6、darken=0.2）；给图片右下角加文字水印用 watermark（text="Daily"、position="br"）；把 4 张图拼成 2x2 用 tile（columns=2）。',
       '做游戏 App 时：角色动画用 to-sprite 一键生成透明精灵图（或 extract-frames 抽帧后自行处理），配 canvas 或 CSS 帧动画播放；去背景请先确认素材是纯色背景（生成视频时要求 AI 用纯绿背景）。',
     ].join(' '),
     parameters: Type.Object({
@@ -3425,8 +3470,15 @@ function editVideoTool(principal: Principal): ToolDefinition {
         Type.Literal('speed'),
         Type.Literal('remove-bg'),
         Type.Literal('concat'),
+        Type.Literal('filter'),
+        Type.Literal('rotate'),
+        Type.Literal('flip'),
+        Type.Literal('convert'),
+        Type.Literal('watermark'),
+        Type.Literal('tile'),
+        Type.Literal('volume'),
       ], { description: '操作类型（见描述）' }),
-      inputs: Type.Array(Type.String({ description: '输入视频/图片的工作区路径（concat 时传多个）' }), { description: '输入文件列表' }),
+      inputs: Type.Array(Type.String({ description: '输入视频/图片/音频的工作区路径（concat/tile 时传多个）' }), { description: '输入文件列表' }),
       frames: Type.Optional(Type.Number({ description: 'extract-frames 帧率（默认 8）/ sprite-sheet 总帧数（默认 8，2-24）' })),
       gifFps: Type.Optional(Type.Number({ description: 'to-gif fps（默认 10）；sprite-sheet 的采样帧率' })),
       gifWidth: Type.Optional(Type.Number({ description: 'to-gif 宽度（默认 480）' })),
@@ -3437,6 +3489,30 @@ function editVideoTool(principal: Principal): ToolDefinition {
       speed: Type.Optional(Type.Number({ description: 'speed 倍速 0.5-4（默认 1）' })),
       bgColor: Type.Optional(Type.String({ description: 'remove-bg 背景色：green/blue/white/black（默认 green）' })),
       similarity: Type.Optional(Type.Number({ description: 'remove-bg 颜色相似度 0.01-0.9（默认 0.1，越大抠得越狠）' })),
+      contrast: Type.Optional(Type.Number({ description: 'filter 对比度 0.1-3（默认 1）' })),
+      brightness: Type.Optional(Type.Number({ description: 'filter 亮度 -1~1（默认 0）' })),
+      saturation: Type.Optional(Type.Number({ description: 'filter 饱和度 0-3（默认 1）' })),
+      gamma: Type.Optional(Type.Number({ description: 'filter 伽马 0.1-3（默认 1）' })),
+      blur: Type.Optional(Type.Number({ description: 'filter 高斯模糊 sigma 0-50（默认 0）' })),
+      alpha: Type.Optional(Type.Number({ description: 'filter 不透明度 0.05-1（默认 1，输出 PNG 带 alpha）' })),
+      darken: Type.Optional(Type.Number({ description: 'filter 暗化 0-0.8（默认 0，colorlevels 压暗）' })),
+      hue: Type.Optional(Type.Number({ description: 'filter 色相 -180~180（默认 0）' })),
+      negate: Type.Optional(Type.Boolean({ description: 'filter 是否反色（默认 false）' })),
+      degrees: Type.Optional(Type.Number({ description: 'rotate 旋转角度 -360~360（默认 0）' })),
+      direction: Type.Optional(Type.String({ description: 'flip 方向 horizontal/vertical（默认 horizontal）' })),
+      to: Type.Optional(Type.String({ description: 'convert 目标格式 png/jpg/webp/gif/mp4/webm' })),
+      quality: Type.Optional(Type.Number({ description: 'convert 质量 1-100（默认 85，仅 jpg/webp）' })),
+      watermarkPath: Type.Optional(Type.String({ description: 'watermark 图片水印的工作区路径（需已存在图片）' })),
+      text: Type.Optional(Type.String({ description: 'watermark 文字水印内容' })),
+      position: Type.Optional(Type.String({ description: 'watermark/tile 位置或布局 tl/tr/bl/br/center（默认 br）' })),
+      margin: Type.Optional(Type.Number({ description: 'watermark 边距 0-200（默认 12）' })),
+      scale: Type.Optional(Type.Number({ description: 'watermark 图片水印缩放 0.1-2（默认 1）' })),
+      fontsize: Type.Optional(Type.Number({ description: 'watermark 文字字号 8-200（默认 28）' })),
+      color: Type.Optional(Type.String({ description: 'watermark 文字颜色 CSS 颜色，支持 #RRGGBBAA 半透明（默认 white）' })),
+      columns: Type.Optional(Type.Number({ description: 'tile 列数 1-6（默认按数量平方根取整）' })),
+      gap: Type.Optional(Type.Number({ description: 'tile 间距 0-50（默认 0）' })),
+      background: Type.Optional(Type.String({ description: 'tile 背景 white/black/transparent（默认 white）' })),
+      level: Type.Optional(Type.Number({ description: 'volume 音量 0-3（默认 1）' })),
     }),
     execute: async (_toolCallId, params: {
       operation: string
@@ -3451,6 +3527,30 @@ function editVideoTool(principal: Principal): ToolDefinition {
       speed?: number
       bgColor?: string
       similarity?: number
+      contrast?: number
+      brightness?: number
+      saturation?: number
+      gamma?: number
+      blur?: number
+      alpha?: number
+      darken?: number
+      hue?: number
+      negate?: boolean
+      degrees?: number
+      direction?: string
+      to?: string
+      quality?: number
+      watermarkPath?: string
+      text?: string
+      position?: string
+      margin?: number
+      scale?: number
+      fontsize?: number
+      color?: string
+      columns?: number
+      gap?: number
+      background?: string
+      level?: number
     }, _signal, onUpdate) => {
       const startedAt = Date.now()
       const state = await loadState(principal)
@@ -3461,7 +3561,7 @@ function editVideoTool(principal: Principal): ToolDefinition {
       if (principal.guest) {
         return fail('GUEST_NOT_ALLOWED', '视频处理仅限登录用户使用（游客不可用），请先登录')
       }
-      if (!Array.isArray(params.inputs) || params.inputs.length === 0) return fail('NO_INPUT', '请提供 inputs（工作区视频路径）')
+      if (!Array.isArray(params.inputs) || params.inputs.length === 0) return fail('NO_INPUT', '请提供 inputs（工作区文件路径）')
       if (!(await ffmpegAvailable())) return fail('FFMPEG_UNAVAILABLE', '服务器未安装 ffmpeg，无法处理视频')
       // 解析输入为工作区绝对路径（每个都要存在且是视频/图片）
       const inputs: string[] = []
@@ -3470,16 +3570,29 @@ function editVideoTool(principal: Principal): ToolDefinition {
           const full = resolveWorkspacePath(principal.key, String(raw).trim())
           const stat = fs.statSync(full)
           if (!stat.isFile()) throw new Error('不是文件')
-          if (!isVideoFile(full)) throw new Error('不是支持的视频/图片格式')
+          if (!isVideoFile(full)) throw new Error('不是支持的视频/图片/音频格式')
           if (stat.size > 100 * 1024 * 1024) throw new Error('文件超过 100MB 限制')
           inputs.push(full)
         } catch (error) {
           return fail('BAD_INPUT', `输入文件无效：${raw}（${error instanceof Error ? error.message : String(error)}）`)
         }
       }
+      // watermark 图片水印必须解析为工作区内绝对路径并校验存在
+      let watermarkFull: string | undefined
+      if (params.operation === 'watermark' && params.watermarkPath) {
+        try {
+          watermarkFull = resolveWorkspacePath(principal.key, String(params.watermarkPath).trim())
+          const wmStat = fs.statSync(watermarkFull)
+          if (!wmStat.isFile()) throw new Error('不是文件')
+          if (!/\.(png|jpe?g|webp)$/i.test(watermarkFull)) throw new Error('水印图仅支持 PNG/JPEG/WebP')
+          if (wmStat.size > 100 * 1024 * 1024) throw new Error('水印图超过 100MB 限制')
+        } catch (error) {
+          return fail('BAD_WATERMARK', `水印图无效：${params.watermarkPath}（${error instanceof Error ? error.message : String(error)}）`)
+        }
+      }
       // 输出目录：agent/media/
       const mediaDir = path.join(getWorkspaceRoot(principal.key), 'agent', 'media')
-      onUpdate?.({ content: [{ type: 'text', text: `正在处理视频（${params.operation}）…` }], details: {} })
+      onUpdate?.({ content: [{ type: 'text', text: `正在处理媒体（${params.operation}）…` }], details: {} })
       markPiActivity()
       const result = await processVideo({
         operation: params.operation as never,
@@ -3495,6 +3608,30 @@ function editVideoTool(principal: Principal): ToolDefinition {
         speed: params.speed,
         bgColor: params.bgColor,
         similarity: params.similarity,
+        contrast: params.contrast,
+        brightness: params.brightness,
+        saturation: params.saturation,
+        gamma: params.gamma,
+        blur: params.blur,
+        alpha: params.alpha,
+        darken: params.darken,
+        hue: params.hue,
+        negate: params.negate,
+        degrees: params.degrees,
+        direction: params.direction,
+        to: params.to,
+        quality: params.quality,
+        watermarkPath: watermarkFull,
+        text: params.text,
+        position: params.position,
+        margin: params.margin,
+        scale: params.scale,
+        fontsize: params.fontsize,
+        color: params.color,
+        columns: params.columns,
+        gap: params.gap,
+        background: params.background,
+        level: params.level,
       })
       // 落库（免费，但记录每次调用供后台统计）
       await recordVideoUsage({
@@ -4156,8 +4293,8 @@ function describeHookError(error: unknown): string {
   return String(error)
 }
 
-/** 对话会话注入的全部 App 工具 + Agent 工作区文件系统工具 */
-function webosAppTools(principal: Principal): ToolDefinition[] {
+/** 对话会话注入的全部 App 工具 + Agent 工作区文件系统工具 +（W2）App API 动态工具 */
+async function webosAppTools(principal: Principal): Promise<ToolDefinition[]> {
   const appTools = [
     listWebosAppsTool(principal),
     updateWebosAppTool(principal),
@@ -4418,10 +4555,53 @@ function webosAppTools(principal: Principal): ToolDefinition[] {
         console.warn(`[webos] onAppSourceChanged failed for ${appId} ${relPath}:`, describeHookError(error))
       }
     },
+    // 2026-08-20（W-F File Service 一阶段）：文件写入/删除后双写 files 元数据
+    //（manifest 锚点，AI 无感知；失败静默，不影响文件操作本身）
+    // 2026-08-21（W1 包体系）：命中 packages/<id>/ 时同步包校验并回流人话反馈
+    //（返回 string → 随 agent_fs_write/edit/copy/delete 结果交给 AI 即时修正）
+    onFsFileWritten: async (fullPath: string) => {
+      let feedback: string | undefined
+      try { await recordFileStats(principal.key, fullPath) } catch { /* 双写失败静默 */ }
+      try {
+        const r = await syncPackageFromFs(principal.key, fullPath)
+        if (typeof r === 'string' && r) feedback = r
+      } catch (error) {
+        console.warn(`[webos] syncPackageFromFs failed:`, describeHookError(error))
+      }
+      return feedback
+    },
+    onFsFileDeleted: async (fullPath: string) => {
+      let feedback: string | undefined
+      try { await recordFileDeleted(principal.key, fullPath) } catch { /* 双写失败静默 */ }
+      try {
+        const r = await syncPackageFromFs(principal.key, fullPath)
+        if (typeof r === 'string' && r) feedback = r
+      } catch (error) {
+        console.warn(`[webos] syncPackageFromFs(delete) failed:`, describeHookError(error))
+      }
+      return feedback
+    },
   }
   const logged = appTools.map(wrapTool)
+  // 2026-08-21（W2 App API）：本人已安装 api 包的端点动态注册为 pi 工具
+  //（appapi_<ns>_<ep>，参数 schema 直接来自 api.json → AI 零幻觉知道怎么调）
+  let apiTools: ToolDefinition[] = []
+  try {
+    apiTools = await registerDynamicTools(principal)
+  } catch (error) {
+    console.warn('[webos] registerDynamicTools failed:', describeHookError(error))
+  }
+  // 2026-08-21（W3 统一包市场）：AI 找包/装包（search_market_packages / install_market_package）
+  let marketTools: ToolDefinition[] = []
+  try {
+    marketTools = await registerMarketTools(principal)
+  } catch (error) {
+    console.warn('[webos] registerMarketTools failed:', describeHookError(error))
+  }
   return [
     ...logged,
+    ...apiTools.map(wrapTool),
+    ...marketTools.map(wrapTool),
     ...workspaceFsTools(principal.key, fsHooks).map(wrapTool),
     wrapTool(inspectWebosAppTool(principal)),
     ...sysSourceTools().map(wrapTool),
@@ -4572,15 +4752,20 @@ function mimeFor(name: string): string {
   return MIME_BY_EXT[ext] ?? 'application/octet-stream'
 }
 
-function fileEntry(name: string, fullPath: string): { name: string; type: 'dir' | 'file'; size: number; modifiedAt: number } | null {
+function fileEntry(name: string, fullPath: string): { name: string; type: 'dir' | 'file'; size: number; modifiedAt: number; publicUrl?: string } | null {
   try {
     const stat = fs.statSync(fullPath)
-    return {
+    const entry: { name: string; type: 'dir' | 'file'; size: number; modifiedAt: number; publicUrl?: string } = {
       name,
       type: stat.isDirectory() ? 'dir' : 'file',
       size: stat.isDirectory() ? 0 : stat.size,
       modifiedAt: stat.mtimeMs,
     }
+    if (stat.isFile()) {
+      const publicUrl = ensurePublicImageCopy(fullPath)
+      if (publicUrl) entry.publicUrl = publicUrl
+    }
+    return entry
   } catch {
     return null
   }
@@ -4621,6 +4806,73 @@ webosRouter.get('/workspace/files', async (req, res, next) => {
       workspaceBytes: used,
       workspaceLimitBytes: workspaceLimitForState(state),
     })
+  } catch (error) {
+    workspacePathError(error, next)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// 2026-08-18 AI 工作区只读浏览（用户需求：文件管理器直接看 AI 工作区内容，
+// 不再每次都要向 AI 要文件/耗 tokens；文件只读打开即可）
+// - GET  /workspace/agent-files?path=      列出工作区任意目录（默认根）
+// - GET  /workspace/agent-files/raw?path=  读取文件字节（图片预览/文本内容/下载）
+// 与 home 区端点不同：这两个端点走 resolveWorkspacePath（工作区根=AI 工作区，
+// 包含 home/ agent/ apps/ shared/ skills/ system/ logs 等全部结构），
+// 只读不写：不提供上传/删除/编辑（AI 工作区文件由 Agent 管理，避免用户误改
+// 破坏 App 版本链/系统资产；需要改文件时仍可让 AI 来做）。
+// ---------------------------------------------------------------------------
+
+/** GET /webos/api/workspace/agent-files?path= — 列出 AI 工作区目录（只读浏览） */
+webosRouter.get('/workspace/agent-files', async (req, res, next) => {
+  try {
+    const principal = requirePrincipal(req)
+    const dir = typeof req.query.path === 'string' && req.query.path.trim()
+      ? req.query.path.trim().replace(/^\/+/, '')
+      : ''
+    const full = resolveWorkspacePath(principal.key, dir || '.')
+    if (!fs.existsSync(full) || !fs.statSync(full).isDirectory()) {
+      next(createError(404, 'DIR_NOT_FOUND', '目录不存在'))
+      return
+    }
+    const entries = fs.readdirSync(full, { withFileTypes: true })
+      .map((entry) => fileEntry(entry.name, path.join(full, entry.name)))
+      .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+      .sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name, 'zh-CN') : (a.type === 'dir' ? -1 : 1)))
+    res.json({
+      path: dir,
+      entries,
+      // AI 工作区与用户可见区共享同一存储配额，附带用量供界面展示
+      workspaceBytes: workspaceUsedBytes(principal.key),
+      workspaceLimitBytes: workspaceLimitForState(await loadState(principal)),
+    })
+  } catch (error) {
+    workspacePathError(error, next)
+  }
+})
+
+/** GET /webos/api/workspace/agent-files/raw?path= — 读取 AI 工作区文件字节（只读） */
+webosRouter.get('/workspace/agent-files/raw', (req, res, next) => {
+  try {
+    const principal = requirePrincipal(req)
+    const filePath = typeof req.query.path === 'string' ? req.query.path : ''
+    if (!filePath) {
+      next(createError(400, 'INVALID_PATH', '缺少 path 参数'))
+      return
+    }
+    const full = resolveWorkspacePath(principal.key, filePath)
+    if (!fs.existsSync(full) || !fs.statSync(full).isFile()) {
+      next(createError(404, 'FILE_NOT_FOUND', '文件不存在'))
+      return
+    }
+    const stat = fs.statSync(full)
+    if (stat.size > 100 * 1024 * 1024) {
+      next(createError(413, 'FILE_TOO_LARGE', '文件过大，暂不支持在线预览'))
+      return
+    }
+    res.setHeader('Content-Type', mimeFor(filePath))
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(path.basename(filePath))}`)
+    res.setHeader('Cache-Control', 'private, max-age=60')
+    fs.createReadStream(full).pipe(res)
   } catch (error) {
     workspacePathError(error, next)
   }
@@ -4940,6 +5192,7 @@ webosRouter.delete('/workspace/files', (req, res, next) => {
       }
       fs.rmdirSync(full)
     } else {
+      removePublicImageCopy(full)
       fs.unlinkSync(full)
     }
     logAgentAction(principal.key, 'user_delete_file', { path: filePath }, true)
@@ -5555,14 +5808,26 @@ webosRouter.post('/chat/stream', async (req, res, next) => {
     const sourceVersionId = typeof body.sourceVersionId === 'string' ? body.sourceVersionId : null
     const lastUser = [...messages].reverse().find((message) => message.role === 'user')
     if (!lastUser) throw createError(400, 'INVALID_MESSAGES', '缺少 user 消息')
-    // 编辑/回退重来：丢弃该会话的旧 pi 上下文，用修改后的完整消息历史重放
-    const historyContext = rebuild ? formatHistoryContext(messages.slice(0, -1)) : ''
+    // 2026-08-18 rebuild 优化（用户反馈：刷新/重发消息会像第一条消息一样重跑
+    // 整个上下文 + 重新执行开场 skill（读记忆/存快照等），一次多花上万 tokens）：
+    // 旧实现：disposeWebosSessions 删除会话与 JSONL 文件 → 全新 session 重新加载
+    //   skills 并重新执行开场流程，且 historyContext 把整段历史文本重放一遍 =
+    //   「上下文没有损失但事实上跑了两遍」。
+    // 新实现（会话存活时）：**不销毁会话、不重放历史**——复用当前内存会话上下文，
+    //   AI 能看到之前已经执行过开场（读记忆/快照等记录都在上下文里），不会重复
+    //   执行；token 消耗回到普通消息水平（几百 tokens 而非上万）。
+    // 兜底（会话丢失，如服务重启/超时清理）：仍回退 historyContext 重放，避免
+    //   AI 完全失忆；但同样不再 dispose（本来就没有会话可清）。
+    const { hasWebosSession } = await loadPiBridge()
+    const sessionAlive = rebuild && hasWebosSession(principal.key, conversationId)
     const timePrefix = beijingTimePrefix()
+    const rebuildNotice = rebuild && sessionAlive
+      ? '（系统提醒：用户修改了此前的消息或要求重新生成。请忽略你之前对应的旧回复，直接针对下面这条最新消息重新作答。本会话开场的初始化（读记忆/存快照等一次性动作）已完成，无需重复执行。）\n\n'
+      : ''
+    const historyContext = rebuild && !sessionAlive ? formatHistoryContext(messages.slice(0, -1)) : ''
     const userText = appId
-      ? `${timePrefix}\n\n（当前 App 上下文：appId=${appId}，sourceVersionId=${sourceVersionId ?? 'none'}）\n${historyContext ? `${historyContext}\n\n` : ''}${lastUser.content}`
-      : historyContext
-        ? `${timePrefix}\n\n${historyContext}\n\n${lastUser.content}`
-        : `${timePrefix}\n\n${lastUser.content}`
+      ? `${timePrefix}\n\n（当前 App 上下文：appId=${appId}，sourceVersionId=${sourceVersionId ?? 'none'}）\n${rebuildNotice}${historyContext ? `${historyContext}\n\n` : ''}${lastUser.content}`
+      : `${timePrefix}\n\n${rebuildNotice}${historyContext ? `${historyContext}\n\n` : ''}${lastUser.content}`
 
     // 2026-08-14 M3 视觉桥接（AI 的眼睛）：DeepSeek 非视觉。用户消息里带
     // 图片/视频引用时，自动调 MiniMax-M3 生成文字描述注入 userText，让 AI
@@ -5580,9 +5845,11 @@ webosRouter.post('/chat/stream', async (req, res, next) => {
     // 文件系统工具，让 pi agent 在对话中直接创建/修改 App（文件夹即 App 路径）。
     const { createWebosSession, disposeWebosSessions, abortWebosSessions } = await loadPiBridge()
     if (rebuild) {
-      // 先释放旧会话：新会话从空上下文开始，历史由上面的 historyContext 重放
-      try { disposeWebosSessions(principal.key, conversationId) } catch { /* ignore */ }
-      tlog(`chat rebuild conv=${conversationId} scope=${principal.key}`)
+      // 2026-08-18 不再 dispose：保留会话上下文，避免刷新/重发消息重复执行
+      // 开场 skill 与重放完整历史（用户实测：刷新一次多花上万 tokens）。
+      // 会话存活→直接复用；会话丢失→historyContext 重放兜底（见上方 userText 构造）。
+      // 旧逻辑 `disposeWebosSessions` 已挪到真正需要清空会话的错误恢复路径。
+      tlog(`chat rebuild conv=${conversationId} scope=${principal.key} sessionAlive=${sessionAlive} (keep/history fallback)`)
     }
     // 2026-08-11 架构统一：任务缓冲 key（scope:convId:thinking）——活跃连接登记/
     // 事件转发/结束信号统一用它（声明提前，供 setupSse 后登记活跃连接使用）
@@ -5625,7 +5892,8 @@ webosRouter.post('/chat/stream', async (req, res, next) => {
     try {
       session = await createWebosSession(principal.key, thinkingToPi(thinking), {
         // 2026-08-06 搜索工具注入 webOS 会话（此前只在画布会话可用，webOS AI 搜不了网）
-        customTools: [...webosAppTools(principal), ...searchTools],
+        // 2026-08-21（W2）动态 App API 工具：appapi_<ns>_<ep>
+        customTools: [...(await webosAppTools(principal)), ...searchTools],
         conversationId,
       })
     } catch (error) {
@@ -5808,7 +6076,7 @@ webosRouter.post('/chat/stream', async (req, res, next) => {
     // 缓存命中时 createWebosSession 直接返回同一实例（O(1)，零开销）。
     try {
       session = await createWebosSession(principal.key, thinkingToPi(thinking), {
-        customTools: [...webosAppTools(principal), ...searchTools],
+        customTools: [...(await webosAppTools(principal)), ...searchTools],
         conversationId,
       })
     } catch (error) {
@@ -6561,7 +6829,13 @@ webosRouter.get('/store/apps', async (req, res, next) => {
       params,
     )
     const state = await loadState(principal)
-    const installedIds = new Set(state.apps.filter((app) => app.source === 'store').map((app) => app.id))
+    // 2026-08-16 修复「已安装」标记恒为 false：安装的 App id 带 `store:` 前缀
+    // （如 store:s-abc123），而商店条目 id 是 s-abc123 → 直接比 row.id 永不匹配。
+    // 收集时去掉 `store:` 前缀，与 row.id 对齐；bundle 安装的 share:xxx 不在此集合。
+    const installedIds = new Set(
+      state.apps.filter((app) => app.source === 'store')
+        .map((app) => (app.id.startsWith('store:') ? app.id.slice('store:'.length) : app.id)),
+    )
     res.json({
       // 2026-08-12 商店标注用户剩余空间：工作区配额 -（磁盘已用 + App 私有数据）
       userFreeBytes: workspaceFreeBytes(principal, calculateStorageBytes(state), state),
@@ -7343,10 +7617,13 @@ webosRouter.post('/store/apps/:shareId/visit', async (req, res, next) => {
 
 // ============================================================================
 // 技能市场（2026-08-09）：应用商店改名「市场」后承载技能分发——
-// 全局 .pi/skills-webos/ 下的系统级 skill（design/xhs-content 等）可一键
-// 安装到用户工作区 skills/<id>/（用户级副本，AI 可用 manage_skill 自定义演进）。
-// 超大 skill（>2MB，如 design 33MB 素材库）标记 installable=false 不提供安装——
-// 全局只读已对所有人可用，复制进每个用户工作区浪费配额。
+// ① 系统级：全局 .pi/skills-webos/ 下的 skill（design/xhs-content 等）可一键
+//    安装到用户工作区 skills/<id>/（用户级副本，AI 可用 manage_skill 自定义演进）。
+//    超大 skill（>2MB，如 design 33MB 素材库）标记 installable=false 不提供安装——
+//    全局只读已对所有人可用，复制进每个用户工作区浪费配额。
+// ② 用户发布（2026-08-18）：用户把自己工作区 skills/<id>/ 的 skill 发布到市场
+//    供他人安装（对齐 App 商店发布/下架/我的 链路）；发布时归档到独立
+//    store-skill-assets/<id>/，与发布者工作区解耦。
 // ============================================================================
 
 /** 解析 skill SKILL.md frontmatter（name/description） */
@@ -7377,10 +7654,167 @@ function copyDirRecursive(src: string, dest: string): void {
 /** 技能可安装大小上限：超过视为系统内置（全局只读已可用，不复制进用户工作区） */
 const SKILL_INSTALL_MAX_BYTES = 2 * 1024 * 1024
 
-/** 列出市场技能：来自全局 .pi/skills-webos/（系统级只读 skill） */
+/** 技能发布大小上限（与安装上限一致：市场所有可安装技能 ≤2MB，超大仅系统全局可用） */
+const SKILL_PUBLISH_MAX_BYTES = 2 * 1024 * 1024
+
+/** my 隐私记忆目录名：用户级私人记忆，禁止发布到市场 */
+const SKILL_PRIVATE_DIRS = new Set(['myself'])
+
+/** 市场技能条目 -> 公开结构 */
+function storeSkillRowToPublic(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: String(row.id),
+    skillId: String(row.skill_id),
+    name: String(row.name ?? '未命名'),
+    description: String(row.description ?? ''),
+    ownerName: String(row.owner_name ?? '匿名'),
+    sizeBytes: Number(row.size_bytes ?? 0),
+    createdAt: Number(row.created_at ?? 0),
+  }
+}
+
+/** 技能市场素材归档目录（用户发布条目的技能副本，与发布者工作区解耦） */
+function storeSkillAssetsDir(id: string): string {
+  return path.join(getSandboxRoot(), 'store-skill-assets', id)
+}
+
+/** 发布时归档：把发布者工作区 skills/<skillId>/ 复制到 store-skill-assets/<id>/（重复发布先清空） */
+function archiveStoreSkillAssets(principal: Principal, skillId: string, entryId: string): void {
+  try {
+    const srcRoot = path.join(getUserSkillsDir(principal.key), skillId)
+    const dstRoot = storeSkillAssetsDir(entryId)
+    if (fs.existsSync(dstRoot)) fs.rmSync(dstRoot, { recursive: true, force: true })
+    if (!fs.existsSync(srcRoot)) return
+    fs.mkdirSync(dstRoot, { recursive: true })
+    copyDirRecursive(srcRoot, dstRoot)
+  } catch (error) {
+    console.warn('[webos] store skill archive failed:', error instanceof Error ? error.message : String(error))
+  }
+}
+
+/** 列出用户工作区 skills/ 下的 skill（发布选择用；排除 myself 等隐私目录） */
+function listUserSkills(principal: Principal): Array<{ id: string; name: string; description: string; sizeBytes: number }> {
+  const root = getUserSkillsDir(principal.key)
+  const items: Array<{ id: string; name: string; description: string; sizeBytes: number }> = []
+  if (!fs.existsSync(root)) return items
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const id = entry.name
+    if (!SKILL_NAME_PATTERN.test(id)) continue
+    if (SKILL_PRIVATE_DIRS.has(id)) continue
+    const skillFile = path.join(root, id, 'SKILL.md')
+    if (!fs.existsSync(skillFile)) continue
+    const meta = parseSkillFrontmatter(skillFile)
+    if (!meta.name || meta.name !== id) continue // frontmatter name 与目录名不一致/缺失，视为无效
+    items.push({ id, name: meta.name || id, description: meta.description || '（无描述）', sizeBytes: dirTotalBytes(path.join(root, id)) })
+  }
+  return items
+}
+
+/** 发布技能到市场（把自己的工作区 skills/<id>/ 发布；重复发布 = 更新快照，条目 id 不变） */
+webosRouter.post('/store/skills', async (req, res, next) => {
+  try {
+    const principal = requirePrincipal(req)
+    const body = (req.body ?? {}) as { skillId?: unknown; description?: unknown }
+    const skillId = typeof body.skillId === 'string' ? body.skillId.trim().slice(0, 32) : ''
+    const description = typeof body.description === 'string' ? body.description.trim().slice(0, 200) : ''
+    if (!skillId) { next(createError(400, 'INVALID_SKILL_ID', '缺少 skillId')); return }
+    if (!SKILL_NAME_PATTERN.test(skillId)) { next(createError(400, 'INVALID_SKILL_ID', '技能 ID 非法')); return }
+    if (SKILL_PRIVATE_DIRS.has(skillId)) { next(createError(403, 'SKILL_NOT_PUBLISHABLE', '该技能属于私人记忆，不能发布')); return }
+    const skillDir = path.join(getUserSkillsDir(principal.key), skillId)
+    const skillFile = path.join(skillDir, 'SKILL.md')
+    if (!fs.existsSync(skillFile)) { next(createError(404, 'SKILL_NOT_FOUND', '你的工作区没有该技能')); return }
+    const sizeBytes = dirTotalBytes(skillDir)
+    if (sizeBytes > SKILL_PUBLISH_MAX_BYTES) {
+      next(createError(400, 'SKILL_TOO_LARGE', `技能超过发布上限（2MB），请精简后再发布`)); return
+    }
+    const meta = parseSkillFrontmatter(skillFile)
+    if (!meta.name || meta.name !== skillId) {
+      next(createError(400, 'SKILL_INVALID_META', '技能元数据无效（SKILL.md 的 name 需与目录名一致）')); return
+    }
+    const pool = getPool()
+    const now = Date.now()
+    // 同一用户对同一技能重复发布：复用已有条目（id 不变，快照更新）
+    const existing = await pool.query('SELECT id FROM webos_store_skills WHERE owner_key = $1 AND skill_id = $2', [principal.key, skillId])
+    let rowId = String(existing.rows[0]?.id ?? '')
+    archiveStoreSkillAssets(principal, skillId, rowId || `sk-${randomUUID().slice(0, 8)}${now.toString(36).slice(-6)}`)
+    if (rowId) {
+      await pool.query(
+        `UPDATE webos_store_skills SET name = $1, description = $2, size_bytes = $3, updated_at = $4, status = 'published' WHERE id = $5`,
+        [meta.name, description, sizeBytes, now, rowId],
+      )
+    } else {
+      rowId = `sk-${randomUUID().slice(0, 8)}${now.toString(36).slice(-6)}`
+      await pool.query(
+        `INSERT INTO webos_store_skills (id, skill_id, owner_key, name, description, size_bytes, created_at, updated_at, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'published')`,
+        [rowId, skillId, principal.key, meta.name, description, sizeBytes, now, now],
+      )
+    }
+    res.json({ ok: true, shareId: rowId, message: `已发布技能「${meta.name}」到市场` })
+  } catch (error) {
+    next(error)
+  }
+})
+
+/** 我的可用技能（工作区 skills/ 下的，发布选择用；标注是否已发布） */
+webosRouter.get('/store/skills/mine', async (req, res, next) => {
+  try {
+    const principal = requirePrincipal(req)
+    const pool = getPool()
+    const publishedRows = (await pool.query('SELECT skill_id FROM webos_store_skills WHERE owner_key = $1 AND status = $2', [principal.key, 'published'])).rows
+    const published = new Set(publishedRows.map((row) => String(row.skill_id)))
+    const items = listUserSkills(principal).map((skill) => ({ ...skill, published: published.has(skill.id) }))
+    res.json({ items })
+  } catch (error) {
+    next(error)
+  }
+})
+
+/** 我的已发布技能（发布者视角管理/下架） */
+webosRouter.get('/store/skills/my', async (req, res, next) => {
+  try {
+    const principal = requirePrincipal(req)
+    const pool = getPool()
+    const result = await pool.query(
+      `SELECT s.*,
+        COALESCE(u.display_name, u.username, '匿名') AS owner_name
+       FROM webos_store_skills s
+       LEFT JOIN users u ON u.id = REPLACE(s.owner_key, 'user:', '')
+       WHERE s.owner_key = $1 AND s.status = 'published'
+       ORDER BY s.created_at DESC`,
+      [principal.key],
+    )
+    res.json({ items: result.rows.map((row) => storeSkillRowToPublic(row)) })
+  } catch (error) {
+    next(error)
+  }
+})
+
+/** 下架已发布技能（仅发布者本人） */
+webosRouter.delete('/store/skills/:id', async (req, res, next) => {
+  try {
+    const principal = requirePrincipal(req)
+    const id = String(req.params.id ?? '').replace(/[^a-zA-Z0-9-]/g, '').slice(0, 64)
+    if (!id) { next(createError(400, 'INVALID_SKILL_ID', '无效的技能条目 ID')); return }
+    const pool = getPool()
+    const result = await pool.query('SELECT owner_key FROM webos_store_skills WHERE id = $1', [id])
+    if (!result.rows[0]) { next(createError(404, 'STORE_SKILL_NOT_FOUND', '该技能条目不存在')); return }
+    if (String(result.rows[0].owner_key) !== principal.key) {
+      next(createError(403, 'STORE_NOT_OWNER', '只有发布者可以下架')); return
+    }
+    await pool.query(`UPDATE webos_store_skills SET status = 'unpublished' WHERE id = $1`, [id])
+    res.json({ ok: true, message: '已下架' })
+  } catch (error) {
+    next(error)
+  }
+})
+
+/** 列出市场技能：系统级（全局 .pi/skills-webos/）+ 用户发布（webos_store_skills 表） */
 webosRouter.get('/store/skills', async (req, res, next) => {
   try {
     const principal = requirePrincipal(req)
+    const pool = getPool()
     const globalDir = SKILLS_WEBOS_DIR
     const userSkills = getUserSkillsDir(principal.key)
     const items: Array<Record<string, unknown>> = []
@@ -7402,8 +7836,35 @@ webosRouter.get('/store/skills', async (req, res, next) => {
           sizeBytes,
           installable: sizeBytes <= SKILL_INSTALL_MAX_BYTES,
           installed,
+          system: true,
         })
       }
+    }
+    // 2026-08-18 用户发布条目（可安装到任意用户工作区；安装时传条目 id=sk-xxx 或 skill_id）
+    const publishedRows = (await pool.query(
+      `SELECT s.*,
+        COALESCE(u.display_name, u.username, '匿名') AS owner_name
+       FROM webos_store_skills s
+       LEFT JOIN users u ON u.id = REPLACE(s.owner_key, 'user:', '')
+       WHERE s.status = 'published'
+       ORDER BY s.created_at DESC
+       LIMIT 100`,
+    )).rows
+    for (const row of publishedRows) {
+      const sid = String(row.skill_id)
+      if (!SKILL_NAME_PATTERN.test(sid)) continue
+      const sizeBytes = Number(row.size_bytes ?? 0)
+      items.push({
+        id: String(row.id),
+        skillId: sid,
+        name: String(row.name ?? sid),
+        description: String(row.description ?? '（无描述）'),
+        sizeBytes,
+        installable: sizeBytes <= SKILL_INSTALL_MAX_BYTES,
+        installed: fs.existsSync(path.join(userSkills, sid, 'SKILL.md')),
+        ownerName: String(row.owner_name ?? '匿名'),
+        system: false,
+      })
     }
     res.json({ items })
   } catch (error) {
@@ -7411,15 +7872,48 @@ webosRouter.get('/store/skills', async (req, res, next) => {
   }
 })
 
-/** 安装技能到用户工作区 skills/<id>/（用户级副本，AI 可用 manage_skill 自定义演进） */
+/** 安装技能到用户工作区 skills/<id>/（用户级副本，AI 可用 manage_skill 自定义演进）
+ * 2026-08-18 支持来源二选一：① 用户发布条目（传条目 id=sk-xxx 或 skill_id，从归档复制）；
+ * ② 系统级全局 skill（design/xhs-content 等，skillRef 为全局目录名）。 */
 webosRouter.post('/store/skills/:skillId/install', async (req, res, next) => {
   try {
     const principal = requirePrincipal(req)
-    const skillId = String(req.params.skillId ?? '').replace(/[^a-z0-9-]/g, '').slice(0, 32)
-    if (!SKILL_NAME_PATTERN.test(skillId)) {
+    const skillRef = String(req.params.skillId ?? '').replace(/[^a-z0-9-]/g, '').slice(0, 64)
+    if (!SKILL_NAME_PATTERN.test(skillRef)) {
       next(createError(400, 'INVALID_SKILL_ID', '技能 ID 非法')); return
     }
-    const src = path.join(SKILLS_WEBOS_DIR, skillId)
+    const pool = getPool()
+    // 用户发布条目优先（id=sk-xxx 或 skill_id 都匹配，同名取最新一条）
+    const publishedRow = (await pool.query(
+      `SELECT * FROM webos_store_skills WHERE status = 'published' AND (id = $1 OR skill_id = $1) ORDER BY created_at DESC LIMIT 1`,
+      [skillRef],
+    )).rows[0]
+    if (publishedRow) {
+      const entryId = String(publishedRow.id)
+      const skillId = String(publishedRow.skill_id)
+      if (!SKILL_NAME_PATTERN.test(skillId)) {
+        next(createError(400, 'INVALID_SKILL_ID', '技能 ID 非法')); return
+      }
+      // 优先读独立归档（发布者删技能后仍可安装），否则回退发布者工作区（旧数据兼容）
+      let src = storeSkillAssetsDir(entryId)
+      if (!fs.existsSync(path.join(src, 'SKILL.md'))) {
+        src = path.join(getUserSkillsDir(String(publishedRow.owner_key)), skillId)
+      }
+      if (!fs.existsSync(path.join(src, 'SKILL.md'))) {
+        next(createError(404, 'SKILL_NOT_FOUND', '该技能的内容不存在')); return
+      }
+      const sizeBytes = dirTotalBytes(src)
+      if (sizeBytes > SKILL_INSTALL_MAX_BYTES) {
+        next(createError(400, 'SKILL_TOO_LARGE', '该技能太大，无法安装')); return
+      }
+      const dest = path.join(getUserSkillsDir(principal.key), skillId)
+      copyDirRecursive(src, dest)
+      console.log(`[store] skill installed (user): ${skillId} (${entryId}) → ${principal.key.slice(0, 12)} (${sizeBytes} B)`)
+      res.json({ ok: true, skillId, message: `已安装技能「${skillId}」，AI 立即可用（可在对话中让它自定义演进）` })
+      return
+    }
+    // 系统级全局 skill
+    const src = path.join(SKILLS_WEBOS_DIR, skillRef)
     const skillFile = path.join(src, 'SKILL.md')
     if (!fs.existsSync(skillFile)) {
       next(createError(404, 'SKILL_NOT_FOUND', '技能不存在')); return
@@ -7430,13 +7924,13 @@ webosRouter.post('/store/skills/:skillId/install', async (req, res, next) => {
     }
     // 校验 frontmatter name 与目录名一致（防目录名伪造）
     const meta = parseSkillFrontmatter(skillFile)
-    if (!meta.name || meta.name !== skillId) {
+    if (!meta.name || meta.name !== skillRef) {
       next(createError(400, 'SKILL_INVALID_META', '技能元数据无效')); return
     }
-    const dest = path.join(getUserSkillsDir(principal.key), skillId)
+    const dest = path.join(getUserSkillsDir(principal.key), skillRef)
     copyDirRecursive(src, dest)
-    console.log(`[store] skill installed: ${skillId} → ${principal.key.slice(0, 12)} (${sizeBytes} B)`)
-    res.json({ ok: true, skillId, message: `已安装技能「${skillId}」，AI 立即可用（可在对话中让它自定义演进）` })
+    console.log(`[store] skill installed: ${skillRef} → ${principal.key.slice(0, 12)} (${sizeBytes} B)`)
+    res.json({ ok: true, skillId: skillRef, message: `已安装技能「${skillRef}」，AI 立即可用（可在对话中让它自定义演进）` })
   } catch (error) {
     next(error)
   }
@@ -7505,7 +7999,9 @@ webosRouter.post('/apps', async (req, res, next) => {
   try {
     const principal = requirePrincipal(req)
     const body = req.body as { name?: unknown; html?: unknown; source?: unknown }
-    const html = validateAppHtml(body.html)
+    // 2026-08-20 「粘贴 HTML 创建 App」放开外部资源：仅 local_import（用户显式粘贴，地位等同
+    // 手工维护自己的静态 App）；AI 生成（source=ai_generated）仍保持严格，防止幻觉 URL/供应链依赖。
+    const html = validateAppHtml(body.html, { allowExternalResources: body.source === 'local_import' })
     const state = await loadState(principal)
     assertAppHtmlRoom(principal, null, html, state)
     const source = body.source === 'local_import' ? 'local_import' : 'ai_generated'
@@ -7879,14 +8375,15 @@ webosRouter.post('/apps/:appId/versions', async (req, res, next) => {
     const state = await loadState(principal)
     const app = findApp(state, req.params.appId)
     const body = req.body as { html?: unknown; capabilities?: unknown }
-    const html = validateAppHtml(body.html)
+    // 2026-08-20 与创建入口对齐：仅「用户粘贴导入的 App」后续编辑放开外部资源；AI 生成保持严格
+    const html = validateAppHtml(body.html, { allowExternalResources: app.source === 'local_import' })
     assertAppHtmlRoom(principal, req.params.appId, html, state)
     const version: StoredVersion = {
       id: `version-${randomUUID()}`,
       appId: app.id,
       version: nextVersion(app),
       status: 'ready',
-      source: 'ai_generated',
+      source: app.source === 'local_import' ? 'local_import' : 'ai_generated',
       capabilities: allowedCapabilities(body.capabilities),
       html,
       createdAt: Date.now(),
