@@ -9,6 +9,9 @@ import { getServerStats, serverHealthAlerts, getOnlineUserCount } from '../utils
 import { listAfdianOrders, handleAfdianOrder, importRedeemCodes, listRedeemCodes, findRedeemCode } from '../payment/afdian.js'
 // 生图定价（与 imagegen 模块共享，避免硬编码漂移；2026-08-13 改为引用）
 import { IMAGE_PRICING } from '../imagegen/chatstImage.js'
+// 2026-08-21 视觉双 provider：配置状态 + 活跃模型名（展示用，不引定价常量避免漂移）
+import { visionConfigured as visionAnyConfigured, visionModelName as activeVisionModel, VISION_PRICING as MINIMAX_PRICING } from '../vision/m3Vision.js'
+import { dsVisionConfigured, dsVisionPricing, DS_VISION_MODEL_NAME } from '../vision/deepseekVision.js'
 
 /**
  * webOS 管理 API（2026-08-02，管理后台 admin.shadowshub.xyz 的后端）。
@@ -1045,9 +1048,10 @@ adminWebosRouter.post('/redeem-codes/revoke', async (req, res, next) => {
 })
 
 // ============================================================================
-// GET /api/admin/webos/vision/stats?days=7 — MiniMax-M3 视觉桥接用量汇总
-// 2026-08-14：AI 的眼睛（DeepSeek 非视觉 → M3 描述图片/视频）。统计平台
-// 在 M3 上的实时消耗（金额 + token），按天/按用户/按触发方式分布。
+// GET /api/admin/webos/vision/stats?days=7 — 视觉桥接用量汇总（双 provider）
+// 2026-08-14 起：AI 的眼睛（DeepSeek 非视觉 → 视觉模型描述图片/视频）。
+// 2026-08-21 双 provider：图片优先 DeepSeek deepseek-v4-flash-vision-exp，
+// 视频/兜底 MiniMax-M3；byModel 按实际执行模型拆分金额/token，pricing 返回两家配置状态。
 // ============================================================================
 
 adminWebosRouter.get('/vision/stats', async (req, res, next) => {
@@ -1057,7 +1061,7 @@ adminWebosRouter.get('/vision/stats', async (req, res, next) => {
     const since = Date.now() - days * 24 * 60 * 60 * 1000
 
     const rows = await pool.query(
-      `SELECT user_key, user_email, trigger, kind, status, media_count,
+      `SELECT user_key, user_email, trigger, kind, model, status, media_count,
               input_tokens, output_tokens, cached_tokens, total_tokens, cost_minor, created_at
        FROM webos_vision_usage WHERE created_at >= $1`,
       [since],
@@ -1069,6 +1073,8 @@ adminWebosRouter.get('/vision/stats', async (req, res, next) => {
     const byTrigger: Record<string, { calls: number; tokens: number; costMinor: number }> = {}
     const byKind: Record<string, number> = {}
     const byStatus: Record<string, number> = {}
+    // 2026-08-21 双 provider：按实际执行模型拆分
+    const byModel: Record<string, { calls: number; ok: number; failed: number; tokens: number; costMinor: number }> = {}
 
     for (const row of rows.rows) {
       const status = String(row.status ?? 'ok')
@@ -1107,8 +1113,21 @@ adminWebosRouter.get('/vision/stats', async (req, res, next) => {
 
       byKind[String(row.kind ?? 'image')] = (byKind[String(row.kind ?? 'image')] ?? 0) + 1
       byStatus[status] = (byStatus[status] ?? 0) + 1
+
+      const model = String(row.model ?? 'unknown')
+      byModel[model] ??= { calls: 0, ok: 0, failed: 0, tokens: 0, costMinor: 0 }
+      byModel[model].calls += 1
+      if (status === 'ok') byModel[model].ok += 1
+      else byModel[model].failed += 1
+      byModel[model].tokens += tokens
+      byModel[model].costMinor += costMinor
     }
 
+    // 双 provider 配置状态与定价（DRY：从 vision 模块取，避免硬编码漂移）
+    const dsPrice = dsVisionPricing()
+    const dsConfigured = dsVisionConfigured()
+    const m3Configured = visionAnyConfigured() && !dsConfigured ? true : Boolean(process.env.MINIMAX_API_KEY?.trim())
+    const activeModel = activeVisionModel()
     res.json({
       days,
       since,
@@ -1118,7 +1137,36 @@ adminWebosRouter.get('/vision/stats', async (req, res, next) => {
       byTrigger,
       byKind,
       byStatus,
-      pricing: { model: 'MiniMax-M3', inputPerMillion: 2.1, outputPerMillion: 8.4, cacheReadPerMillion: 0.42, note: '官方永久五折价（2026-08-12）' },
+      byModel,
+      // 兼容旧字段（active provider）；新字段 providers 给 UI 展示双 provider
+      pricing: {
+        model: activeModel,
+        inputPerMillion: dsConfigured ? dsPrice.inputPerMillion : MINIMAX_PRICING.inputPerMillion,
+        outputPerMillion: dsConfigured ? dsPrice.outputPerMillion : MINIMAX_PRICING.outputPerMillion,
+        cacheReadPerMillion: dsConfigured ? dsPrice.cacheReadPerMillion : MINIMAX_PRICING.cacheReadPerMillion,
+        note: dsConfigured
+          ? 'DeepSeek 官方价（图片优先；高峰 ×2，图片 ≤384 token/张）＋ MiniMax-M3 兜底'
+          : 'MiniMax-M3 官方五折价（DeepSeek 视觉未配置）',
+        provider: 'deepseek_minimax_double',
+        providers: [
+          {
+            model: DS_VISION_MODEL_NAME,
+            active: dsConfigured,
+            inputPerMillion: dsPrice.inputPerMillion,
+            outputPerMillion: dsPrice.outputPerMillion,
+            cacheReadPerMillion: dsPrice.cacheReadPerMillion,
+            note: 'DeepSeek 官方（图片优先；高峰 ×2）',
+          },
+          {
+            model: 'MiniMax-M3',
+            active: m3Configured,
+            inputPerMillion: MINIMAX_PRICING.inputPerMillion,
+            outputPerMillion: MINIMAX_PRICING.outputPerMillion,
+            cacheReadPerMillion: MINIMAX_PRICING.cacheReadPerMillion,
+            note: '官方永久五折价（视频 / 兜底）',
+          },
+        ],
+      },
     })
   } catch (error) {
     next(error)
@@ -1147,7 +1195,7 @@ adminWebosRouter.get('/vision/usage', async (req, res, next) => {
     }
     params.push(limit, (page - 1) * limit)
     const result = await pool.query(
-      `SELECT id, user_key, user_email, request_id, conversation_id, trigger, kind, media_count,
+      `SELECT id, user_key, user_email, request_id, conversation_id, trigger, kind, model, media_count,
               prompt, description, input_tokens, output_tokens, cached_tokens, total_tokens,
               cost_minor, status, error_code, error_message, duration_ms, ip, created_at
        FROM webos_vision_usage WHERE ${where} ORDER BY created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
@@ -1375,14 +1423,13 @@ adminWebosRouter.get('/stats/activity', async (req, res, next) => {
 //
 // 数据源：api_usage_log（搜索工具每次调用写一条：时间/用户/引擎/query/成败/耗时/来源）。
 // 返回：整体统计 + 按引擎 + 按来源工具 + 按天趋势 + 按用户 TOP + 失败样例。
-// 引擎 provider：metaso（秘塔搜索 web_search/read_webpage）、arxiv（academic_search）、
-// github（github_search）；github_proxy 为 GitHub 下载代理（不属搜索工具，谨慎区分）。
+// 引擎 provider：exa（Exa 搜索 web_search/read_webpage/exa_find_similar）、arxiv（academic_search）；
+// github_proxy 为 GitHub 下载代理（已无搜索工具，仅保留历史统计兼容）。
 // ============================================================================
 
 const SEARCH_ENGINE_LABEL: Record<string, string> = {
-  metaso: '秘塔搜索',
+  exa: 'Exa 搜索',
   arxiv: '学术搜索(ArXiv)',
-  github: 'GitHub搜索',
   github_proxy: 'GitHub代理下载',
   local: '本地搜索',
 }

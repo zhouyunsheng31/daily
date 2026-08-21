@@ -442,9 +442,10 @@ CREATE INDEX IF NOT EXISTS idx_webos_chat_sessions_user ON webos_chat_sessions(u
 CREATE INDEX IF NOT EXISTS idx_webos_chat_sessions_conv ON webos_chat_sessions(user_key, conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_webos_chat_sessions_created ON webos_chat_sessions(created_at);
 
--- 2026-08-14 MiniMax-M3 视觉桥接用量明细（AI 的眼睛：图片/视频 → 文字描述）
--- 主模型（DeepSeek）非视觉，每次 M3 调用一行；成本按官方「永久五折」价
--- （输入 ¥2.10 / 输出 ¥8.40 / 缓存 ¥0.42 每百万 token）折算，管理后台实时查看
+-- 2026-08-14 视觉桥接用量明细（AI 的眼睛：图片/视频 → 文字描述）
+-- 主模型（DeepSeek）非视觉，每次视觉模型调用一行；2026-08-21 双 provider：
+--   图片优先 deepseek-v4-flash-vision-exp（官方价，高峰×2）/ 兜底与视频走 MiniMax-M3（官方五折价），
+--   model 列区分实际执行模型，成本按各自价格折算，管理后台实时查看
 CREATE TABLE IF NOT EXISTS webos_vision_usage (
   id TEXT PRIMARY KEY,             -- vision-<uuid>
   user_key TEXT NOT NULL,          -- guest:<deviceId> / user:<userId>
@@ -453,9 +454,10 @@ CREATE TABLE IF NOT EXISTS webos_vision_usage (
   conversation_id TEXT,
   trigger TEXT NOT NULL DEFAULT 'chat_bridge', -- chat_bridge / read_tool / describe_media
   kind TEXT NOT NULL DEFAULT 'image',          -- image / video / mixed / unsupported
+  model TEXT,                                  -- 2026-08-21 实际执行模型：deepseek-v4-flash-vision-exp / MiniMax-M3
   media_count INTEGER NOT NULL DEFAULT 0,
   prompt TEXT,                     -- 附带指令摘要（≤300 字符）
-  description TEXT,                -- M3 返回的描述（≤500 字符，审计用）
+  description TEXT,                -- 视觉模型返回的描述（≤500 字符，审计用）
   input_tokens INTEGER NOT NULL DEFAULT 0,
   output_tokens INTEGER NOT NULL DEFAULT 0,
   cached_tokens INTEGER NOT NULL DEFAULT 0,
@@ -512,6 +514,21 @@ CREATE TABLE IF NOT EXISTS webos_store_installs (
   created_at INTEGER NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_store_installs_unique ON webos_store_installs(share_id, installer_key);
+
+-- 2026-08-18 技能市场发布：用户把自己工作区 skills/<skill_id>/ 发布到市场（他人可安装）
+CREATE TABLE IF NOT EXISTS webos_store_skills (
+  id TEXT PRIMARY KEY,             -- 条目 id（sk- 前缀，市场列表/安装/下架用）
+  skill_id TEXT NOT NULL,          -- 发布时的技能目录名（安装到用户工作区 skills/<skill_id>/）
+  owner_key TEXT NOT NULL,         -- 发布者（guest:<deviceId> / user:<userId>）
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'published'
+);
+CREATE INDEX IF NOT EXISTS idx_store_skills_owner ON webos_store_skills(owner_key, status);
+CREATE INDEX IF NOT EXISTS idx_store_skills_status ON webos_store_skills(status, created_at);
 
 -- 2026-08-06 服务器负载历史（每分钟一条，保留 30 天；管理后台趋势图 + AI 追溯查询）
 CREATE TABLE IF NOT EXISTS webos_server_metrics (
@@ -794,15 +811,14 @@ function cleanupOldSearchKeys(db: SqliteDatabase): void {
 }
 
 // ---------------------------------------------------------------------------
-// 种子数据：4 个默认搜索引擎（spec §10.3，幂等）
+// 种子数据：3 个默认搜索引擎（spec §10.3，幂等；2026-08-17：移除秘塔/GitHub，web 改用 Exa）
 // ---------------------------------------------------------------------------
 
 function seedSearchEngines(db: SqliteDatabase): void {
   const engines = [
     { name: 'local', display_name: '本地搜索', enabled: 1, config: '{}' },
-    { name: 'metaso', display_name: '秘塔搜索', enabled: 1, config: '{}' },
+    { name: 'exa', display_name: 'Exa 搜索', enabled: 1, config: '{}' },
     { name: 'arxiv', display_name: '学术搜索(ArXiv)', enabled: 1, config: '{}' },
-    { name: 'github', display_name: 'GitHub搜索', enabled: 1, config: '{}' },
   ]
   const now = Date.now()
   for (const e of engines) {
@@ -847,6 +863,12 @@ export async function initializeSchema(): Promise<void> {
 
   // api_usage_log 新增 credits_consumed 列（spec 2.7.5 节）
   addColumnIfNotExists(db, 'api_usage_log', 'credits_consumed', 'INTEGER')
+
+  // api_usage_log 新增 user_key/query/tool 列（2026-08-17 搜索 API 状态可视化）
+  addColumnIfNotExists(db, 'api_usage_log', 'user_key', 'TEXT')
+  addColumnIfNotExists(db, 'api_usage_log', 'query', 'TEXT')
+  addColumnIfNotExists(db, 'api_usage_log', 'tool', 'TEXT')
+  createIndexIfNotExists(db, 'idx_api_usage_log_tool_time', 'api_usage_log(tool, created_at)')
 
   // entity_conflict_logs 补加 panel_id 列（已部署 DB 兼容）
   addColumnIfNotExists(db, 'entity_conflict_logs', 'panel_id', 'TEXT')

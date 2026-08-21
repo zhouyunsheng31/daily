@@ -45,6 +45,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      TZ: Asia/Shanghai
       NODE_ENV: production
       PORT: 3456
       DATABASE_URL: postgresql://${POSTGRES_USER:-daily}:${POSTGRES_PASSWORD:-daily}@postgres:5432/${POSTGRES_DB:-daily}

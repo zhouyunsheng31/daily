@@ -22,11 +22,11 @@ import { sanitizeApiKey } from '../utils/sanitize.js'
 
 export const searchKeysRouter = Router()
 
-const VALID_PROVIDERS: SearchProvider[] = ['metaso', 'github']
+const VALID_PROVIDERS: SearchProvider[] = ['exa', 'github']
 const PROVIDER_SET = new Set<string>(VALID_PROVIDERS)
 
 const PROVIDER_DISPLAY_NAMES: Record<SearchProvider, string> = {
-  metaso: '秘塔搜索',
+  exa: 'Exa 搜索',
   github: 'GitHub',
 }
 
@@ -171,36 +171,39 @@ interface TestResult {
 
 function getTestEndpoint(provider: SearchProvider): string {
   switch (provider) {
-    case 'metaso': return 'web-search'
+    case 'exa': return 'search'
     case 'github': return 'rate-limit'
   }
 }
 
 async function testSearchKey(provider: SearchProvider, key: string): Promise<TestResult> {
   switch (provider) {
-    case 'metaso': return testMetasoKey(key)
+    case 'exa': return testExaKey(key)
     case 'github': return testGitHubKey(key)
   }
 }
 
-/** 秘塔搜索：POST /api/v1/search，成功条件 HTTP 200 */
-async function testMetasoKey(key: string): Promise<TestResult> {
+/** Exa 搜索：POST /search，成功条件 HTTP 200 且有 results */
+async function testExaKey(key: string): Promise<TestResult> {
   const start = Date.now()
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 10_000)
   try {
-    const response = await fetch('https://metaso.cn/api/v1/search', {
+    const response = await fetch('https://api.exa.ai/search', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${key}`,
-        'Accept': 'application/json',
+        'x-api-key': key,
       },
-      body: JSON.stringify({ q: 'test', scope: 'webpage', size: '1', includeSummary: false, includeRawContent: false, conciseSnippet: false }),
+      body: JSON.stringify({ query: 'test', numResults: 1 }),
       signal: controller.signal,
     })
     const latencyMs = Date.now() - start
     if (response.status === 200) {
+      const data = await response.json() as { results?: unknown }
+      if (!Array.isArray(data?.results)) {
+        return { ok: false, latencyMs, error: 'Exa 响应缺少 results 字段' }
+      }
       return { ok: true, latencyMs }
     }
     const text = await response.text().catch(() => '')

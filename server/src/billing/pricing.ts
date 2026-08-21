@@ -17,7 +17,7 @@
 // ============================================================================
 
 /** 统一计费项（新增能力在此注册，管理后台/前端自动展示） */
-export type BillingKind = 'chat' | 'image' | 'search' | 'video' | 'tts'
+export type BillingKind = 'chat' | 'image' | 'search' | 'video' | 'tts' | 'api'
 
 export interface BillingItem {
   kind: BillingKind
@@ -46,7 +46,7 @@ export const BILLING_TABLE: BillingItem[] = [
   {
     kind: 'chat',
     label: 'AI 对话',
-    model: 'deepseek-v4-flash',
+    model: 'deepseek-v4-flash-0731',
     unitLabel: '元 / 百万 token',
     // 官方成本：输入(缓存未命中)¥1、输出¥2、缓存命中 ¥0.02（2026-08-02 查证）
     inputPerMillion: 1,
@@ -75,9 +75,9 @@ export const BILLING_TABLE: BillingItem[] = [
     inputPerMillion: 0,
     outputPerMillion: 0,
     cacheHitPerMillion: 0,
-    // 2026-08-05 修正为 0.03（秘塔每次搜索/读网页/问答实际消耗 3 credits ≈ ¥0.03）
-    // 2026-08-13 调价：售价 0.05/次（毛利 40%）
-    fixedPrice: 0.05,
+    // 2026-08-17 供应商替换：Exa（$7/1k 搜索 ≈ ¥0.05/次；含 summary/contents 成本更高，估值 ¥0.07）
+    // 2026-08-13 调价：售价 0.08/次（覆盖 Exa 成本，毛利约 30-60%）
+    fixedPrice: 0.08,
     peakMultiplier: 1,
     costBased: false,
   },
@@ -103,6 +103,19 @@ export const BILLING_TABLE: BillingItem[] = [
     outputPerMillion: 0,
     cacheHitPerMillion: 0,
     fixedPrice: 0.5,
+    peakMultiplier: 1,
+    costBased: false,
+  },
+  {
+    kind: 'api',
+    label: 'App API 调用',
+    model: 'appapi',
+    unitLabel: '元 / 次',
+    inputPerMillion: 0,
+    outputPerMillion: 0,
+    cacheHitPerMillion: 0,
+    // 2026-08-21（W2）固定微价/次：1 积分 = ¥0.01（覆盖服务端受限 vm 执行 + storage/审计成本）
+    fixedPrice: 0.01,
     peakMultiplier: 1,
     costBased: false,
   },

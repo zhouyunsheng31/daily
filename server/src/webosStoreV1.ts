@@ -185,6 +185,34 @@ export const WEBOS_STORE_V1_HTML = `<!doctype html>
     background: rgba(255,255,255,0.55); color: var(--muted); font-size: 10.5px; line-height: 1.65;
   }
   .skill-tip b { color: var(--ink-soft); }
+  /* ============ 统一包市场（2026-08-21，W3 R14：万物皆可包） ============ */
+  .mkt-row { display: none; align-items: center; gap: 8px; margin: 4px 18px 12px; }
+  .mkt-chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; flex: 1; }
+  .mkt-chips::-webkit-scrollbar { display: none; }
+  .mkt-chip { flex: 0 0 auto; border: 0; border-radius: 999px; padding: 7px 13px; font-size: 12px; font-weight: 600; background: rgba(255,255,255,.65); color: var(--muted); cursor: pointer; }
+  .mkt-chip.active { background: var(--blue); color: #fff; box-shadow: 0 4px 12px rgba(49,91,214,.24); }
+  .mkt-mine { flex: 0 0 auto; border: 0; border-radius: 999px; padding: 7px 12px; font-size: 11px; font-weight: 600; background: rgba(255,255,255,.8); color: var(--ink); box-shadow: var(--shadow-sm); cursor: pointer; }
+  .mkt-tag { display: inline-block; font-size: 9px; font-weight: 800; border-radius: 6px; padding: 1px 6px; margin-right: 5px; vertical-align: 1px; }
+  .mkt-tag-api { color: #3f5dd0; background: rgba(76,111,255,.14); }
+  .mkt-tag-skill { color: #0a7d3c; background: rgba(16,168,91,.14); }
+  .mkt-tag-theme { color: #a97f3f; background: rgba(212,156,19,.15); }
+  .mkt-tag-toolpkg { color: #6b5ba8; background: rgba(107,91,168,.14); }
+  .mkt-tag-app { color: #c2443f; background: rgba(194,68,63,.12); }
+  .mkt-tag-bundle, .mkt-tag-subagent, .mkt-tag-mcp { color: #3f6f6f; background: rgba(63,111,111,.13); }
+  /* ============ 发布弹层：应用/技能 切换（2026-08-18） ============ */
+  .publish-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .publish-tabs .pubtab {
+    flex: 1; border: 0; border-radius: 999px; padding: 9px 12px;
+    font-size: 12.5px; font-weight: 600; cursor: pointer;
+    background: rgba(255,255,255,0.6); color: var(--muted); transition: all 0.15s ease;
+  }
+  .publish-tabs .pubtab.active { background: var(--blue); color: #fff; box-shadow: 0 4px 12px rgba(49,91,214,.28); }
+  .publish-tabs .pubtab:active { transform: scale(0.96); }
+  .apppick .stat { margin-left: auto; }
+  .apppick .installed-tag {
+    flex: 0 0 auto; font-size: 12px; font-weight: 600;
+    background: var(--paper-muted); color: var(--muted); border-radius: 999px; padding: 4px 10px;
+  }
   /* ============ 加载/提示 ============ */
   .loading { text-align: center; color: var(--ink-soft); padding: 36px 0; font-size: 12px; }
   .toast {
@@ -224,6 +252,10 @@ export const WEBOS_STORE_V1_HTML = `<!doctype html>
   /* ============ 底部弹层（发布/我的发布） ============ */
   .overlay { position: fixed; inset: 0; background: rgba(50,44,34,0.45); z-index: 30; display: none; align-items: flex-end; justify-content: center; }
   .overlay.show { display: flex; }
+  /* 2026-08-16 发布页最高遮盖层：发布弹层独立 z-index:50（高于预览 preview-overlay z40 与
+     「我的」层 z30，低于 toast z60），避免从「我的」进入发布时被同级遮盖、保证发布是最高操作层。
+     id 选择器优先级高于 .overlay 类，只对发布弹层生效。 */
+  #publish-overlay { z-index: 50; }
   .sheet {
     width: 100%; max-width: 480px; background: var(--paper); border-radius: 20px 20px 0 0;
     padding: 16px 16px calc(20px + env(safe-area-inset-bottom)); max-height: 74vh; overflow-y: auto;
@@ -273,6 +305,19 @@ export const WEBOS_STORE_V1_HTML = `<!doctype html>
   <button class="tab active" data-sort="latest" id="tab-latest">最新</button>
   <button class="tab" data-sort="hot" id="tab-hot">最热</button>
   <button class="tab" data-sort="skills" id="tab-skills">技能</button>
+  <button class="tab" data-sort="market" id="tab-market">市场</button>
+</div>
+<!-- 2026-08-21（W3 统一包市场 R14）：type 维度（api/skill/theme/…）+ App 只读适配 -->
+<div class="mkt-row" id="mkt-row">
+  <div class="mkt-chips" id="mkt-chips">
+    <button class="mkt-chip active" data-type="">全部</button>
+    <button class="mkt-chip" data-type="api">API</button>
+    <button class="mkt-chip" data-type="skill">技能</button>
+    <button class="mkt-chip" data-type="theme">主题</button>
+    <button class="mkt-chip" data-type="toolpkg">工具包</button>
+    <button class="mkt-chip" data-type="app">App</button>
+  </div>
+  <button class="mkt-mine" id="mkt-mine">我的安装</button>
 </div>
 <!-- 2026-08-12 工作区空间提示：应用安装会占用工作区空间，空间不足无法安装 -->
 <div class="space-bar" id="space-bar"><span>工作区剩余</span><span id="space-free">…</span></div>
@@ -308,12 +353,29 @@ export const WEBOS_STORE_V1_HTML = `<!doctype html>
   <iframe class="preview-frame" id="preview-frame" sandbox="allow-scripts" title="应用预览"></iframe>
 </div>
 
-<!-- 发布弹层（从「我的」进入） -->
+<!-- 2026-08-21 包市场详情（统一包市场 R14） -->
+<div class="overlay" id="market-overlay">
+  <div class="sheet">
+    <h2 id="mkt-title">包详情</h2>
+    <div id="mkt-detail"></div>
+    <div class="row">
+      <button class="btn" id="mkt-close">关闭</button>
+      <button class="btn primary" id="mkt-install">安装</button>
+    </div>
+  </div>
+</div>
+
+<!-- 发布弹层（从「我的」进入；应用/技能 双 tab） -->
 <div class="overlay" id="publish-overlay">
   <div class="sheet">
     <h2>发布到市场</h2>
+    <div class="publish-tabs" id="publish-tabs">
+      <button class="pubtab active" id="pubtab-app">应用</button>
+      <button class="pubtab" id="pubtab-skill">技能</button>
+    </div>
     <div id="myapps"></div>
-    <textarea id="pub-desc" placeholder="介绍你的应用（可选，一句话说明它是做什么的）"></textarea>
+    <div id="myskills" style="display:none"></div>
+    <textarea id="pub-desc" placeholder="介绍它（可选，一句话说明它是做什么的）"></textarea>
     <div class="row">
       <button class="btn" id="pub-cancel">取消</button>
       <button class="btn primary" id="pub-confirm">发布</button>
@@ -325,10 +387,12 @@ export const WEBOS_STORE_V1_HTML = `<!doctype html>
   <div class="sheet">
     <h2>我的</h2>
     <div class="mine-stats" id="mine-stats"></div>
-    <div class="mine-section">我的发布</div>
+    <div class="mine-section">我的应用发布</div>
     <div id="my-list"></div>
+    <div class="mine-section">我的技能发布</div>
+    <div id="my-skill-list"></div>
     <div class="row">
-      <button class="btn primary" id="btn-publish">发布应用</button>
+      <button class="btn primary" id="btn-publish">发布到市场</button>
       <button class="btn" id="my-close" style="flex:1">关闭</button>
     </div>
   </div>
@@ -487,6 +551,160 @@ export const WEBOS_STORE_V1_HTML = `<!doctype html>
     })
   }
 
+  // ==========================================================================
+  // 2026-08-21 统一包市场（W3 R14）：Type 维度浏览 + 详情 + 安装 + 我的安装 + App 适配
+  // ==========================================================================
+  function renderMarket(entries) {
+    var listEl = $('list')
+    listEl.innerHTML = ''
+    $('empty').style.display = entries.length ? 'none' : 'block'
+    entries.forEach(function (e) {
+      var card = document.createElement('div')
+      card.className = 'card'
+      var tag = '<span class="mkt-tag mkt-tag-' + esc(e.type) + '">' + esc(e.type) + '</span>'
+      card.innerHTML =
+        '<div class="icon" style="background:#fff"><span class="ph" style="color:' + phColor(e.displayName || e.packageId) + ';font-size:20px;font-weight:800">' + esc((e.displayName || '?').slice(0, 1).toUpperCase()) + '</span></div>' +
+        '<div class="name">' + tag + esc(e.displayName || e.packageId) + '</div>' +
+        '<div class="meta">' + esc(e.owner || '系统') + ' · v' + esc(e.version || '0.0.0') + (e.endpoints ? ' · ' + e.endpoints + ' 端点' : '') + '</div>' +
+        '<div class="desc">' + esc(e.description || '安装后即可使用') + '</div>' +
+        '<div class="ops"><button class="install" data-act="mkt-detail" data-id="' + esc(e.packageId) + '">详情 / 安装</button></div>'
+      listEl.appendChild(card)
+    })
+  }
+  function renderMarketApps(apps) {
+    var listEl = $('list')
+    listEl.innerHTML = ''
+    $('empty').style.display = apps.length ? 'none' : 'block'
+    apps.forEach(function (a) {
+      var card = document.createElement('div')
+      card.className = 'card'
+      card.innerHTML =
+        '<div class="icon" style="background:#fff"><span class="ph" style="color:#c2443f;font-size:20px;font-weight:800">' + esc((a.name || '?').slice(0, 1).toUpperCase()) + '</span></div>' +
+        '<div class="name"><span class="mkt-tag mkt-tag-app">app</span>' + esc(a.name || a.id) + '</div>' +
+        '<div class="meta">' + (a.version ? 'v' + esc(a.version) : '') + (a.source ? ' · ' + esc(a.source) : '') + '</div>' +
+        '<div class="desc">App 在商店「最新 / 最热」列表安装</div>' +
+        '<div class="ops"><button class="install done" disabled>商店安装</button></div>'
+      listEl.appendChild(card)
+    })
+  }
+  function loadMarket(type) {
+    var listEl = $('list')
+    listEl.innerHTML = '<div class="loading" style="grid-column:1/-1">加载中…</div>'
+    if (type === 'app') {
+      call('market.apps', {}).then(function (res) { renderMarketApps((res && res.apps) || []) })
+        .catch(function (e) { listEl.innerHTML = '<div class="empty" style="grid-column:1/-1"><strong>加载失败</strong>' + esc(e.message || '') + '</div>' })
+      return
+    }
+    call('market.list', { type: type || undefined }).then(function (res) { renderMarket((res && res.entries) || []) })
+      .catch(function (e) { listEl.innerHTML = '<div class="empty" style="grid-column:1/-1"><strong>加载失败</strong>' + esc(e.message || '') + '</div>' })
+  }
+  var mktCurrent = null
+  var mktKind = 'pkg' // 'pkg' | 'app' | 'skill'（商店模板统一包市场：App/skill 也是包，走各自安装语义）
+  function openMarketDetail(id) {
+    mktCurrent = id
+    var box = $('mkt-detail')
+    box.innerHTML = '<div class="loading">加载中…</div>'
+    $('market-overlay').classList.add('show')
+    var btn0 = $('mkt-install')
+    btn0.disabled = false
+    btn0.style.display = ''
+    // App 包（store:xxx）→ 老商店详情/安装；skill 包（sys-skill: / sk-）→ 技能安装
+    if (id.indexOf('store:') === 0) {
+      mktKind = 'app'
+      var shareId = id.slice('store:'.length)
+      call('get', { shareId: shareId }).then(function (res) {
+        var it = (res && res.item) || {}
+        var html =
+          '<div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">' +
+          '<div class="skill-icon" style="width:44px;height:44px"><span class="ph" style="color:' + phColor(it.name || id) + ';font-size:18px;font-weight:800">' + esc((it.name || '?').slice(0, 1).toUpperCase()) + '</span></div>' +
+          '<div style="min-width:0"><div class="skill-name">' + esc(it.name || id) + '</div>' +
+          '<div class="skill-meta"><span class="mkt-tag mkt-tag-app">app</span>v' + esc(it.version || '1.0.0') + '</div></div></div>' +
+          '<div class="skill-desc">' + esc(it.description || '可安装到你的桌面（App 包）') + '</div>' +
+          '<div class="skill-meta" style="margin-top:8px">' + (it.installed ? '✅ 已安装' : '安装免费') + '</div>'
+        box.innerHTML = html
+        btn0.disabled = false
+        btn0.textContent = it.installed ? '重新安装' : '安装'
+      }).catch(function (e) { box.innerHTML = '<div class="skill-desc">' + esc(e.message || '加载失败') + '</div>' })
+      return
+    }
+    if (id.indexOf('sys-skill:') === 0 || id.indexOf('sk-') === 0) {
+      mktKind = 'skill'
+      var skillRef = id.indexOf('sys-skill:') === 0 ? id.slice('sys-skill:'.length) : id
+      box.innerHTML =
+        '<div class="skill-desc"><strong>' + esc(skillRef) + '</strong><br>这是一个技能包：安装后 Daily 的 AI 立即可用（复制到你的 skills/）</div>'
+      btn0.disabled = false
+      btn0.textContent = '安装技能'
+      return
+    }
+    mktKind = 'pkg'
+    call('market.detail', { packageId: id }).then(function (res) {
+      var en = (res && res.entry) || {}
+      var scope = en.dataScope || {}
+      var read = (scope.storage && scope.storage.read) || []
+      var write = (scope.storage && scope.storage.write) || []
+      var endpoints = (scope.endpoints || []).join('、')
+      var isInstalled = !!(res && res.isInstalled)
+      var html =
+        '<div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">' +
+        '<div class="skill-icon" style="width:44px;height:44px"><span class="ph" style="color:' + phColor(en.displayName || id) + ';font-size:18px;font-weight:800">' + esc((en.displayName || id).slice(0, 1).toUpperCase()) + '</span></div>' +
+        '<div style="min-width:0"><div class="skill-name">' + esc(en.displayName || id) + '</div>' +
+        '<div class="skill-meta"><span class="mkt-tag mkt-tag-' + esc(en.type || '') + '">' + esc(en.type || '-') + '</span>v' + esc(en.version || '0.0.0') + '</div></div></div>' +
+        '<div class="skill-desc">' + esc(en.description || '无简介') + '</div>'
+      if (en.apiNamespace) html += '<div class="skill-meta" style="margin-top:6px">namespace：' + esc(en.apiNamespace) + '</div>'
+      if (endpoints) html += '<div class="skill-meta">public 端点：' + esc(endpoints) + '</div>'
+      if (read.length || write.length) html += '<div class="skill-meta">数据范围 · 读：' + esc(read.join('、') || '—') + ' / 写：' + esc(write.join('、') || '—') + '</div>'
+      html += '<div class="skill-meta" style="margin-top:8px">' + (isInstalled ? '✅ 已安装' : '安装免费；api 端点按调用者计费（R15）') + '</div>'
+      box.innerHTML = html
+      btn0.disabled = false
+      btn0.textContent = isInstalled ? '重新安装' : '安装'
+    }).catch(function (e) { box.innerHTML = '<div class="skill-desc">' + esc(e.message || '加载失败') + '</div>' })
+  }
+  document.addEventListener('click', function (e) {
+    var t = e.target
+    var el = t && t.closest ? t.closest('[data-act="mkt-detail"]') : null
+    if (!el) return
+    openMarketDetail(el.getAttribute('data-id'))
+  })
+  $('mkt-close').addEventListener('click', function () { $('market-overlay').classList.remove('show') })
+  $('mkt-install').addEventListener('click', function () {
+    if (!mktCurrent) return
+    var btn = $('mkt-install')
+    btn.disabled = true
+    var op
+    if (mktKind === 'app') {
+      // App 包：安装到桌面（老商店语义）
+      op = call('install', { shareId: mktCurrent.slice('store:'.length) })
+    } else if (mktKind === 'skill') {
+      // 技能包：复制 SKILL.md 到用户 skills/
+      var skillRef = mktCurrent.indexOf('sys-skill:') === 0 ? mktCurrent.slice('sys-skill:'.length) : mktCurrent
+      op = call('skills.install', { skillId: skillRef })
+    } else {
+      op = call('market.install', { packageId: mktCurrent })
+    }
+    op.then(function (res) {
+      toast((res && (res.note || res.message)) || '安装成功')
+      openMarketDetail(mktCurrent)
+      if (marketMode) loadMarket(marketType)
+    }).catch(function (e) {
+      toast('安装失败：' + (e.message || ''))
+    }).finally(function () { btn.disabled = false })
+  })
+  Array.prototype.forEach.call($('mkt-chips').children, function (chip) {
+    chip.addEventListener('click', function () {
+      marketType = chip.getAttribute('data-type') || ''
+      Array.prototype.forEach.call($('mkt-chips').children, function (c) { c.classList.remove('active') })
+      chip.classList.add('active')
+      loadMarket(marketType)
+    })
+  })
+  $('mkt-mine').addEventListener('click', function () {
+    call('market.mine', {}).then(function (res) {
+      var items = (res && res.items) || []
+      if (!items.length) { toast('还没有安装任何包'); return }
+      toast('我的安装：' + items.map(function (i) { return i.packageId }).join('、'))
+    }).catch(function (e) { toast(e.message || '我的安装加载失败') })
+  })
+
   // 搜索：300ms 防抖 → 服务端过滤（API 支持 q 参数）
   $('search').addEventListener('input', function () {
     var q = this.value.trim().slice(0, 60)
@@ -501,8 +719,30 @@ export const WEBOS_STORE_V1_HTML = `<!doctype html>
   $('tab-latest').addEventListener('click', function () { setTab('latest') })
   $('tab-hot').addEventListener('click', function () { setTab('hot') })
   $('tab-skills').addEventListener('click', function () { setTab('skills') })
+  // 2026-08-21（W3 统一包市场 R14）：「市场」页签
+  $('tab-market').addEventListener('click', function () { setTab('market') })
+  var marketMode = false
+  var marketType = ''
   var skillsMode = false
   function setTab(tab) {
+    // 2026-08-21（W3 统一包市场 R14）：「市场」页签（万物皆可包，type 维度）
+    if (tab === 'market') {
+      if (marketMode) return
+      marketMode = true
+      ;['latest', 'hot', 'skills', 'market'].forEach(function (k) { var el = $('tab-' + k); if (el) el.classList.remove('active') })
+      $('tab-market').classList.add('active')
+      $('search').style.display = 'block'
+      $('featured-wrap').style.display = 'none'
+      $('space-bar').style.display = 'none'
+      $('mkt-row').style.display = 'flex'
+      $('section-label').textContent = '包市场 · 万物皆可包'
+      $('list').style.gridTemplateColumns = ''
+      var mtip = $('skill-tip'); if (mtip) mtip.remove()
+      loadMarket(marketType)
+      return
+    }
+    marketMode = false
+    $('mkt-row').style.display = 'none'
     if (tab === 'skills') {
       if (skillsMode) return
       skillsMode = true
@@ -562,10 +802,15 @@ export const WEBOS_STORE_V1_HTML = `<!doctype html>
     empty.style.display = 'none'
     items.forEach(function (s) {
       var size = formatBytes(s.sizeBytes)
+      // 2026-08-18 用户发布技能：带发布者标注；系统级按内置语义展示
       var meta = size ? size + ' · ' : ''
-      meta += s.installable ? '安装后可让 AI 自定义演进' : '系统内置 · 全局已可用'
+      if (s.system) {
+        meta += s.installable ? '安装后可让 AI 自定义演进' : '系统内置 · 全局已可用'
+      } else {
+        meta += (s.ownerName || '匿名') + ' 发布'
+      }
       var btn = ''
-      if (!s.installable) {
+      if (s.system && !s.installable) {
         btn = '<button class="install done" disabled>内置</button>'
       } else if (s.installed) {
         btn = '<button class="install done" disabled>已安装</button>'
@@ -588,12 +833,12 @@ export const WEBOS_STORE_V1_HTML = `<!doctype html>
     var el = $('list')
     el.innerHTML = '<div class="loading" style="grid-column:1/-1">加载中…</div>'
     $('empty').style.display = 'none'
-    // 技能说明（设计上保持克制：一行小字提示安装语义）
+    // 技能说明（设计上保持克制：一行小字提示安装语义；2026-08-18 提示可发布自己的技能）
     if (!$('skill-tip')) {
       var tip = document.createElement('div')
       tip.className = 'skill-tip'
       tip.id = 'skill-tip'
-      tip.innerHTML = '<b>技能 = AI 的专长</b>：安装后 Daily 的 AI 立即可用，还能在对话中让它按你的习惯自定义'
+      tip.innerHTML = '<b>技能 = AI 的专长</b>：安装后 Daily 的 AI 立即可用，还能在对话中让它按你的习惯自定义；点底部「我的」可发布你自己的技能'
       el.parentNode.insertBefore(tip, el)
     }
     call('skills.list', {}).then(function (res) {
@@ -746,26 +991,40 @@ export const WEBOS_STORE_V1_HTML = `<!doctype html>
   function openMine() {
     var statsEl = $('mine-stats')
     statsEl.innerHTML = '<div class="mine-stat" style="grid-column:1/-1;color:var(--muted)">加载中…</div>'
-    Promise.all([call('my', {}), call('myApps', {})]).then(function (results) {
+    Promise.all([call('my', {}), call('myApps', {}), call('skills.my', {})]).then(function (results) {
       var list = results[0].items || []
       var apps = results[1].items || []
+      var skillList = results[2].items || []
       var installs = 0
       var visits = 0
       list.forEach(function (it) { installs += it.installs || 0; visits += it.visits || 0 })
       statsEl.innerHTML =
-        '<div class="mine-stat"><b>' + list.length + '</b><span>发布</span></div>' +
+        '<div class="mine-stat"><b>' + list.length + '</b><span>应用发布</span></div>' +
+        '<div class="mine-stat"><b>' + skillList.length + '</b><span>技能发布</span></div>' +
         '<div class="mine-stat"><b>' + installs + '</b><span>总安装</span></div>' +
-        '<div class="mine-stat"><b>' + visits + '</b><span>总分享</span></div>' +
-        '<div class="mine-stat"><b>' + apps.length + '</b><span>我的应用</span></div>'
+        '<div class="mine-stat"><b>' + visits + '</b><span>总分享</span></div>'
       var el = $('my-list')
       if (!list.length) {
-        el.innerHTML = '<p class="empty" style="padding:20px 0">还没发布过应用，点下方「发布应用」分享你的第一个作品</p>'
+        el.innerHTML = '<p class="empty" style="padding:20px 0">还没发布过应用，点下方「发布到市场」分享你的第一个作品</p>'
       } else {
         el.innerHTML = list.map(function (it) {
           return '<div class="apppick"><div class="icon">' + iconHtml(it) + '</div>' +
             '<div class="nm">' + esc(it.name) + '</div>' +
             '<div class="stat">' + (it.installs || 0) + ' 安装 · 分享 ' + (it.visits || 0) + '</div>' +
             '<button class="btn" data-unpub="' + esc(it.id) + '" style="flex:0">下架</button></div>'
+        }).join('')
+      }
+      // 2026-08-18 我的技能发布（可下架）
+      var skillEl = $('my-skill-list')
+      if (!skillList.length) {
+        skillEl.innerHTML = '<p class="empty" style="padding:16px 0">还没发布过技能——把调教好的技能分享给大家</p>'
+      } else {
+        skillEl.innerHTML = skillList.map(function (it) {
+          return '<div class="apppick">' +
+            '<div class="skill-icon" style="width:34px;height:34px;border-radius:10px"><img src="' + phSvgUri(it.name || '技能') + '" alt=""></div>' +
+            '<div class="nm">' + esc(it.name || it.skillId) + '</div>' +
+            '<div class="stat">' + formatBytes(it.sizeBytes) + '</div>' +
+            '<button class="btn" data-skill-unpub="' + esc(it.id) + '" style="flex:0">下架</button></div>'
         }).join('')
       }
       $('my-overlay').classList.add('show')
@@ -786,18 +1045,65 @@ export const WEBOS_STORE_V1_HTML = `<!doctype html>
       load() // 市场列表同步移除
     }).catch(function (e) { toast(e.message) })
   })
+  // 2026-08-18 技能下架（「我的」个人主页）
+  $('my-skill-list').addEventListener('click', function (e) {
+    var btn = e.target.closest('button[data-skill-unpub]')
+    if (!btn) return
+    var id = btn.getAttribute('data-skill-unpub')
+    call('skills.unpublish', { id: id }).then(function () {
+      toast('技能已下架')
+      openMine() // 刷新个人主页（保持打开）
+      loadSkills() // 技能市场列表同步移除
+    }).catch(function (e) { toast(e.message) })
+  })
 
   var pickedApp = null
-  // 个人主页内「发布应用」→ 打开发布弹层（选择要发布的 App）
+  var pickedSkill = null
+  var publishMode = 'app' // 'app' | 'skill'
+  function setPublishMode(mode) {
+    publishMode = mode
+    $('pubtab-app').classList.toggle('active', mode === 'app')
+    $('pubtab-skill').classList.toggle('active', mode === 'skill')
+    $('myapps').style.display = mode === 'app' ? '' : 'none'
+    $('myskills').style.display = mode === 'skill' ? '' : 'none'
+    $('pub-desc').placeholder = mode === 'app'
+      ? '介绍你的应用（可选，一句话说明它是做什么的）'
+      : '介绍你的技能（可选，补充一句话说明亮点）'
+  }
+  $('pubtab-app').addEventListener('click', function () { setPublishMode('app') })
+  $('pubtab-skill').addEventListener('click', function () { setPublishMode('skill') })
+  // 个人主页内「发布到市场」→ 打开发布弹层（应用/技能 双 tab）
   $('btn-publish').addEventListener('click', function () {
-    call('myApps', {}).then(function (res) {
-      var apps = res.items || []
-      if (!apps.length) { toast('你还没有可发布的 App——先让 AI 做一个吧'); return }
-      var el = $('myapps'); pickedApp = null
-      el.innerHTML = apps.map(function (a) {
-        return '<div class="apppick" data-app="' + esc(a.id) + '"><div class="icon">' + iconHtml(a) + '</div><div class="nm">' + esc(a.name) + '</div></div>'
-      }).join('')
+    Promise.all([call('myApps', {}), call('skills.mine', {})]).then(function (results) {
+      var apps = results[0].items || []
+      var skills = (results[1] && results[1].items) || []
+      pickedApp = null; pickedSkill = null
       $('pub-desc').value = ''
+      var el = $('myapps')
+      if (!apps.length) {
+        el.innerHTML = '<p class="empty" style="padding:14px 0 18px">还没有可发布的 App——先让 AI 做一个吧</p>'
+      } else {
+        el.innerHTML = apps.map(function (a) {
+          return '<div class="apppick" data-app="' + esc(a.id) + '"><div class="icon">' + iconHtml(a) + '</div><div class="nm">' + esc(a.name) + '</div></div>'
+        }).join('')
+      }
+      // 技能选择（工作区我的技能；已发布的标注）
+      var skillEl = $('myskills')
+      if (!skills.length) {
+        skillEl.innerHTML = '<p class="empty" style="padding:14px 0 18px">工作区还没有可发布的技能——让 AI 写一个 skill，或从市场安装后自定义</p>'
+      } else {
+        skillEl.innerHTML = skills.map(function (s) {
+          var tag = s.published ? '<span class="installed-tag">已发布</span>' : ''
+          return '<div class="apppick" data-skill="' + esc(s.id) + '">' +
+            '<div class="skill-icon" style="width:34px;height:34px;border-radius:10px"><img src="' + phSvgUri(s.name || '技能') + '" alt=""></div>' +
+            '<div class="nm">' + esc(s.name || s.id) + '</div>' +
+            '<div class="stat">' + formatBytes(s.sizeBytes) + '</div>' + tag + '</div>'
+        }).join('')
+      }
+      setPublishMode('app')
+      // 2026-08-16 打开发布页前先关闭「我的」层——两者都是 .overlay（同级），
+      // 若不同时关闭，DOM 靠后的 my-overlay 会盖住发布页（发布表单被遮挡点不到）。
+      $('my-overlay').classList.remove('show')
       $('publish-overlay').classList.add('show')
     }).catch(function (e) { toast(e.message) })
   })
@@ -806,23 +1112,41 @@ export const WEBOS_STORE_V1_HTML = `<!doctype html>
     if (!pick) return
     Array.prototype.forEach.call($('myapps').children, function (c) { c.classList.remove('active') })
     pick.classList.add('active')
-    pickedApp = pick.getAttribute('data-app')
+    pickedApp = pick.getAttribute('data-app'); pickedSkill = null
+  })
+  $('myskills').addEventListener('click', function (e) {
+    var pick = e.target.closest('.apppick')
+    if (!pick) return
+    Array.prototype.forEach.call($('myskills').children, function (c) { c.classList.remove('active') })
+    pick.classList.add('active')
+    pickedSkill = pick.getAttribute('data-skill'); pickedApp = null
   })
   $('pub-cancel').addEventListener('click', function () { $('publish-overlay').classList.remove('show') })
   $('pub-confirm').addEventListener('click', function () {
-    if (!pickedApp) { toast('先选择一个应用'); return }
     var desc = $('pub-desc').value.trim().slice(0, 200)
     var btn = $('pub-confirm'); btn.disabled = true
-    call('publish', { appId: pickedApp, description: desc }).then(function (res) {
+    var op
+    if (publishMode === 'skill') {
+      if (!pickedSkill) { toast('先选择一个技能'); btn.disabled = false; return }
+      op = call('skills.publish', { skillId: pickedSkill, description: desc })
+    } else {
+      if (!pickedApp) { toast('先选择一个应用'); btn.disabled = false; return }
+      op = call('publish', { appId: pickedApp, description: desc })
+    }
+    op.then(function (res) {
       $('publish-overlay').classList.remove('show')
-      toast('已发布！链接：' + (res.url || ''))
+      toast((res && res.message) || '已发布到市场')
       load()
+      loadSkills()
       // 发布成功后刷新「我的」主页（统计与列表保持最新）
       if ($('my-overlay').classList.contains('show')) openMine()
     }).catch(function (e) { toast(e.message) }).finally(function () { btn.disabled = false })
   })
 
-  load()
+  // 2026-08-21（W3 R14 收敛）：打开商店即进入「市场」页签 = 统一包市场（万物皆可包，
+  // App / skill / api / theme … 全是「包」，一张列表）。旧「最新/最热/技能」tab 保留
+  // 可切（老商店浏览），但默认就是包市场。
+  setTab('market')
 })()
 </script>
 </body>

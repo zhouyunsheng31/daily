@@ -1,13 +1,16 @@
 // ============================================================================
-// MiniMax-M3 视觉桥接（2026-08-14，AI 的眼睛）
+// 视觉桥接（2026-08-14，AI 的眼睛；2026-08-21 升级为双 provider）
 // ----------------------------------------------------------------------------
 // 背景：平台 AI 主模型是 DeepSeek V4 Flash（纯文本，非视觉）。当用户给 AI 发
-// 图片/视频、或 AI 需要查看工作区图片时，本模块调用 MiniMax-M3（原生多模态，
-// 图片/视频理解）生成文字描述，作为 AI 的「眼睛」。
+// 图片/视频、或 AI 需要查看工作区图片时，本模块调用视觉模型生成文字描述，
+// 作为 AI 的「眼睛」。2026-08-21 起双 provider：
+//   - 图片：优先 DeepSeek 官方 deepseek-v4-flash-vision-exp（更便宜，图片 token
+//     有上限 ≤384/张）；失败自动降级 MiniMax-M3。
+//   - 视频：仅 MiniMax-M3（DeepSeek 官方视觉暂不支持视频）。
 //
 // 媒体来源解析规则：
-// - data:image URI        → 直接传给 M3
-// - http(s):// 公网 URL   → 直接传给 M3（M3 服务器自行拉取）
+// - data:image URI        → 直接传给视觉模型
+// - http(s):// 公网 URL   → 直接传（视觉模型服务器自行拉取）
 // - /webos/api/apps/:id/files/raw/* → 优先服务端读文件转 base64；失败回退公网 URL
 // - /webos/api/imagegen/file/* 、/webos/api/videogen/file/* → 公网 URL（免鉴权）
 // - /webos/api/workspace/files/raw?path= → 服务端读工作区文件（该端点带鉴权）
@@ -15,16 +18,21 @@
 //   视频仅 apps/<appId>/ 下有公开 raw 端点可转 URL，其余本地视频无法分析
 //   （返回 unsupported，不伪造成功）。
 //
-// 计费：按 MiniMax 官方「永久五折」价（输入 ¥2.10 / 输出 ¥8.40 / 缓存 ¥0.42
-// 每百万 token）折算平台成本，逐次落 webos_vision_usage 表；管理后台
-// （/api/admin/webos/vision/*）实时查看消耗金额与 token。不扣用户积分
-// （属于平台侧 AI 能力增强成本）。
+// 计费：按实际使用的 provider 价格折算平台成本，逐次落 webos_vision_usage 表
+// （model 列区分 DeepSeek / MiniMax-M3）；管理后台（/api/admin/webos/vision/*）
+// 实时查看消耗金额与 token。不扣用户积分（属于平台侧 AI 能力增强成本）。
 // ============================================================================
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { getPool } from '../db/connection.js'
+import {
+  callDeepSeekVision,
+  dsVisionConfigured,
+  dsVisionPricing,
+  DS_VISION_MODEL_NAME,
+} from './deepseekVision.js'
 
 const VISION_MODEL = process.env.MINIMAX_VISION_MODEL?.trim() || 'MiniMax-M3'
 const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY?.trim() || ''
@@ -45,12 +53,14 @@ const MAX_MEDIA_PER_CALL = 8
 const REQUEST_TIMEOUT_MS = 90_000
 const MAX_DESCRIPTION_TOKENS = 2048
 
+/** 视觉是否可用：DeepSeek 或 MiniMax 任一配置 */
 export function visionConfigured(): boolean {
-  return MINIMAX_API_KEY.length > 0
+  return dsVisionConfigured() || MINIMAX_API_KEY.length > 0
 }
 
+/** 当前活跃视觉模型名（DeepSeek 优先） */
 export function visionModelName(): string {
-  return VISION_MODEL
+  return dsVisionConfigured() ? DS_VISION_MODEL_NAME : VISION_MODEL
 }
 
 export interface VisionContext {
@@ -121,10 +131,27 @@ interface ResolvedMedia {
   label: string
 }
 
+/** 归一化工作区相对路径：去掉开头的 / 或 ./（不解码，调用方按来源决定是否已解码） */
+function normalizeWorkspaceRel(rel: string): string {
+  let value = rel.trim().replace(/^\/+/, '')
+  if (value.startsWith('./')) value = value.slice(2)
+  return value
+}
+
+/** 对用户原始文本中的工作区路径做安全 URL 解码（中文/空格等），非法编码保留原文 */
+function decodeWorkspaceRel(rel: string): string {
+  const normalized = normalizeWorkspaceRel(rel)
+  try {
+    return decodeURIComponent(normalized)
+  } catch {
+    return normalized
+  }
+}
+
 /** 工作区相对路径 → 图片 base64 data URI（带防穿越；不存在/过大返回 null） */
 function localImageToDataUri(root: string, rel: string): string | null {
   try {
-    const trimmed = rel.trim().replace(/^\/+/, '')
+    const trimmed = normalizeWorkspaceRel(rel)
     if (!trimmed || trimmed.includes('\0')) return null
     const resolved = path.resolve(root, trimmed)
     const relCheck = path.relative(root, resolved)
@@ -143,11 +170,11 @@ function localImageToDataUri(root: string, rel: string): string | null {
 /** 工作区相对路径 → 公开 raw URL（仅 apps/<appId>/ 下，免鉴权端点） */
 function localVideoToPublicUrl(root: string, rel: string, publicBase: string): string | null {
   try {
-    const trimmed = rel.trim().replace(/^\/+/, '')
+    const trimmed = normalizeWorkspaceRel(rel)
     const match = trimmed.match(/^apps\/([^/]+)\/(.+)$/)
     if (!match) return null
-    const appId = decodeURIComponent(match[1] ?? '')
-    const rest = decodeURIComponent(match[2] ?? '')
+    const appId = match[1] ?? ''
+    const rest = match[2] ?? ''
     if (!appId || !rest || appId.includes('..')) return null
     const urlPath = rest.split('/').map((seg) => encodeURIComponent(seg)).join('/')
     return `${publicBase}/webos/api/apps/${encodeURIComponent(appId)}/files/raw/${urlPath}`
@@ -168,7 +195,8 @@ function resolveMediaSource(src: string, ctx: VisionContext): ResolvedMedia | nu
 
   // 2) 公网 URL → 按扩展名判定；无扩展名按图片处理
   if (/^https?:\/\//i.test(trimmed)) {
-    const kind = fileKindOf(trimmed) ?? (VIDEO_EXT_RE.test(trimmed.split('?')[0] ?? '') ? 'video' : 'image')
+    const pathPart = trimmed.split(/[?#]/)[0] ?? ''
+    const kind = fileKindOf(pathPart) ?? (VIDEO_EXT_RE.test(pathPart) ? 'video' : 'image')
     return { kind, url: trimmed, label: trimmed }
   }
 
@@ -184,16 +212,25 @@ function resolveMediaSource(src: string, ctx: VisionContext): ResolvedMedia | nu
         const root = path.join(ctx.workspaceRoot, 'apps', appId)
         const dataUri = localImageToDataUri(root, rest)
         if (dataUri) return { kind: 'image', url: dataUri, label: `apps/${appId}/${rest}` }
+        // 本地读取失败时，只有确认是图片扩展名才允许回退公网 raw
+        return { kind: 'image', url: `${ctx.publicBase}${trimmed}`, label: trimmed }
       }
-      // 兜底：公开 raw 端点（生产环境免鉴权，M3 可直接拉取）
-      return { kind: kind ?? 'image', url: `${ctx.publicBase}${trimmed}`, label: trimmed }
+      if (kind === 'video') {
+        return { kind: 'video', url: `${ctx.publicBase}${trimmed}`, label: trimmed }
+      }
+      // 2026-08-17 修复：未知扩展名/空 rest 不能默认当图片发给 M3
+      // （此前 `kind ?? 'image'` 兜底会把正文里的代码路径如「webos.ts:2862，支持」
+      //   拼成图片 URL → MiniMax HTTP 400 invalid param: image format）
+      return null
     }
-    // 3b) 生图公开产物（免鉴权）
+    // 3b) 生图公开产物（免鉴权）——严格校验真实文件名，防正文尾巴被吞
     if (/^\/webos\/api\/imagegen\/file\//i.test(trimmed)) {
+      if (!/^\/webos\/api\/imagegen\/file\/[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*\.(?:png|jpe?g|webp|gif)$/i.test(trimmed)) return null
       return { kind: 'image', url: `${ctx.publicBase}${trimmed}`, label: trimmed }
     }
-    // 3c) 视频生成公开产物（免鉴权）
+    // 3c) 视频生成公开产物
     if (/^\/webos\/api\/videogen\/file\//i.test(trimmed)) {
+      if (!/^\/webos\/api\/videogen\/file\/[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*\.(?:mp4|webm)$/i.test(trimmed)) return null
       return { kind: 'video', url: `${ctx.publicBase}${trimmed}`, label: trimmed }
     }
     // 3d) 用户工作区文件 raw（带鉴权，必须服务端读）
@@ -217,15 +254,16 @@ function resolveMediaSource(src: string, ctx: VisionContext): ResolvedMedia | nu
   }
 
   // 4) 工作区相对路径（home/、agent/、apps/、skills/…）
-  const kind = fileKindOf(trimmed)
+  const rel = decodeWorkspaceRel(trimmed)
+  const kind = fileKindOf(rel)
   if (kind === 'image') {
-    const dataUri = localImageToDataUri(ctx.workspaceRoot, trimmed)
-    if (dataUri) return { kind: 'image', url: dataUri, label: trimmed }
+    const dataUri = localImageToDataUri(ctx.workspaceRoot, rel)
+    if (dataUri) return { kind: 'image', url: dataUri, label: rel }
     return null
   }
   if (kind === 'video') {
-    const publicUrl = localVideoToPublicUrl(ctx.workspaceRoot, trimmed, ctx.publicBase)
-    if (publicUrl) return { kind: 'video', url: publicUrl, label: trimmed }
+    const publicUrl = localVideoToPublicUrl(ctx.workspaceRoot, rel, ctx.publicBase)
+    if (publicUrl) return { kind: 'video', url: publicUrl, label: rel }
     return null
   }
   return null
@@ -250,6 +288,22 @@ function stripThink(content: string): string {
   return content.replace(/^<think>[\s\S]*?<\/think>\s*/i, '').trim()
 }
 
+/** 兼容 M3 返回 string 或 OpenAI 风格 content 数组（取其中 text 片段） */
+function extractTextContent(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content.map((part) => {
+      if (typeof part === 'string') return part
+      if (part && typeof part === 'object' && 'text' in part) {
+        const text = (part as { text?: unknown }).text
+        if (typeof text === 'string') return text
+      }
+      return ''
+    }).join('')
+  }
+  return ''
+}
+
 async function callM3(
   parts: Array<Record<string, unknown>>,
   ask?: string,
@@ -272,7 +326,7 @@ async function callM3(
             content: [{ type: 'text', text: userText }, ...parts],
           },
         ],
-        max_completion_tokens: MAX_DESCRIPTION_TOKENS,
+        max_tokens: MAX_DESCRIPTION_TOKENS,
         temperature: 0.3,
       }),
       signal: controller.signal,
@@ -289,7 +343,7 @@ async function callM3(
         prompt_tokens_details?: { cached_tokens?: unknown }
       }
     }
-    const content = typeof data?.choices?.[0]?.message?.content === 'string' ? data.choices[0].message.content : ''
+    const content = extractTextContent(data?.choices?.[0]?.message?.content)
     const usage = data?.usage ?? {}
     return {
       content: stripThink(content),
@@ -313,6 +367,8 @@ export interface VisionUsageRecord {
   conversationId?: string | null
   trigger: VisionTrigger
   kind: 'image' | 'video' | 'mixed' | 'unsupported'
+  /** 2026-08-21 实际执行的视觉模型（deepseek-v4-flash-vision-exp / MiniMax-M3） */
+  model?: string
   mediaCount: number
   prompt?: string
   description?: string
@@ -333,9 +389,9 @@ export async function recordVisionUsage(input: VisionUsageRecord): Promise<void>
     const pool = getPool()
     await pool.query(
       `INSERT INTO webos_vision_usage
-        (id, user_key, user_email, request_id, conversation_id, trigger, kind, media_count, prompt, description,
+        (id, user_key, user_email, request_id, conversation_id, trigger, kind, model, media_count, prompt, description,
          input_tokens, output_tokens, cached_tokens, total_tokens, cost_minor, status, error_code, error_message, duration_ms, ip, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
       [
         `vision-${randomUUID()}`,
         input.userKey,
@@ -344,6 +400,7 @@ export async function recordVisionUsage(input: VisionUsageRecord): Promise<void>
         input.conversationId ?? null,
         input.trigger,
         input.kind,
+        input.model ?? null,
         input.mediaCount,
         input.prompt ? String(input.prompt).slice(0, 300) : null,
         input.description ? String(input.description).slice(0, 500) : null,
@@ -435,7 +492,7 @@ function getWorkspaceRootByKey(userKey: string): string {
 export async function describeMedia(input: DescribeMediaInput): Promise<DescribeMediaResult> {
   const startedAt = Date.now()
 
-  if (!MINIMAX_API_KEY) {
+  if (!visionConfigured()) {
     return {
       ok: false,
       descriptions: [],
@@ -448,7 +505,7 @@ export async function describeMedia(input: DescribeMediaInput): Promise<Describe
       durationMs: Date.now() - startedAt,
       status: 'not_configured',
       errorCode: 'VISION_NOT_CONFIGURED',
-      errorMessage: '视觉模型未配置（MINIMAX_API_KEY 缺失）',
+      errorMessage: '视觉模型未配置（MINIMAX_API_KEY 与 DEEPSEEK_VISION_API_KEY 均缺失）',
     }
   }
 
@@ -501,11 +558,91 @@ export async function describeMedia(input: DescribeMediaInput): Promise<Describe
     }
   }
 
-  // 组装 M3 多模态 content
+  // 组装视觉模型的 content 块（image_url 格式 DeepSeek 与 M3 通用）
   const parts = resolved.map((r) => (r.kind === 'image'
     ? { type: 'image_url', image_url: { url: r.url } }
     : { type: 'video_url', video_url: { url: r.url } }))
+  const hasVideo = resolved.some((r) => r.kind === 'video')
 
+  // ── DeepSeek 视觉优先（仅图片；DeepSeek 官方暂不支持视频）──
+  // 成功直接返回；异常或空描述记录一条 failed/empty 后降级 M3（双 provider 可观测）。
+  if (dsVisionConfigured() && !hasVideo) {
+    try {
+      const ds = await callDeepSeekVision(parts, input.ask)
+      const totalTokens = ds.inputTokens + ds.outputTokens
+      const price = dsVisionPricing()
+      const costMinor = Math.round(
+        (ds.inputTokens / 1_000_000) * price.inputPerMillion * 100
+        + (ds.outputTokens / 1_000_000) * price.outputPerMillion * 100,
+      )
+      const ok = ds.content.length > 0
+
+      await recordVisionUsage({
+        userKey: input.userKey,
+        userEmail: input.userEmail ?? null,
+        requestId: input.requestId ?? null,
+        conversationId: input.conversationId ?? null,
+        trigger: input.trigger,
+        kind,
+        model: DS_VISION_MODEL_NAME,
+        mediaCount,
+        prompt: input.ask ?? undefined,
+        description: ok ? ds.content : undefined,
+        inputTokens: ds.inputTokens,
+        outputTokens: ds.outputTokens,
+        cachedTokens: ds.cachedTokens,
+        totalTokens,
+        costMinor,
+        status: ok ? 'ok' : 'empty',
+        errorCode: ok ? undefined : 'EMPTY_DESCRIPTION',
+        durationMs: Date.now() - startedAt,
+        ip: input.ip ?? null,
+      })
+
+      if (ok) {
+        return {
+          ok: true,
+          descriptions: [ds.content],
+          mediaCount,
+          inputTokens: ds.inputTokens,
+          outputTokens: ds.outputTokens,
+          cachedTokens: ds.cachedTokens,
+          totalTokens,
+          costMinor,
+          durationMs: Date.now() - startedAt,
+          status: 'ok',
+        }
+      }
+      console.warn(`[vision] DeepSeek vision 返回空描述，降级 MiniMax-M3 trigger=${input.trigger} media=${mediaCount}`)
+    } catch (error) {
+      const isTimeout = error instanceof Error && (error.name === 'AbortError' || /abort|timeout/i.test(error.message))
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn(`[vision] DeepSeek vision ${isTimeout ? '超时' : '失败'}，降级 MiniMax-M3 trigger=${input.trigger} media=${mediaCount} msg=${message.slice(0, 200)}`)
+      await recordVisionUsage({
+        userKey: input.userKey,
+        userEmail: input.userEmail ?? null,
+        requestId: input.requestId ?? null,
+        conversationId: input.conversationId ?? null,
+        trigger: input.trigger,
+        kind,
+        model: DS_VISION_MODEL_NAME,
+        mediaCount,
+        prompt: input.ask ?? undefined,
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedTokens: 0,
+        totalTokens: 0,
+        costMinor: 0,
+        status: isTimeout ? 'timeout' : 'failed',
+        errorCode: isTimeout ? 'DS_TIMEOUT_FALLBACK_M3' : 'DS_FALLBACK_M3',
+        errorMessage: message.slice(0, 500),
+        durationMs: Date.now() - startedAt,
+        ip: input.ip ?? null,
+      })
+    }
+  }
+
+  // ── MiniMax-M3（视频直走 / DeepSeek 未配置或失败兜底）──
   try {
     const { content, inputTokens, outputTokens, cachedTokens } = await callM3(parts, input.ask)
     const totalTokens = inputTokens + outputTokens
@@ -522,6 +659,7 @@ export async function describeMedia(input: DescribeMediaInput): Promise<Describe
       conversationId: input.conversationId ?? null,
       trigger: input.trigger,
       kind,
+      model: VISION_MODEL,
       mediaCount,
       prompt: input.ask ?? undefined,
       description: ok ? content : undefined,
@@ -565,6 +703,7 @@ export async function describeMedia(input: DescribeMediaInput): Promise<Describe
       conversationId: input.conversationId ?? null,
       trigger: input.trigger,
       kind,
+      model: VISION_MODEL,
       mediaCount,
       prompt: input.ask ?? undefined,
       inputTokens: 0,

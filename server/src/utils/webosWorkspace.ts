@@ -36,6 +36,97 @@ const MAX_LIST_ENTRIES = 1000
 const MAX_SEARCH_RESULTS = 500
 const MAX_PATH_LENGTH = 512
 
+// 2026-08-16 用户上传图片公开副本：桌面 sandbox iframe（opaque origin）加载 <img>/CSS
+// 背景图不携带 cookie，鉴权端点 401 会被 Chrome ORB 拦截。这里沿用生图公开目录模式：
+// 仅将 home/ 下用户上传的图片按不可枚举 UUID 复制到 PUBLIC_IMAGES_DIR，并维护
+// 路径 -> 公开文件名的映射，供 AI 工具（agent_fs_list/stat/read）返回 publicUrl。
+// 不开放 /workspace/files/raw 免鉴权（path 可枚举工作区文件）。
+export const PUBLIC_IMAGES_DIR = path.join(process.cwd(), 'data', 'webos-public-images')
+const PUBLIC_UPLOAD_MAP_FILE = path.join(process.cwd(), 'data', 'webos-public-uploads.json')
+const PUBLIC_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif'])
+const PUBLIC_UPLOAD_NAME_PATTERN = /^[a-zA-Z0-9._-]{1,160}$/
+
+interface PublicImageRef {
+  name: string
+  size: number
+  mtimeMs: number
+}
+
+function readPublicUploadMap(): Record<string, PublicImageRef> {
+  try {
+    const raw = fs.readFileSync(PUBLIC_UPLOAD_MAP_FILE, 'utf-8')
+    const parsed = JSON.parse(raw) as Record<string, PublicImageRef>
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function writePublicUploadMap(map: Record<string, PublicImageRef>): void {
+  try {
+    fs.mkdirSync(path.dirname(PUBLIC_UPLOAD_MAP_FILE), { recursive: true })
+    const tmp = `${PUBLIC_UPLOAD_MAP_FILE}.${process.pid}.${Date.now()}.tmp`
+    fs.writeFileSync(tmp, JSON.stringify(map, null, 2), 'utf-8')
+    fs.renameSync(tmp, PUBLIC_UPLOAD_MAP_FILE)
+  } catch {
+    // 映射写失败不阻断主流程；最坏情况是下次重新生成一个新公开副本
+  }
+}
+
+/** 为工作区图片生成/复用不可枚举公开 URL（仅图片；失败返回 null） */
+export function ensurePublicImageCopy(fullPath: string): string | null {
+  try {
+    const abs = path.resolve(fullPath)
+    const stat = fs.statSync(abs)
+    if (!stat.isFile()) return null
+    const ext = path.extname(abs).toLowerCase()
+    if (!PUBLIC_IMAGE_EXTENSIONS.has(ext)) return null
+    const map = readPublicUploadMap()
+    const ref = map[abs]
+    if (ref && ref.size === stat.size && Math.floor(ref.mtimeMs) === Math.floor(stat.mtimeMs)) {
+      const existing = path.join(PUBLIC_IMAGES_DIR, ref.name)
+      if (fs.existsSync(existing) && PUBLIC_UPLOAD_NAME_PATTERN.test(ref.name)) {
+        return `/webos/api/imagegen/file/${ref.name}`
+      }
+    }
+    const name = `up-${Date.now()}-${crypto.randomUUID()}${ext}`
+    fs.mkdirSync(PUBLIC_IMAGES_DIR, { recursive: true })
+    fs.copyFileSync(abs, path.join(PUBLIC_IMAGES_DIR, name))
+    if (ref) {
+      try { fs.unlinkSync(path.join(PUBLIC_IMAGES_DIR, ref.name)) } catch { /* 旧副本可能已不存在 */ }
+    }
+    map[abs] = { name, size: stat.size, mtimeMs: stat.mtimeMs }
+    writePublicUploadMap(map)
+    return `/webos/api/imagegen/file/${name}`
+  } catch {
+    return null
+  }
+}
+
+/** 删除某工作区文件的公开副本（用户删除文件时清理，避免孤儿文件） */
+export function removePublicImageCopy(fullPath: string): void {
+  try {
+    const abs = path.resolve(fullPath)
+    const map = readPublicUploadMap()
+    const ref = map[abs]
+    if (!ref) return
+    try { fs.unlinkSync(path.join(PUBLIC_IMAGES_DIR, ref.name)) } catch { /* 忽略 */ }
+    delete map[abs]
+    writePublicUploadMap(map)
+  } catch { /* 忽略 */ }
+}
+
+/** 判断文件是否位于用户可见区 home/ 下（只有这里的图片才自动生成 publicUrl） */
+export function isUserHomeFile(key: string, fullPath: string): boolean {
+  try {
+    const homeRoot = path.join(getWorkspaceRoot(key), 'home')
+    const resolved = path.resolve(fullPath)
+    return resolved.startsWith(homeRoot + path.sep)
+  } catch {
+    return false
+  }
+}
+
 /** principal.key → 安全的目录名（保留可读性，去掉危险字符） */
 export function workspaceDirName(key: string): string {
   const safe = key.replace(/[^a-zA-Z0-9_.:-]/g, '_').slice(0, 96)
@@ -121,7 +212,7 @@ export function getWorkspaceRoot(key: string): string {
 function ensureWorkspace(root: string, key: string): void {
   const created = !fs.existsSync(root)
   if (created) fs.mkdirSync(root, { recursive: true })
-  for (const dir of ['home', 'system', 'agent', 'logs', 'apps', 'shared', 'skills']) {
+  for (const dir of ['home', 'system', 'agent', 'logs', 'apps', 'shared', 'skills', 'packages']) {
     fs.mkdirSync(path.join(root, dir), { recursive: true })
   }
   fs.mkdirSync(path.join(root, 'system', 'tools'), { recursive: true })
@@ -159,11 +250,12 @@ function ensureWorkspace(root: string, key: string): void {
           '这是 AI 助手（agent）的私有工作区，AI 可以通过文件工具自由读写这里的文件。',
           '',
           '## 目录约定',
-          '- `home/`：用户可见区。用户明确要求保存的内容（文档、导出物）放在这里。',
+          '- `home/`：用户可见区。用户明确要求保存的内容（文档、导出物）放在这里。home/ 下的图片可通过 agent_fs_list / agent_fs_stat / agent_fs_read 返回的 publicUrl 在桌面/App 沙箱中免鉴权引用（不要用 /webos/api/workspace/files/raw?path=... 或相对路径）。',
           '- `system/`：系统资源区。壁纸（SVG）、主题配置、系统相关素材放在这里。',
           '- `agent/`：agent 私有草稿区。中间产物、临时文件放在这里。',
           '- `apps/<appId>/`：App 私有文件区。**文件夹即 App**：在 apps/ 下新建文件夹并写 index.html 即创建新 App（系统自动注册到桌面）；App 图标 = 文件夹内 icon.svg（SVG 文本）或 icon.png 等图片；图片/CSS/JS 素材放文件夹内，App HTML 里用相对路径（assets/xxx.png、css/style.css）直接引用即可显示。',
           '- `apps/.trash/`：回收站。被删除 App 的文件夹在这里（可读取；把文件夹复制回 apps/ 下即自动恢复重新注册；彻底删除 = 删除回收站内目录）。',
+          '- `packages/<id>/`：包目录。**文件夹即包（W1）**：在 packages/ 下新建文件夹并写 daily.pkg.json（manifest）即注册一个非 app 类型的包（theme/skill/api 等；app 请仍用 apps/）；系统自动静态校验并建立不可变版本，校验错误会随写文件结果回流，你按提示修正即可。删除包 = 移入 packages/.trash/（复制回原目录自动恢复）。',
           '- `shared/`：跨 App 共享区。多个 App 之间共享的数据（如 todo.json）放在这里，App 与 AI 都可读写。',
           '- `logs/execution.log`：AI 执行日志（系统自动记录，AI 只读不可修改）。',
           '',
@@ -319,6 +411,14 @@ ImageMagick（IM6，convert）是图像批处理利器，尤其适合抠图与�
 - 一次最多 4 张；prompt 最长 8000 字符
 - 生成结果必须立即使用（本地已落盘，无临时 URL 失效问题）
 - 失败/超时会明确返回错误（不伪造成功）
+
+## 内容边界（⚠️ 2026-08-20，OpenAI 系审查）
+- 底层 gpt-image-2-super 把「人物/动漫角色」题材审查得极严，**动漫/女性角色图生图最易触发**，
+  被拒时错误码为 SAFETY_REJECTED（违规类别多为 sexual）——这是上游内容审查的确定性策略，
+  非系统故障、不扣费，同提示词+同类参考图会持续命中。
+- 生成人物/动漫题材时避免：anime girl、少女/女仆/校服、身材或衣着描写、人物特写参考图。
+- 遇 SAFETY_REJECTED：主动改写题材（改场景/物品/动物等非人物主体）或更换参考图后重试，
+  **不要用同一触雷提示词反复重试**（会持续被拒）。
 `,
   'edit-image.md': `# 图片编辑能力说明（edit_image 工具）
 
@@ -377,7 +477,7 @@ const SYSTEM_DESIGN_DOCS: Record<string, string> = {
     '如果某次改动把系统改难看了，从这里恢复默认值（改回去即可，不用重写）。',
     '',
     '## 颜色',
-    '- 背景：--bg-1 #eef1f6（主）、--bg-2 #dfe6f3（渐变尾）；壁纸可用 system/wallpaper.svg 覆盖',
+    '- 背景：--bg-1 #eef1f6（主）、--bg-2 #dfe6f3（渐变尾）；壁纸可用 system/wallpaper.svg 覆盖；用户上传的图片作壁纸时用 agent_fs_list/stat/read 返回的 publicUrl（免鉴权公开 URL）',
     '- 墨色：--ink #1c2333（正文）、--ink-soft #6b7280（次要）',
     '- 卡片：--card rgba(255,255,255,0.78)，边框 rgba(255,255,255,0.95)',
     '- 主色：--accent #4f6ef7（按钮/高亮/进度）',
@@ -496,19 +596,27 @@ function okResult(payload: unknown, details?: Record<string, unknown>) {
   }
 }
 
-function formatEntry(name: string, fullPath: string): Record<string, unknown> {
+function formatEntry(name: string, fullPath: string, key?: string): Record<string, unknown> {
   let stat: fs.Stats | null = null
   try {
     stat = fs.statSync(fullPath)
   } catch {
     return { name, type: 'unknown' }
   }
-  return {
+  const entry: Record<string, unknown> = {
     name,
     type: stat.isDirectory() ? 'dir' : 'file',
     size: stat.isDirectory() ? 0 : stat.size,
     modifiedAt: stat.mtimeMs,
   }
+  // 仅给用户可见区 home/ 的图片附带免鉴权 publicUrl（桌面沙箱/App 内嵌使用）。
+  if (key && stat.isFile() && isUserHomeFile(key, fullPath)) {
+    try {
+      const publicUrl = ensurePublicImageCopy(fullPath)
+      if (publicUrl) entry.publicUrl = publicUrl
+    } catch { /* 列表不因公开副本失败而中断 */ }
+  }
+  return entry
 }
 
 // ---------------------------------------------------------------------------
@@ -522,11 +630,24 @@ function formatEntry(name: string, fullPath: string): Record<string, unknown> {
  *   建版本并切换 + push app_updated」——AI 改文件立即生效，不再等 bootstrap 懒同步；
  * - onAppFolderCreated(appId)：mkdir 命中 apps/<name>/ 时触发，webos.ts 注入做
  *   「自动注册为 App」——AI 只需建文件夹，系统负责初始化与注册。
+ * 2026-08-20（W-F File Service 一阶段）新增：
+ * - onFsFileWritten(fullPath)：任意工作区文件被写入/复制后触发，webos.ts 注入
+ *   File Service 的 recordFileStats 做 files 元数据双写（AI 无感知）；
+ * - onFsFileDeleted(fullPath)：文件/目录被删除后触发，注入 recordFileDeleted
+ *   标记回收站语义（deleted_at 非空，保留版本历史）。
  * 钩子为异步且失败静默（不影响文件操作本身）。
  */
 export interface WorkspaceFsHooks {
   onAppSourceChanged?: (appId: string, relPath: string) => Promise<unknown> | void
   onAppFolderCreated?: (appId: string) => Promise<unknown> | void
+  /**
+   * 任意工作区文件被写入/复制后触发（W-F：files 元数据双写；W1：包校验反馈）。
+   * 返回值若为 `string`（人话校验反馈），工具会把它附到 agent_fs_write/edit/copy 的结果上，
+   * 供 AI 即时修正（校验反馈回路）；无反馈返回 void。
+   */
+  onFsFileWritten?: (fullPath: string) => Promise<string | void> | string | void
+  /** 文件/目录被删除后触发（W-F：回收站语义；W1：包失效提示同理） */
+  onFsFileDeleted?: (fullPath: string) => Promise<string | void> | string | void
 }
 
 /** 解析相对路径是否命中 apps/<appId>/index.html（返回 appId，非则 null） */
@@ -586,7 +707,7 @@ export function workspaceFsTools(key: string, hooks?: WorkspaceFsHooks): ToolDef
         const dir = resolve((params as { path?: string }).path ?? '.')
         const entries = fs.readdirSync(dir, { withFileTypes: true })
           .slice(0, MAX_LIST_ENTRIES)
-          .map((entry) => formatEntry(entry.name, path.join(dir, entry.name)))
+          .map((entry) => formatEntry(entry.name, path.join(dir, entry.name), key))
         log('agent_fs_list', params as Record<string, unknown>, true)
         return okResult({ success: true, path: (params as { path?: string }).path ?? '.', entries })
       } catch (error) {
@@ -618,12 +739,14 @@ export function workspaceFsTools(key: string, hooks?: WorkspaceFsHooks): ToolDef
           const vr = await describeImageFile({ filePath: full, userKey: key })
           if (vr.ok && vr.description) {
             log('agent_fs_read', { path: filePath, kind: 'image', describedBy: visionModelName() }, true)
+            const publicUrl = isUserHomeFile(key, full) ? ensurePublicImageCopy(full) : null
             return okResult({
               success: true,
               path: filePath,
               kind: 'image',
               describedBy: visionModelName(),
               size: stat.size,
+              ...(publicUrl ? { publicUrl } : {}),
               note: `这是图片文件，AI 主模型没有视觉能力，以下为视觉助手（${visionModelName()}）对该图片的描述：`,
               description: vr.description,
             })
@@ -685,12 +808,19 @@ export function workspaceFsTools(key: string, hooks?: WorkspaceFsHooks): ToolDef
         fs.mkdirSync(path.dirname(full), { recursive: true })
         fs.writeFileSync(full, content, 'utf-8')
         log('agent_fs_write', { path: filePath, bytes }, true)
+        // 2026-08-20（W-F）：任意工作区文件写入后落 files 元数据（双写，AI 无感知）；
+        // 2026-08-21（W1）：若命中 packages/ 包目录，同步触发包校验并回流人话反馈
+        let fsFeedback: string | undefined
+        try {
+          const feedback = await hooks?.onFsFileWritten?.(full)
+          if (typeof feedback === 'string' && feedback) fsFeedback = feedback
+        } catch { /* 双写失败静默 */ }
         // 2026-08-13 即时生效：命中 apps/<appId>/index.html → 触发建版本回调
         const appIdHit = matchAppIndexHtml(getWorkspaceRoot(key), path.relative(getWorkspaceRoot(key), full))
         if (appIdHit) {
           try { await hooks?.onAppSourceChanged?.(appIdHit, filePath) } catch { /* 回调失败不影响写入 */ }
         }
-        return okResult({ success: true, path: filePath, bytes })
+        return okResult({ success: true, path: filePath, bytes, ...(fsFeedback ? { note: fsFeedback } : {}) })
       } catch (error) {
         log('agent_fs_write', params as Record<string, unknown>, false, error instanceof Error ? error.message : String(error))
         return errorResult('写入失败', { message: error instanceof Error ? error.message : String(error) })
@@ -762,14 +892,24 @@ export function workspaceFsTools(key: string, hooks?: WorkspaceFsHooks): ToolDef
         assertMutable(relative)
         const stat = fs.statSync(full)
         if (stat.isDirectory()) fs.rmdirSync(full)
-        else fs.unlinkSync(full)
+        else {
+          removePublicImageCopy(full)
+          fs.unlinkSync(full)
+        }
         log('agent_fs_delete', { path: filePath }, true)
+        // 2026-08-20（W-F）：删除后落 files 回收站语义（deleted_at 非空，保留版本历史）；
+        // 2026-08-21（W1）：删除 packages/ 内文件时回流包状态提示
+        let fsFeedback: string | undefined
+        try {
+          const feedback = await hooks?.onFsFileDeleted?.(full)
+          if (typeof feedback === 'string' && feedback) fsFeedback = feedback
+        } catch { /* 双写失败静默 */ }
         // 2026-08-13 删除命中 apps/<appId>/index.html → 触发回调（sync 会重建镜像/标记异常）
         const appIdHit = matchAppIndexHtml(root, relative)
         if (appIdHit) {
           try { await hooks?.onAppSourceChanged?.(appIdHit, filePath) } catch { /* 回调失败不影响删除 */ }
         }
-        return okResult({ success: true, path: filePath })
+        return okResult({ success: true, path: filePath, ...(fsFeedback ? { note: fsFeedback } : {}) })
       } catch (error) {
         log('agent_fs_delete', params as Record<string, unknown>, false, error instanceof Error ? error.message : String(error))
         return errorResult('删除失败', { message: error instanceof Error ? error.message : String(error) })
@@ -788,7 +928,7 @@ export function workspaceFsTools(key: string, hooks?: WorkspaceFsHooks): ToolDef
       try {
         const filePath = (params as { path: string }).path
         const full = resolve(filePath)
-        const info = formatEntry(path.basename(full), full)
+        const info = formatEntry(path.basename(full), full, key)
         log('agent_fs_stat', { path: filePath }, true)
         return okResult({ success: true, path: filePath, ...info })
       } catch (error) {
@@ -937,12 +1077,18 @@ export function workspaceFsTools(key: string, hooks?: WorkspaceFsHooks): ToolDef
         const updated = replaceAll ? content.split(oldText).join(newText) : content.replace(oldText, newText)
         fs.writeFileSync(full, updated, 'utf-8')
         log('agent_fs_edit', { path: filePath, matches, replaceAll: !!replaceAll }, true)
+        // 2026-08-20（W-F）：编辑后落 files 元数据（双写，AI 无感知）；W1：包校验反馈回流
+        let fsFeedback: string | undefined
+        try {
+          const feedback = await hooks?.onFsFileWritten?.(full)
+          if (typeof feedback === 'string' && feedback) fsFeedback = feedback
+        } catch { /* 双写失败静默 */ }
         // 2026-08-13 即时生效：命中 apps/<appId>/index.html → 触发建版本回调
         const appIdHit = matchAppIndexHtml(getWorkspaceRoot(key), path.relative(getWorkspaceRoot(key), full))
         if (appIdHit) {
           try { await hooks?.onAppSourceChanged?.(appIdHit, filePath) } catch { /* 回调失败不影响编辑 */ }
         }
-        return okResult({ success: true, path: filePath, matches, bytes: Buffer.byteLength(updated, 'utf-8') })
+        return okResult({ success: true, path: filePath, matches, bytes: Buffer.byteLength(updated, 'utf-8'), ...(fsFeedback ? { note: fsFeedback } : {}) })
       } catch (error) {
         log('agent_fs_edit', params as Record<string, unknown>, false, error instanceof Error ? error.message : String(error))
         return errorResult('编辑失败', { message: error instanceof Error ? error.message : String(error) })
@@ -985,12 +1131,30 @@ export function workspaceFsTools(key: string, hooks?: WorkspaceFsHooks): ToolDef
         }
         const dstStat = fs.statSync(dstFull)
         log('agent_fs_copy', { source, target, bytes: dstStat.size }, true)
+        // 2026-08-20（W-F）：复制后落 files 元数据（双写，AI 无感知；目录复制走到目标后逐文件登记）；
+        // 2026-08-21（W1）：复制进 packages/ 时回流包校验反馈
+        let fsFeedback: string | undefined
+        try {
+          if (stat.isDirectory()) {
+            const walkDst = (dir: string): void => {
+              for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                const child = path.join(dir, entry.name)
+                if (entry.isDirectory()) walkDst(child)
+                else void hooks?.onFsFileWritten?.(child)
+              }
+            }
+            walkDst(dstFull)
+          } else {
+            const feedback = await hooks?.onFsFileWritten?.(dstFull)
+            if (typeof feedback === 'string' && feedback) fsFeedback = feedback
+          }
+        } catch { /* 双写失败静默 */ }
         // 2026-08-13 即时生效：复制命中 apps/<appId>/index.html → 触发建版本回调
         const appIdHit = matchAppIndexHtml(getWorkspaceRoot(key), dstRel)
         if (appIdHit) {
           try { await hooks?.onAppSourceChanged?.(appIdHit, targetRel) } catch { /* 回调失败不影响复制 */ }
         }
-        return okResult({ success: true, source, target, size: dstStat.size, type: stat.isDirectory() ? 'dir' : 'file' })
+        return okResult({ success: true, source, target, size: dstStat.size, type: stat.isDirectory() ? 'dir' : 'file', ...(fsFeedback ? { note: fsFeedback } : {}) })
       } catch (error) {
         log('agent_fs_copy', params as Record<string, unknown>, false, error instanceof Error ? error.message : String(error))
         return errorResult('复制失败', { message: error instanceof Error ? error.message : String(error) })

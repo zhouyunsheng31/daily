@@ -289,3 +289,32 @@ export async function ensureVisionUsageTable(): Promise<void> {
     console.warn('[db] ensureVisionUsageTable failed:', error instanceof Error ? error.message : String(error))
   }
 }
+
+/**
+ * 2026-08-21 视觉双 provider：webos_vision_usage 表补充 model 列（幂等）。
+ * 记录实际执行模型（deepseek-v4-flash-vision-exp / MiniMax-M3），管理后台按模型
+ * 拆分成本/用量。SQLite：PRAGMA table_info 检查后 ALTER TABLE ADD COLUMN。
+ * 在 ensureVisionUsageTable 之后调用。
+ */
+export async function ensureVisionModelColumn(): Promise<void> {
+  const isSqlite = process.env.DB_DRIVER === 'sqlite' || process.env.USE_SQLITE === 'true'
+  const pool = getPool()
+  try {
+    let existing: string[] = []
+    if (isSqlite) {
+      const result = await pool.query('PRAGMA table_info(webos_vision_usage)')
+      existing = result.rows.map((row) => String((row as { name?: unknown }).name ?? ''))
+    } else {
+      const result = await pool.query(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = 'webos_vision_usage'",
+      )
+      existing = result.rows.map((row) => String((row as { column_name?: unknown }).column_name ?? ''))
+    }
+    if (!existing.includes('model')) {
+      await pool.query('ALTER TABLE webos_vision_usage ADD COLUMN model TEXT')
+      console.log('[db] webos_vision_usage.model added')
+    }
+  } catch (error) {
+    console.warn('[db] ensureVisionModelColumn failed:', error instanceof Error ? error.message : String(error))
+  }
+}

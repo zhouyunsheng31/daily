@@ -41,7 +41,7 @@ import { adminWebosRouter } from './routes/adminWebos.js'
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
 import { runRetentionCleanup } from './db/aiContext.js'
-import { ensureUserIpColumns, ensureDisplayNameColumn, ensureServerMetricsTable, ensureStoreSizeBytesColumn, ensureAfdianRedeemColumn, ensureRedeemCodesTable, ensureVideoUsageErrorMessageColumn, ensureChatSessionsTable, ensureVisionUsageTable } from './db/migrations.js'
+import { ensureUserIpColumns, ensureDisplayNameColumn, ensureServerMetricsTable, ensureStoreSizeBytesColumn, ensureAfdianRedeemColumn, ensureRedeemCodesTable, ensureVideoUsageErrorMessageColumn, ensureChatSessionsTable, ensureVisionUsageTable, ensureVisionModelColumn } from './db/migrations.js'
 import { aiSettingsRouter } from './routes/aiSettings.js'
 import { skillsRouter } from './routes/skills.js'
 import { localServicesRouter } from './routes/localServices.js'
@@ -52,8 +52,20 @@ import { searchKeysRouter } from './routes/searchKeys.js'
 import { githubProxyRouter } from './routes/githubProxy.js'
 import { wikiRouter } from './routes/wiki.js'
 import { componentCapabilitiesRouter } from './routes/componentCapabilities.js'
-import { webosRouter, servePublicImageFile, servePublicAppRawFile, servePublicVideoFile, serveSharePreview, serveShareRawFile, serveStoreRawFile } from './routes/webos.js'
+import { webosRouter, loadState, servePublicImageFile, servePublicAppRawFile, servePublicVideoFile, serveSharePreview, serveShareRawFile, serveStoreRawFile } from './routes/webos.js'
 import { webosTimeRouter } from './routes/webosTime.js'
+import { webosConversationsRouter } from './routes/webosConversations.js'
+import { desktopLayoutRouter } from './webos/desktopLayout.js'
+// 2026-08-20（W-F）：文件服务一阶段路由
+import { filesRouter, ensureFileServiceSchema } from './webos/files/index.js'
+// 2026-08-21（W1）：包体系（三表 + 端点族 + app 只读适配视图注入）
+import { packagesRouter, ensurePackageSchema, setAppViewProvider } from './webos/packages/index.js'
+// 2026-08-21（W2）：App API（handler 受限 vm + owner 级端点 + 计费 kind='api'）
+import { appapiRouter, ensureApiUsageSchema, ensureApiPublicSchema } from './webos/appapi/index.js'
+// 2026-08-21（W3 互通原语 v1）：共享数据空间 + 事件总线（跨用户，R13 非游客）
+import { netRouter, ensureNetSchema } from './webos/net/index.js'
+// 2026-08-21（W3 统一包市场 R14）：万物皆可包市场（发布/浏览/安装/依赖闭包 + pi 工具）
+import { marketRouter, ensureMarketSchema } from './webos/market/index.js'
 import { communitiesRouter } from './routes/communities.js'
 import { backgroundRouter, BACKGROUNDS_DIR, quarantineLegacySvgBackgrounds } from './routes/background.js'
 import { getSearchKey } from './db/aiSettingsStore.js'
@@ -256,7 +268,14 @@ function createApp(options: CreateAppOptions = {}): { app: Express } {
   app.use('/api/component-capabilities', componentCapabilitiesRouter)
 
   // webOS P0：独立命名空间，显式继承现有 JWT 游客/账户鉴权；不改动 Legacy Dashboard 路由或 WS 协议
-  app.use('/webos/api', authMiddleware, webosRouter, webosTimeRouter)
+  // 2026-08-17 会话历史 API（换设备/登录后可见历史；不触碰冻结的 webos.ts）
+  // 2026-08-20 桌面布局端点（web 路线 desktopLayout.ts 插队小任务；解锁移动端 M1-4；不触碰冻结的 webos.ts）
+  // 2026-08-20 W-F 文件服务一阶段（manifest/blob/分块/快照；移动端 M1-7 同步锚点）
+  // 2026-08-21 W1 包体系（三表 + packages 端点族；移动端 M2 包客户端真实联调锚点）
+  // 2026-08-21 W2 App API（handler 受限 vm + owner 级端点 /appapi/:ns/:ep；计费 kind='api'）
+  // 2026-08-21 W3 互通原语 v1（/net/spaces 共享数据空间 + 事件总线；R13 非游客）
+  // 2026-08-21 W3 统一包市场 R14（/market type 维度 + 依赖闭包安装 + AI 找包/装包）
+  app.use('/webos/api', authMiddleware, webosRouter, webosTimeRouter, webosConversationsRouter, desktopLayoutRouter, filesRouter, packagesRouter, appapiRouter, netRouter, marketRouter)
 
   // Phase 6：联邦式社区 API（spec §9 节，走 /api 全局 authMiddleware 继承）
   app.use('/api/communities', communitiesRouter)
@@ -584,6 +603,52 @@ async function main() {
   // 2026-08-14 MiniMax-M3 视觉桥接用量表（旧库幂等建表）
   await ensureVisionUsageTable()
   logStep('ensureVisionUsageTable done')
+  // 2026-08-21 视觉双 provider：用量表补 model 列（旧库幂等；区分 DeepSeek/M3）
+  await ensureVisionModelColumn()
+  logStep('ensureVisionModelColumn done')
+  // 2026-08-20（W-F）：文件服务一阶段元数据表（旧库幂等建表）
+  await ensureFileServiceSchema()
+  logStep('ensureFileServiceSchema done')
+  // 2026-08-21（W1）：包体系三表（旧库幂等建表；apps 状态不动，只读适配视图）
+  await ensurePackageSchema()
+  logStep('ensurePackageSchema done')
+  // 2026-08-21（W2）：App API 用量/审计表（每次调用一行）
+  await ensureApiUsageSchema()
+  logStep('ensureApiUsageSchema done')
+  // 2026-08-21（W3 public 管道）：namespace→owner 发布索引表
+  await ensureApiPublicSchema()
+  logStep('ensureApiPublicSchema done')
+  // 2026-08-21（W3 互通原语 v1）：共享空间 / 空间 KV / 事件总线表
+  await ensureNetSchema()
+  logStep('ensureNetSchema done')
+  // 2026-08-21（W3 统一包市场 R14）：市场发布条目 + 安装登记表
+  await ensureMarketSchema()
+  logStep('ensureMarketSchema done')
+  // 2026-08-21（W1）：注册「app 视为 type=app 的包」只读适配视图
+  //（GET /packages 无 type 过滤时与真包合并返回；避免 packages 模块直接依赖 webos.ts）
+  setAppViewProvider(async (key: string) => {
+    const principal = key.startsWith('guest:')
+      ? { key, id: `guest-${key.slice(6)}`, deviceId: key.slice(6), guest: true, role: 'guest' }
+      : { key, id: key.slice(5), deviceId: `account-${key.slice(5)}`, guest: false, role: 'member' }
+    const state = await loadState(principal as never)
+    return state.apps.map((app) => {
+      const active = app.versions.find((v) => v.id === app.activeVersionId) ?? app.versions[app.versions.length - 1]
+      return {
+        id: app.id,
+        type: 'app' as const,
+        displayName: app.name,
+        icon: app.icon ?? null,
+        version: active?.version ?? null,
+        source: app.source,
+        installed: app.installed,
+        owner: true,
+        capabilities: active?.capabilities ?? [],
+        activeVersionId: app.activeVersionId,
+        createdAt: app.createdAt,
+        updatedAt: Date.now(),
+      }
+    })
+  })
   await seedBuiltinTemplates()
   logStep('seedBuiltinTemplates done')
   await seedShowcasePanel()

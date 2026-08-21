@@ -15,6 +15,12 @@
 // - remove-bg        绿幕/纯色背景去除（chroma key → 带 alpha 的 webm；仅限纯色背景，
 //                    复杂背景做不到——与 AI 抠图不同，工具描述里明确说明）
 // - concat           拼接多个视频（同编码参数）
+// - filter           图片/视频帧滤镜（eq/hue/gblur/colorlevels/negate/alpha，结构化参数）
+// - rotate/flip      旋转/翻转（90/180/270 用 transpose 无损，其他角度 rotate 黑底）
+// - convert          格式转换（png/jpg/webp/gif/mp4/webm）
+// - watermark        图片 overlay / 文字 drawtext 水印
+// - tile             多图网格拼图（ImageMagick montage）
+// - volume           音频音量
 //
 // 输出统一落工作区 agent/media/（AI 可管理），并双写到全局公开目录供 App/iframe 使用。
 // 调用方（webos.ts edit_video 工具）负责权限、落库与计费。
@@ -37,16 +43,46 @@ const execFileAsync = (cmd: string, args: string[], timeoutMs = 120_000): Promis
 /** 支持的输入视频扩展名 */
 const VIDEO_EXTS = ['.mp4', '.mov', '.mkv', '.webm', '.avi', '.m4v']
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp']
+const AUDIO_EXTS = ['.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.opus']
 
 export function isVideoFile(name: string): boolean {
   const ext = path.extname(name).toLowerCase()
-  return VIDEO_EXTS.includes(ext) || IMAGE_EXTS.includes(ext)
+  return VIDEO_EXTS.includes(ext) || IMAGE_EXTS.includes(ext) || AUDIO_EXTS.includes(ext)
+}
+
+function clampNum(value: unknown, min: number, max: number, def: number): number {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return def
+  return Math.min(max, Math.max(min, n))
+}
+
+/** drawtext 文本转义：\ : ' , % 前加反斜杠（供 FFmpeg filter 解析） */
+function escapeDrawText(text: string): string {
+  return text.replace(/([\\:,'%])/g, '\\$1')
+}
+
+/** 从系统字体列表里挑一个存在的字体；找不到返回 null */
+function findFontFile(): string | null {
+  const candidates = [
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+    '/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf',
+  ]
+  return candidates.find((f) => fs.existsSync(f)) ?? null
+}
+
+/** 解析 #RRGGBBAA 为 FFmpeg 可用的 fontcolor（不支持 8 位 hex 时原样返回） */
+function parseColor(color: string): string {
+  const m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})$/.exec(color.trim())
+  if (!m) return color.trim()
+  const alpha = parseInt(m[2]!, 16) / 255
+  return `0x${m[1]}@${alpha.toFixed(3)}`
 }
 
 export interface EditVideoParams {
   operation:
     | 'extract-frames' | 'sprite-sheet' | 'to-sprite' | 'to-gif' | 'poster' | 'trim' | 'crop'
     | 'scale' | 'extract-audio' | 'mute' | 'speed' | 'remove-bg' | 'concat'
+    | 'filter' | 'rotate' | 'flip' | 'convert' | 'watermark' | 'tile' | 'volume'
   /** 源文件工作区绝对路径（concat 时是数组） */
   input: string | string[]
   /** 输出目录（工作区绝对路径）；默认调用方给的 agent/media/ 下自动建子目录 */
@@ -68,6 +104,36 @@ export interface EditVideoParams {
   /** remove-bg：背景颜色（green/blue/white/black，默认 green）与相似度（0-1，默认 0.1） */
   bgColor?: string
   similarity?: number
+  /** filter：图片/视频帧滤镜 */
+  contrast?: number
+  brightness?: number
+  saturation?: number
+  gamma?: number
+  blur?: number
+  alpha?: number
+  darken?: number
+  hue?: number
+  negate?: boolean
+  /** rotate/flip */
+  degrees?: number
+  direction?: string
+  /** convert */
+  to?: string
+  quality?: number
+  /** watermark */
+  watermarkPath?: string
+  text?: string
+  position?: string
+  margin?: number
+  scale?: number
+  fontsize?: number
+  color?: string
+  /** tile */
+  columns?: number
+  gap?: number
+  background?: string
+  /** volume */
+  level?: number
 }
 
 export interface EditVideoResult {
@@ -342,6 +408,192 @@ export async function editVideo(params: EditVideoParams): Promise<EditVideoResul
         const outFile = path.join(outRoot, 'concat.mp4')
         await execFileAsync('ffmpeg', ['-y', '-v', 'error', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', '-movflags', '+faststart', outFile])
         return ok([await publishFile(outFile, outRoot, 'video')])
+      }
+
+      // ---- 图片/视频帧滤镜（结构化参数，不接受任意 filter 字符串）----
+      case 'filter': {
+        const contrast = clampNum(params.contrast, 0.1, 3, 1)
+        const brightness = clampNum(params.brightness, -1, 1, 0)
+        const saturation = clampNum(params.saturation, 0, 3, 1)
+        const gamma = clampNum(params.gamma, 0.1, 3, 1)
+        const blur = clampNum(params.blur, 0, 50, 0)
+        const alpha = clampNum(params.alpha, 0.05, 1, 1)
+        const darken = clampNum(params.darken, 0, 0.8, 0)
+        const hue = clampNum(params.hue, -180, 180, 0)
+        const negate = params.negate === true
+        const parts: string[] = []
+        parts.push(`eq=contrast=${contrast.toFixed(3)}:brightness=${brightness.toFixed(3)}:saturation=${saturation.toFixed(3)}:gamma=${gamma.toFixed(3)}`)
+        if (Math.abs(hue) > 0.001) parts.push(`hue=h=${hue.toFixed(3)}`)
+        if (blur > 0) parts.push(`gblur=sigma=${blur.toFixed(3)}`)
+        if (darken > 0) {
+          const max = (1 - darken).toFixed(3)
+          // FFmpeg colorlevels 实际参数名为 romax/gomax/bomax（输出白点），同值压暗
+          parts.push(`colorlevels=romax=${max}:gomax=${max}:bomax=${max}`)
+        }
+        if (negate) parts.push('negate')
+        if (alpha < 1) parts.push('format=rgba', `colorchannelmixer=aa=${alpha.toFixed(3)}`)
+        const hasAlpha = alpha < 1 || ext === '.png' || ext === '.webp'
+        const outExt = hasAlpha ? '.png' : '.jpg'
+        const outFile = path.join(outRoot, `filtered${outExt}`)
+        const args = ['-y', '-v', 'error', '-i', input0, '-vf', parts.join(','), '-frames:v', '1']
+        if (outExt === '.png') args.push('-c:v', 'png')
+        else args.push('-q:v', '3')
+        args.push(outFile)
+        await execFileAsync('ffmpeg', args)
+        return ok([await publishFile(outFile, outRoot, 'image')])
+      }
+
+      // ---- 旋转（90/180/270 用 transpose 组合，其他角度 rotate 黑底）----
+      case 'rotate': {
+        const degrees = clampNum(params.degrees, -360, 360, 0)
+        const normalized = ((degrees % 360) + 360) % 360
+        let vf = 'null'
+        if (normalized === 90) vf = 'transpose=1'
+        else if (normalized === 180) vf = 'transpose=1,transpose=1'
+        else if (normalized === 270) vf = 'transpose=2'
+        else if (Math.abs(degrees) > 0.001) {
+          const rad = (degrees * Math.PI / 180).toFixed(6)
+          vf = `rotate=${rad}:fillcolor=black`
+        }
+        const isImage = IMAGE_EXTS.includes(ext)
+        const outFile = path.join(outRoot, `rotated${isImage ? ext : '.mp4'}`)
+        const args = ['-y', '-v', 'error', '-i', input0]
+        if (vf !== 'null') {
+          args.push('-vf', vf)
+          if (!isImage) args.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-c:a', 'aac', '-movflags', '+faststart')
+        } else if (!isImage) {
+          args.push('-c', 'copy', '-movflags', '+faststart')
+        }
+        args.push(outFile)
+        await execFileAsync('ffmpeg', args)
+        return ok([await publishFile(outFile, outRoot, isImage ? 'image' : 'video')])
+      }
+
+      // ---- 翻转 ----
+      case 'flip': {
+        const direction = String(params.direction || 'horizontal').toLowerCase()
+        if (direction !== 'horizontal' && direction !== 'vertical') throw new Error('flip direction 仅支持 horizontal/vertical')
+        const vf = direction === 'horizontal' ? 'hflip' : 'vflip'
+        const isImage = IMAGE_EXTS.includes(ext)
+        const outFile = path.join(outRoot, `flipped${isImage ? ext : '.mp4'}`)
+        const args = ['-y', '-v', 'error', '-i', input0, '-vf', vf]
+        if (!isImage) args.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-c:a', 'aac', '-movflags', '+faststart')
+        args.push(outFile)
+        await execFileAsync('ffmpeg', args)
+        return ok([await publishFile(outFile, outRoot, isImage ? 'image' : 'video')])
+      }
+
+      // ---- 格式转换 ----
+      case 'convert': {
+        const to = String(params.to || '').toLowerCase()
+        const allowed = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'webm']
+        if (!allowed.includes(to)) throw new Error('convert to 仅支持 png/jpg/webp/gif/mp4/webm')
+        const quality = Math.round(clampNum(params.quality, 1, 100, 85))
+        const outExt = to === 'jpeg' ? '.jpg' : `.${to}`
+        const outFile = path.join(outRoot, `converted${outExt}`)
+        const args = ['-y', '-v', 'error', '-i', input0]
+        if (to === 'png') args.push('-c:v', 'png')
+        else if (to === 'jpg' || to === 'jpeg') args.push('-q:v', String(Math.max(2, Math.min(31, Math.round((100 - quality) * 0.3 + 2)))))
+        else if (to === 'webp') args.push('-quality', String(quality))
+        else if (to === 'gif') args.push('-c:v', 'gif')
+        else if (to === 'mp4') args.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-c:a', 'aac', '-movflags', '+faststart')
+        else if (to === 'webm') args.push('-c:v', 'libvpx-vp9', '-b:v', '1.5M', '-c:a', 'libopus')
+        args.push(outFile)
+        await execFileAsync('ffmpeg', args)
+        const isImage = ['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(to)
+        return ok([await publishFile(outFile, outRoot, isImage ? 'image' : 'video')])
+      }
+
+      // ---- 水印（图片 overlay / 文字 drawtext）----
+      case 'watermark': {
+        const position = String(params.position || 'br').toLowerCase()
+        const allowedPos = ['tl', 'tr', 'bl', 'br', 'center']
+        if (!allowedPos.includes(position)) throw new Error('watermark position 仅支持 tl/tr/bl/br/center')
+        const margin = Math.round(clampNum(params.margin, 0, 200, 12))
+        const isImage = IMAGE_EXTS.includes(ext)
+        const outFile = path.join(outRoot, isImage ? 'watermarked.png' : 'watermarked.mp4')
+
+        if (params.watermarkPath) {
+          const wmFull = params.watermarkPath
+          if (!fs.existsSync(wmFull) || !IMAGE_EXTS.includes(path.extname(wmFull).toLowerCase())) {
+            throw new Error('watermarkPath 不存在或不是图片')
+          }
+          const scale = clampNum(params.scale, 0.1, 2, 1)
+          const posExpr: Record<string, string> = {
+            tl: `x=${margin}:y=${margin}`,
+            tr: `x=W-w-${margin}:y=${margin}`,
+            bl: `x=${margin}:y=H-h-${margin}`,
+            br: `x=W-w-${margin}:y=H-h-${margin}`,
+            center: `x=(W-w)/2:y=(H-h)/2`,
+          }
+          const scaled = scale !== 1 ? `[1:v]scale=iw*${scale.toFixed(3)}:ih*${scale.toFixed(3)}[wm];` : ''
+          const filterComplex = `${scaled}[0:v][${scale !== 1 ? 'wm' : '1:v'}]overlay=${posExpr[position]}`
+          const args = ['-y', '-v', 'error', '-i', input0, '-i', wmFull, '-filter_complex', filterComplex]
+          if (isImage) {
+            args.push('-frames:v', '1', '-c:v', 'png')
+          } else {
+            args.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-c:a', 'aac', '-movflags', '+faststart')
+          }
+          args.push(outFile)
+          await execFileAsync('ffmpeg', args)
+          return ok([await publishFile(outFile, outRoot, isImage ? 'image' : 'video')])
+        }
+
+        if (params.text !== undefined && String(params.text).length > 0) {
+          const font = findFontFile()
+          if (!font) {
+            return { ok: false, files: [], durationMs: Date.now() - startedAt, errorCode: 'FONT_NOT_FOUND', errorMessage: '未找到可用系统字体（DejaVuSans/DejaVuSerif）' }
+          }
+          const fontsize = Math.round(clampNum(params.fontsize, 8, 200, 28))
+          const color = parseColor(String(params.color || 'white'))
+          const text = escapeDrawText(String(params.text))
+          const posExpr: Record<string, string> = {
+            tl: `x=${margin}:y=${margin}`,
+            tr: `x=w-tw-${margin}:y=${margin}`,
+            bl: `x=${margin}:y=h-th-${margin}`,
+            br: `x=w-tw-${margin}:y=h-th-${margin}`,
+            center: `x=(w-tw)/2:y=(h-th)/2`,
+          }
+          const vf = `drawtext=text='${text}':fontfile='${font}':fontsize=${fontsize}:fontcolor=${color}:${posExpr[position]}`
+          const args = ['-y', '-v', 'error', '-i', input0, '-vf', vf]
+          if (isImage) {
+            args.push('-frames:v', '1', '-c:v', 'png')
+          } else {
+            args.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-c:a', 'aac', '-movflags', '+faststart')
+          }
+          args.push(outFile)
+          await execFileAsync('ffmpeg', args)
+          return ok([await publishFile(outFile, outRoot, isImage ? 'image' : 'video')])
+        }
+
+        throw new Error('watermark 需要提供 watermarkPath 或 text')
+      }
+
+      // ---- 网格拼图（ImageMagick montage）----
+      case 'tile': {
+        if (inputs.length < 2 || inputs.length > 12) throw new Error('tile 需要 2-12 张图片')
+        for (const f of inputs) {
+          const fext = path.extname(f).toLowerCase()
+          if (!fs.existsSync(f) || !IMAGE_EXTS.includes(fext)) throw new Error('tile 输入必须都是已存在的图片')
+        }
+        const defaultColumns = Math.max(1, Math.min(6, Math.round(Math.sqrt(inputs.length))))
+        const columns = Math.max(1, Math.min(6, Math.round(clampNum(params.columns, 1, 6, defaultColumns))))
+        const gap = Math.round(clampNum(params.gap, 0, 50, 0))
+        const bg = String(params.background || 'white').toLowerCase()
+        if (bg !== 'white' && bg !== 'black' && bg !== 'transparent') throw new Error('tile background 仅支持 white/black/transparent')
+        const bgArg = bg === 'transparent' ? 'none' : bg
+        const outFile = path.join(outRoot, 'tile.png')
+        await execFileAsync('montage', [...inputs, '-tile', `${columns}x`, '-geometry', `+${gap}+${gap}`, '-background', bgArg, outFile])
+        return ok([await publishFile(outFile, outRoot, 'image')])
+      }
+
+      // ---- 音频音量 ----
+      case 'volume': {
+        if (!AUDIO_EXTS.includes(ext)) throw new Error('volume 仅支持音频输入')
+        const level = clampNum(params.level, 0, 3, 1)
+        const outFile = path.join(outRoot, 'volume.mp3')
+        await execFileAsync('ffmpeg', ['-y', '-v', 'error', '-i', input0, '-af', `volume=${level.toFixed(3)}`, '-c:a', 'libmp3lame', '-q:a', '4', outFile])
+        return ok([await publishFile(outFile, outRoot, 'audio')])
       }
 
       default:

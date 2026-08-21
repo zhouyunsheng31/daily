@@ -74,12 +74,12 @@ export const AI_TOOL_DEFINITIONS: AiToolInfo[] = [
   // Phase 5：弹出层触发工具（2 个，spec §3.3）
   { name: 'show_popup', label: '显示弹出层', description: '在弹出层显示内容（登录窗口/引导/广告/自定义HTML），可叠加', category: 'interaction', canDisable: true, defaultEnabled: true },
   { name: 'dismiss_popup', label: '关闭弹出层', description: '关闭指定弹出层或所有弹出层', category: 'interaction', canDisable: true, defaultEnabled: true },
-  // search 工具（6 个，Phase S9 + 2026-08-05 秘塔 reader/QA）
+  // search 工具（5 个，2026-08-17 供应商替换：Exa + ArXiv）
   { name: 'local_search', label: '本地搜索', description: '检索本端已同步数据（面板/笔记/任务/书签等）', category: 'search', canDisable: true, defaultEnabled: true },
-  { name: 'web_search', label: '网页搜索', description: '联网搜索网页/学术/图片（秘塔 AI 搜索，metaso.cn）', category: 'search', canDisable: true, defaultEnabled: true },
-  { name: 'read_webpage', label: '读取网页', description: '读取指定网页全文（markdown，含链接，可逐级深入打开）', category: 'search', canDisable: true, defaultEnabled: true },
+  { name: 'web_search', label: '网页搜索', description: '联网搜索（Exa 语义搜索，api.exa.ai，支持学术/新闻/公司等分类）', category: 'search', canDisable: true, defaultEnabled: true },
+  { name: 'read_webpage', label: '读取网页', description: '读取指定网页全文（Exa 抓正文，支持一次多 URL）', category: 'search', canDisable: true, defaultEnabled: true },
   { name: 'academic_search', label: '学术搜索', description: '检索 ArXiv 学术论文（按提交日期倒序，支持开放获取 PDF，无需 API Key）', category: 'search', canDisable: true, defaultEnabled: true },
-  { name: 'github_search', label: 'GitHub 搜索', description: 'GitHub 仓库/代码/用户/Issue 搜索 + 文件/Release/整仓 zip 下载（token 可选，无 token 60 req/hour，search_code 需 token）', category: 'search', canDisable: true, defaultEnabled: true },
+  { name: 'exa_find_similar', label: '相似内容检索', description: '按已知 URL 找语义相似的其他网页/文章/论文（Exa 独有）', category: 'search', canDisable: true, defaultEnabled: true },
   // system 工具（1 个，Phase 14.4，系统级，不允许禁用）
   { name: 'query_capabilities', label: '查询组件能力', description: '查询所有组件的能力声明（widgetType / displayName / description / api / dependencies）', category: 'system', canDisable: false, defaultEnabled: true },
   // filesystem 工具（7 个，Phase 3，spec §7）

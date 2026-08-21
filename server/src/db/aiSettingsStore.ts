@@ -13,7 +13,7 @@ export const SETTINGS_KEYS = {
   SYSTEM_PROMPT: 'system_prompt',
   CANVAS_PROMPT: 'canvas_prompt',
   BROWSER_PROMPT: 'browser_prompt',
-  SEARCH_KEY_METASO: 'search_key_metaso',
+  SEARCH_KEY_EXA: 'search_key_exa',
   SEARCH_KEY_GITHUB: 'searchKey.github',
 } as const
 
@@ -157,19 +157,18 @@ export function clearPromptCache(): void {
 // Phase S9：搜索引擎 API Key 管理（spec 8.4 节）
 // ============================================================================
 
-export type SearchProvider = 'metaso' | 'github'
+export type SearchProvider = 'exa' | 'github'
 
 const SEARCH_KEY_MAP: Record<SearchProvider, string> = {
-  metaso: SETTINGS_KEYS.SEARCH_KEY_METASO,
+  exa: SETTINGS_KEYS.SEARCH_KEY_EXA,
   github: SETTINGS_KEYS.SEARCH_KEY_GITHUB,
 }
 
 /** 读取搜索引擎 API Key（明文），供 piBridge 工具 execute 内调用 */
 export async function getSearchKey(provider: SearchProvider): Promise<string | null> {
-  // 2026-08-06 秘塔 key 优先读环境变量（METASO_API_KEY 同时服务搜索/视频），
-  // 未配置时回退 DB（旧版设置页存储）
-  if (provider === 'metaso') {
-    const envKey = process.env.METASO_API_KEY
+  // 2026-08-17 Exa key 优先读环境变量（EXA_API_KEY），未配置时回退 DB（设置页存储）
+  if (provider === 'exa') {
+    const envKey = process.env.EXA_API_KEY
     if (envKey && envKey.trim().length > 0) return envKey.trim()
   }
   const pool = getPool()

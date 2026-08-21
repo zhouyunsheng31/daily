@@ -58,6 +58,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      TZ: Asia/Shanghai
       NODE_ENV: production
       PORT: 3456
       DATABASE_URL: postgresql://${POSTGRES_USER:-daily}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-daily}
@@ -75,6 +76,7 @@ services:
       # webOS P0: DeepSeek Provider（仅服务端读取，禁止进入前端 bundle）
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-}
     # S15: 端口绑定 127.0.0.1，仅 Nginx 反代可访问（不暴露公网）
     ports:
       - "127.0.0.1:3456:3456"

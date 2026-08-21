@@ -13,6 +13,12 @@ export interface ApiUsageLogEntry {
   status: 'ok' | 'error'
   errorMsg?: string
   creditsConsumed?: number  // 秘塔 credits 字段（spec 2.7.5 节，其他 provider 不传）
+  /** 2026-08-17 搜索 API 状态可视化：调用方用户标识（user:<id> / guest:<deviceId> / panel:<panelId>） */
+  userKey?: string | null
+  /** 搜索关键词（非搜索类调用不传） */
+  query?: string | null
+  /** 来源工具名（web_search / read_webpage / academic_search / github_search 等） */
+  tool?: string | null
 }
 
 /** 记录一次外部 API 调用 */
@@ -21,9 +27,9 @@ export async function logApiUsage(entry: ApiUsageLogEntry): Promise<void> {
     const pool = getPool()
     const now = Date.now()
     await pool.query(
-      `INSERT INTO api_usage_log (provider, endpoint, count, latency_ms, status, error_msg, credits_consumed, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [entry.provider, entry.endpoint, entry.count ?? 1, entry.latencyMs ?? null, entry.status, entry.errorMsg ?? null, entry.creditsConsumed ?? null, now]
+      `INSERT INTO api_usage_log (provider, endpoint, count, latency_ms, status, error_msg, credits_consumed, user_key, query, tool, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [entry.provider, entry.endpoint, entry.count ?? 1, entry.latencyMs ?? null, entry.status, entry.errorMsg ?? null, entry.creditsConsumed ?? null, entry.userKey ?? null, entry.query ?? null, entry.tool ?? null, now]
     )
   } catch (err) {
     // 日志记录失败不影响主流程

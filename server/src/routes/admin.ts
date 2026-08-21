@@ -376,8 +376,7 @@ adminRouter.put('/tool-permissions/:toolName', async (req, res, next) => {
 
 // ============================================================================
 // 搜索引擎配置 API（spec §10.3）
-// 4 个引擎：local/web(metaso)/academic(arxiv)/github
-// config JSON 存储引擎参数（如 api_key）；metaso/github 的 api_key 同步到 ai_settings 表
+// 引擎：local / web(exa) / academic(arxiv)；config JSON 存储 api_key；exa 的 api_key 同步到 ai_settings 表
 // ============================================================================
 
 interface SearchEngineRow {
@@ -458,14 +457,12 @@ adminRouter.put('/search-engines/:name', async (req, res, next) => {
       values,
     )
 
-    // 同步 metaso/github 的 api_key 到 ai_settings 表（piBridge 从 ai_settings 读取）
+    // 同步 exa 的 api_key 到 ai_settings 表（piBridge 从 ai_settings 读取；exa 优先环境变量 EXA_API_KEY）
     if (body.config) {
       const apiKey = body.config.apiKey as string | undefined
       if (typeof apiKey === 'string' && apiKey.length > 0) {
-        if (name === 'metaso') {
-          await setSetting(SETTINGS_KEYS.SEARCH_KEY_METASO, apiKey)
-        } else if (name === 'github') {
-          await setSetting(SETTINGS_KEYS.SEARCH_KEY_GITHUB, apiKey)
+        if (name === 'exa') {
+          await setSetting(SETTINGS_KEYS.SEARCH_KEY_EXA, apiKey)
         }
       }
     }

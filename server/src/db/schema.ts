@@ -293,9 +293,14 @@ CREATE TABLE IF NOT EXISTS api_usage_log (
   latency_ms INTEGER,
   status VARCHAR(16) NOT NULL,
   error_msg TEXT,
-  created_at BIGINT NOT NULL
+  created_at BIGINT NOT NULL,
+  -- 2026-08-17 搜索 API 状态可视化：用户/关键词/来源工具（可空，兼容旧记录）
+  user_key VARCHAR(128),
+  query TEXT,
+  tool VARCHAR(64)
 );
 CREATE INDEX IF NOT EXISTS idx_api_usage_log_provider_time ON api_usage_log(provider, created_at);
+CREATE INDEX IF NOT EXISTS idx_api_usage_log_tool_time ON api_usage_log(tool, created_at);
 
 -- ============================================================================
 -- Phase 14.4：组件能力声明表（spec 14.4.2 节）
@@ -332,6 +337,24 @@ DO $$ BEGIN
     ALTER TABLE api_usage_log ADD COLUMN credits_consumed INTEGER;
   END IF;
 END $$;
+
+-- 4. api_usage_log 新增 user_key/query/tool 列（搜索 API 状态可视化，幂等）
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'api_usage_log' AND column_name = 'user_key') THEN
+    ALTER TABLE api_usage_log ADD COLUMN user_key VARCHAR(128);
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'api_usage_log' AND column_name = 'query') THEN
+    ALTER TABLE api_usage_log ADD COLUMN query TEXT;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'api_usage_log' AND column_name = 'tool') THEN
+    ALTER TABLE api_usage_log ADD COLUMN tool VARCHAR(64);
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_api_usage_log_tool_time ON api_usage_log(tool, created_at);
 
 -- ============================================================================
 -- Phase S3 缺口 A：实体冲突日志（架构文档 4.3）
@@ -491,9 +514,10 @@ CREATE INDEX IF NOT EXISTS idx_webos_chat_sessions_user ON webos_chat_sessions(u
 CREATE INDEX IF NOT EXISTS idx_webos_chat_sessions_conv ON webos_chat_sessions(user_key, conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_webos_chat_sessions_created ON webos_chat_sessions(created_at);
 
--- 2026-08-14 MiniMax-M3 视觉桥接用量明细（AI 的眼睛：图片/视频 → 文字描述）
--- 主模型（DeepSeek）非视觉，每次 M3 调用一行；成本按官方「永久五折」价
--- （输入 ¥2.10 / 输出 ¥8.40 / 缓存 ¥0.42 每百万 token）折算，管理后台实时查看
+-- 2026-08-14 视觉桥接用量明细（AI 的眼睛：图片/视频 → 文字描述）
+-- 主模型（DeepSeek）非视觉，每次视觉模型调用一行；2026-08-21 双 provider：
+--   图片优先 deepseek-v4-flash-vision-exp（官方价，高峰×2）/ 兜底与视频走 MiniMax-M3（官方五折价），
+--   model 列区分实际执行模型，成本按各自价格折算，管理后台实时查看
 CREATE TABLE IF NOT EXISTS webos_vision_usage (
   id TEXT PRIMARY KEY,             -- vision-<uuid>
   user_key TEXT NOT NULL,          -- guest:<deviceId> / user:<userId>
@@ -502,6 +526,7 @@ CREATE TABLE IF NOT EXISTS webos_vision_usage (
   conversation_id TEXT,
   trigger TEXT NOT NULL DEFAULT 'chat_bridge', -- chat_bridge / read_tool / describe_media
   kind TEXT NOT NULL DEFAULT 'image',          -- image / video / mixed / unsupported
+  model TEXT,                                  -- 2026-08-21 实际执行模型：deepseek-v4-flash-vision-exp / MiniMax-M3
   media_count INTEGER NOT NULL DEFAULT 0,
   prompt TEXT,                     -- 附带指令摘要（≤300 字符）
   description TEXT,                -- M3 返回的描述（≤500 字符，审计用）
@@ -561,6 +586,21 @@ CREATE TABLE IF NOT EXISTS webos_store_installs (
   created_at BIGINT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_store_installs_unique ON webos_store_installs(share_id, installer_key);
+
+-- 2026-08-18 技能市场发布：用户把自己工作区 skills/<skill_id>/ 发布到市场（他人可安装）
+CREATE TABLE IF NOT EXISTS webos_store_skills (
+  id TEXT PRIMARY KEY,             -- 条目 id（sk- 前缀，市场列表/安装/下架用）
+  skill_id TEXT NOT NULL,          -- 发布时的技能目录名（安装到用户工作区 skills/<skill_id>/）
+  owner_key TEXT NOT NULL,         -- 发布者（guest:<deviceId> / user:<userId>）
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  size_bytes BIGINT NOT NULL DEFAULT 0,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'published'
+);
+CREATE INDEX IF NOT EXISTS idx_store_skills_owner ON webos_store_skills(owner_key, status);
+CREATE INDEX IF NOT EXISTS idx_store_skills_status ON webos_store_skills(status, created_at);
 
 -- 2026-08-06 服务器负载历史（每分钟一条，保留 30 天；管理后台趋势图 + AI 追溯查询）
 CREATE TABLE IF NOT EXISTS webos_server_metrics (
@@ -801,12 +841,11 @@ CREATE TABLE IF NOT EXISTS search_engines (
   updated_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM now()) * 1000)::BIGINT
 );
 
--- 种子数据：4 个默认搜索引擎
+-- 种子数据：3 个默认搜索引擎（2026-08-17：移除秘塔/GitHub，web 改用 Exa）
 INSERT INTO search_engines (name, display_name, enabled, config) VALUES
   ('local', '本地搜索', TRUE, '{}'::jsonb),
-  ('metaso', '秘塔搜索', TRUE, '{}'::jsonb),
-  ('arxiv', '学术搜索(ArXiv)', TRUE, '{}'::jsonb),
-  ('github', 'GitHub搜索', TRUE, '{}'::jsonb)
+  ('exa', 'Exa 搜索', TRUE, '{}'::jsonb),
+  ('arxiv', '学术搜索(ArXiv)', TRUE, '{}'::jsonb)
 ON CONFLICT (name) DO NOTHING;
 `
 

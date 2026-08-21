@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import { join, extname } from 'path'
-import { writeFileSync, existsSync, mkdirSync } from 'fs'
+import { writeFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'fs'
 import { AsyncLocalStorage } from 'async_hooks'
 // Phase 14 C5 修复：pi-coding-agent 改为懒加载，避免 server 启动时 import 超时
 // 根因：tsx loader 给 pi-coding-agent import 增加巨大开销（8.4s 直接 → 26s with tsx），
@@ -12,6 +12,7 @@ import type {
   ToolDefinition,
   SessionManager,
   ProviderConfig,
+  ProviderModelConfig,
 } from '@earendil-works/pi-coding-agent'
 
 // 懒加载 pi-coding-agent：推迟到首次 AI 请求时才加载
@@ -53,7 +54,7 @@ import { persistConversation, restoreSessionContext, persistPiEvent } from './db
 import { getAiSettings, getPromptOverrides, clearPromptCache, DEFAULT_PROMPTS } from './db/aiSettingsStore.js'
 import { getPool } from './db/connection.js'
 import { AI_TOOL_MAP, isValidToolName } from './utils/aiTools.js'
-import { searchTools } from './utils/searchTools.js'
+import { searchTools, withSearchUser } from './utils/searchTools.js'
 import { queryCapabilitiesTool } from './utils/capabilityTools.js'
 import { fileSystemTools } from './utils/fileSystemTools.js'
 import { initSandbox } from './sandbox/index.js'
@@ -1519,7 +1520,7 @@ const customTools: ToolDefinition[] = [
   askUserTool,
   // Phase S9：4 个搜索工具（local_search 路由到客户端，其余 3 个直接调外部 API）
   localSearchTool,
-  ...searchTools,  // webSearchTool, academicSearchTool, githubSearchTool
+  ...searchTools,  // webSearchTool, readWebpageTool, academicSearchTool, exaFindSimilarTool
   // Phase 14.4：查询组件能力声明（system 工具，不可禁用）
   queryCapabilitiesTool,
   // Phase 3：7 个文件系统工具（PI 原生工具，在服务端沙箱内运行，默认禁用，spec §7）
@@ -2094,50 +2095,53 @@ export async function handleUserMessage(
 
   // 在面板上下文中执行（让 customTools 能获取到 panelId，spec 2.3 节）
   // 同时在 callerWidgetId 上下文中执行（spec 7.2 M4 修复：让 customTools 能获取到 callerWidgetId）
+  // 2026-08-17 追加搜索用户上下文（user_key = panel:<panelId>），供搜索工具落库记录调用方
   // prompt is async; do not await - let event stream drive the UI
-  void withPanelContext(panelId, async () => {
-    return withCallerWidgetContext(callerWidgetId, async () => {
-      // v3 修复 B3：关键诊断日志
-      const promptStart = Date.now()
-      console.log('[PiBridge] prompt START', panelId, 'content:', content.slice(0, 80))
-      try {
-        // v3 修复 B1：3 分钟整体超时，防止 SDK 内部工具循环无限运行
-        await Promise.race([
-          session.prompt(content),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('prompt timeout 180s')), 180_000),
-          ),
-        ])
-        // v3 修复 B3：prompt END 日志
-        console.log('[PiBridge] prompt END', panelId, 'durationMs:', Date.now() - promptStart)
-        // 标记该面板 session ready（首次成功 prompt 后）
-        if (!panelSessionReady.has(panelId)) {
-          panelSessionReady.add(panelId)
-          broadcast({ kind: 'session_ready', sessionId: session.sessionId, panelId })
+  void withSearchUser(`panel:${panelId}`, async () => {
+    return withPanelContext(panelId, async () => {
+      return withCallerWidgetContext(callerWidgetId, async () => {
+        // v3 修复 B3：关键诊断日志
+        const promptStart = Date.now()
+        console.log('[PiBridge] prompt START', panelId, 'content:', content.slice(0, 80))
+        try {
+          // v3 修复 B1：3 分钟整体超时，防止 SDK 内部工具循环无限运行
+          await Promise.race([
+            session.prompt(content),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('prompt timeout 180s')), 180_000),
+            ),
+          ])
+          // v3 修复 B3：prompt END 日志
+          console.log('[PiBridge] prompt END', panelId, 'durationMs:', Date.now() - promptStart)
+          // 标记该面板 session ready（首次成功 prompt 后）
+          if (!panelSessionReady.has(panelId)) {
+            panelSessionReady.add(panelId)
+            broadcast({ kind: 'session_ready', sessionId: session.sessionId, panelId })
+          }
+        } catch (err) {
+          console.error(`[PiBridge] prompt error for panel ${panelId}:`, err)
+          const message = err instanceof Error ? err.message : String(err)
+          if (message.includes('timeout')) {
+            console.warn('[PiBridge] prompt TIMEOUT', panelId, '180s')
+          }
+          // v3 修复 B1：销毁 session（超时或错误都销毁，避免 SDK 内部状态不一致）
+          void disposePanelSession(panelId)
+          // 通知客户端
+          const errorMsg = {
+            kind: 'error' as const,
+            message: message.includes('timeout')
+              ? 'AI 响应超时（3 分钟），已终止。请重新发送或简化任务。'
+              : `Agent prompt failed: ${message}`,
+            panelId,
+          }
+          // 优先发送到发起消息的设备，无 deviceId 时广播
+          if (deviceId) {
+            sendToDevice(deviceId, errorMsg)
+          } else {
+            broadcast(errorMsg)
+          }
         }
-      } catch (err) {
-        console.error(`[PiBridge] prompt error for panel ${panelId}:`, err)
-        const message = err instanceof Error ? err.message : String(err)
-        if (message.includes('timeout')) {
-          console.warn('[PiBridge] prompt TIMEOUT', panelId, '180s')
-        }
-        // v3 修复 B1：销毁 session（超时或错误都销毁，避免 SDK 内部状态不一致）
-        void disposePanelSession(panelId)
-        // 通知客户端
-        const errorMsg = {
-          kind: 'error' as const,
-          message: message.includes('timeout')
-            ? 'AI 响应超时（3 分钟），已终止。请重新发送或简化任务。'
-            : `Agent prompt failed: ${message}`,
-          panelId,
-        }
-        // 优先发送到发起消息的设备，无 deviceId 时广播
-        if (deviceId) {
-          sendToDevice(deviceId, errorMsg)
-        } else {
-          broadcast(errorMsg)
-        }
-      }
+      })
     })
   })
 }
@@ -2248,8 +2252,8 @@ export const __test = {
 // 背景：webOS 早期端点自研了 DeepSeek HTTP 直连（模型名 deepseek-chat /
 // deepseek-reasoner、自造 fast/balanced/deep/high 档位），偏离了“AI 能力由
 // pi agent 提供”的项目架构。现改为复用 pi-coding-agent 会话链路：
-// - 模型：pi 内置 deepseek provider 的 `deepseek/deepseek-v4-flash`（DeepSeek
-//   V4 Flash，baseUrl https://api.deepseek.com，可用 DEEPSEEK_MODEL 覆盖）
+// - 模型：pi 内置 deepseek provider 的 `deepseek/deepseek-v4-flash-0731`（ChatST
+//   聚合网关，baseUrl https://api.chatst.org/v1，可用 DEEPSEEK_MODEL / DEEPSEEK_BASE_URL 覆盖）
 // - 思考档：DeepSeek 官方四档 low/medium/high/max（pi 原生 xhigh 对应 max）
 // - API Key：服务端 DEEPSEEK_API_KEY（pi AuthStorage 显式注入）
 // - webOS 纯文字会话不注册画布工具（noTools + 空 customTools）
@@ -2272,10 +2276,11 @@ const WEBOS_SYSTEM_PROMPT = [
   '- 工作流（create_workflow / run_workflow / list_workflows / delete_workflow，2026-08-13）：把"生成 → 处理 → 生成视频 → 处理"等多步骤素材流水线保存为可复用工作流（步骤参数用 $0.files[].path 引用前一步输出，支持 generate_image / edit_image / generate_video / edit_video 四个工具）。用户说"跑一遍/重做那个流程/再生成一批"时用 run_workflow 一键执行，不用重新描述；同一批图有不同后处理（有的去背景、有的图生视频）就拆成多个工作流或在一个工作流里分多条并行思路。',
   '- 系统源码只读可搜（agent_src_list / agent_src_read / agent_src_grep）：用户需求涉及"系统能不能做"时先查源码确认能力，不要臆测、不要拒绝；运行中的 Shell 源码不可修改（安全带），但 App/桌面/工作区文件可自由改。',
   '- Skill 与记忆：做任何视觉相关的东西（桌面、App 界面、海报、动画）必须先用 read 读 design skill 再按规范执行（用户指定风格时按用户要求设计）；myself 是你的长期记忆（只属于当前用户、跨会话保留），有发现/经验/偏好时用 manage_skill 更新，新会话先读它回忆自己。',
-  '- 可替换的系统素材：Logo（system/logo.svg）、用户头像（system/avatar.svg）、称呼（set_display_name）、加载页（system/boot.html + boot.json）、桌面形态（apps/system.desktop/index.html）、商店形态（apps/system.store/index.html）——用户说"换/改"时读写对应文件，告知刷新生效；删除的 App 在 apps/.trash/ 可恢复；用户上传的文件在 home/uploads/。',
+  '- 可替换的系统素材：Logo（system/logo.svg）、用户头像（system/avatar.svg）、称呼（set_display_name）、加载页（system/boot.html + boot.json）、桌面形态（apps/system.desktop/index.html）、商店形态（apps/system.store/index.html）——用户说"换/改"时读写对应文件，告知刷新生效；删除的 App 在 apps/.trash/ 可恢复；用户上传的文件在 home/uploads/。用户上传的图片要作为桌面壁纸或 App 图片时，必须使用 agent_fs_list / agent_fs_stat / agent_fs_read 返回的 publicUrl（形如 /webos/api/imagegen/file/up-... 的免鉴权公开 URL），不要使用 /webos/api/workspace/files/raw?path=... 或相对路径 home/uploads/...（桌面 sandbox iframe 不带 cookie，鉴权 URL 会 401/404）。',
   '- 对话内互动（show_interactive_html）：用户要"在对话里直接看/玩/操作"（计算器、投票、小游戏、表单、设计方向选择等）时用它，宽度 100%、高度 120-480px（建议 220-320）；完整 App 用文件夹方式创建（apps/<名称>/ 下写 index.html，见 app-dev skill）。互动 HTML 里放选择按钮时 postMessage interactive_answer（channel:"daily-webos-sdk"）把用户点击回传给你，形成问答闭环。',
   '- 应用商店（publish_webos_app / unpublish_webos_app）：用户说"发布/上架/分享到商店"时调用；商店形态 = system.store App 可改（改形态不改数据）。',
   '- App 侧 SDK（写进 App HTML 的能力）：DailyWebOs.http（外部 API 代理，做天气/新闻/实时数据类 App）、DailyWebOs.api（App 互联互通）、DailyWebOs.apps.open（App 跳转）、DailyWebOs.fs（文件）——涉及这些需求时直接用，不要说做不到。',
+  '- **App API（让你读到 App 内数据的关键，2026-08-21 W2/W3 已上线）：在 packages/ 下建 api 包（文件夹即包），系统会自动把你的每个端点注册成 `appapi_<namespace>_<endpoint>` 工具——之后你在对话里直接调用它，就能读到用户在 App 里存的数据（用户记了什么、进度、配置等）。做法：`agent_fs_mkdir packages/<id>/` → 写 `daily.pkg.json`（type=api、id、version），再写 `api.json`（namespace + endpoints 声明，每个端点含 name/method/path/handler/storage 读写范围）与 `handlers/*.js`（handler 函数，`ctx.storage.get/set/del` 读写、`ctx.http` 受限请求、`ctx.secrets` 取密钥）→ 系统校验通过自动注册+建版本，**下一轮对话/重建会话后** `appapi_*` 工具即注入可用。用户问"我在 App 里记了什么/存了什么/进度如何"必须先查该 api 包工具再回答；没建过 api 包的 App 你读不到它的私有数据（隐私边界），需要读取时应主动建议补建 api 包（严格按 api.json storage 声明的最小范围）。规范见 04 文档/packages 校验反馈（写文件结果里的 ⚠️ 会告诉你哪里不合格）。',
   '- 媒体工具手册：工作区 system/tools/ 下有 ffmpeg.md / imagemagick.md / imagegen.md / edit-image.md——处理音视频/图片素材前先读对应手册；游戏角色动画用 edit_video 的 to-sprite 一键生成透明精灵图（生成视频时明确要求纯色背景方便抠图）。',
   '- 客服：站长联系方式是敏感信息，不要主动提供、不要写进 App/桌面/任何生成物；用户问"怎么联系站长/购买/反馈"时引导去个人主页查看，不要编造。',
   '',
@@ -2336,32 +2341,47 @@ export function preheatPiAgent(): void {
 function registerDeepseekModels(
   modelRegistry: { registerProvider(name: string, config: ProviderConfig): void },
   apiKey: string,
+  baseUrl?: string,
 ): void {
+  // 2026-08-17 用户决定：web 端 AI 改用**对话模型**（不输出推理流）。
+  // 背景：ChatST/推理网关（deepseek-v4-flash-0731 reasoning:true）下出现
+  // 「思考与回答杂糅」「标题生成失败」——推理流 reasoning_effort 在网关侧
+  // 返回结构不稳，前端 thinking/delta 混排、completeSimple 标题拿不到 content。
+  // 对策：模型注册改 reasoning:false + thinkingLevelMap 置空，pi 不再请求
+  // reasoning_effort → 网关返回纯 content 流（无 thinking_delta），对话纯净、
+  // 标题生成稳定。DEEPSEEK_MODEL=deepseek/deepseek-v4-flash + DEEPSEEK_BASE_URL
+  // （当前 opencode.ai/zen/go/v1）不变；保留原模型名便于改回推理时只改此处。
+  const effectiveBaseUrl = baseUrl?.trim() || 'https://api.deepseek.com'
+  const flashModel = (id: string): ProviderModelConfig => ({
+    id,
+    name: 'DeepSeek V4 Flash',
+    api: 'openai-completions',
+    baseUrl: effectiveBaseUrl,
+    compat: { requiresReasoningContentOnAssistantMessages: false, thinkingFormat: 'deepseek' },
+    reasoning: false,
+    thinkingLevelMap: {},
+    input: ['text'],
+    // 2026-08-17 修复：缺少 cost 导致 completeSimple 计算费用时
+    // model.cost.input 抛「Cannot read properties of undefined (reading 'input')」
+    // → 标题生成永远失败返回 null（对话走 AgentSession 路径未触发）。
+    cost: { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 },
+    contextWindow: 1_000_000,
+    maxTokens: 384_000,
+  })
   modelRegistry.registerProvider('deepseek', {
-    baseUrl: 'https://api.deepseek.com',
+    baseUrl: effectiveBaseUrl,
     apiKey,
     models: [
-      {
-        id: 'deepseek-v4-flash',
-        name: 'DeepSeek V4 Flash',
-        api: 'openai-completions',
-        baseUrl: 'https://api.deepseek.com',
-        compat: { requiresReasoningContentOnAssistantMessages: true, thinkingFormat: 'deepseek' },
-        reasoning: true,
-        thinkingLevelMap: { low: 'low', medium: 'medium', high: 'high', xhigh: 'max' },
-        input: ['text'],
-        cost: { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 },
-        contextWindow: 1_000_000,
-        maxTokens: 384_000,
-      },
+      flashModel('deepseek-v4-flash-0731'),
+      flashModel('deepseek-v4-flash'),
       {
         id: 'deepseek-v4-pro',
         name: 'DeepSeek V4 Pro',
         api: 'openai-completions',
-        baseUrl: 'https://api.deepseek.com',
-        compat: { requiresReasoningContentOnAssistantMessages: true, thinkingFormat: 'deepseek' },
-        reasoning: true,
-        thinkingLevelMap: { low: 'low', medium: 'medium', high: 'high', xhigh: 'max' },
+        baseUrl: effectiveBaseUrl,
+        compat: { requiresReasoningContentOnAssistantMessages: false, thinkingFormat: 'deepseek' },
+        reasoning: false,
+        thinkingLevelMap: {},
         input: ['text'],
         cost: { input: 0.435, output: 0.87, cacheRead: 0.003625, cacheWrite: 0 },
         contextWindow: 1_000_000,
@@ -2387,7 +2407,11 @@ export async function createWebosSession(
   options?: { systemPrompt?: string[]; customTools?: ToolDefinition[]; conversationId?: string },
 ): Promise<AgentSession> {
   const conversationId = options?.conversationId ?? 'default'
-  const key = `webos:${scope}:${conversationId}:${thinking}`
+  // 2026-08-17 会话持久化修复（用户反馈：重启丢上下文 + 换设备看不到历史）：
+  // - key 不再含 thinking：切换思考档（浅/中/深/极深）沿用同一会话文件，上下文不丢
+  // - 会话按 (scope, conversationId) 固定文件持久化（SessionManager.create + sessionDir），
+  //   重启后 buildSessionContext() 从 JSONL 文件恢复完整历史（含工具调用/记忆）
+  const key = `webos:${scope}:${conversationId}`
   const existing = webosSessions.get(key)
   if (existing) return existing
 
@@ -2409,7 +2433,17 @@ export async function createWebosSession(
   // pi 的 createAgentSession 会通过 sessionManager.buildSessionContext() 恢复历史，
   // 若所有 webOS 会话共享同一个 inMemory(cwd) 实例，不同会话的上下文会互相串扰
   // （会话 B 能看到会话 A 的内容）。独立实例 = 独立上下文，天然支持并行会话。
-  const sessionManager = SessionManager.inMemory(cwd)
+  //
+  // 2026-08-17 持久化修复：inMemory → create(cwd, sessionDir) 文件持久化。
+  // sessionDir 按 (scope, conversationId) 固定 → 重启/部署后 buildSessionContext()
+  // 自动从 JSONL 文件恢复完整上下文（此前纯内存，重启即失忆）。
+  // 会话文件命名：scope 与 conversationId 均含 : 等特殊字符，统一编码为安全文件名。
+  const sessionDir = join(
+    process.env.WEBOS_SESSION_DIR ?? join(cwd, 'data', 'webos-sessions'),
+    encodeURIComponent(scope),
+    encodeURIComponent(conversationId),
+  )
+  const sessionManager = SessionManager.create(cwd, sessionDir)
 
   // webOS 专用 skills 目录（2026-08-11 起分两层）：
   // 1) 用户级 skills：<workspace>/skills/（myself 记忆等用户专属 skill，每个用户独立）
@@ -2457,7 +2491,7 @@ export async function createWebosSession(
     const authStorage = AuthStorage.create(agentDir ? join(agentDir, 'auth.json') : undefined)
     const modelRegistry = ModelRegistry.create(authStorage)
     // 覆盖 pi 内置 DeepSeek 模型定义：启用官方 low/medium/high/max 全部四档
-    registerDeepseekModels(modelRegistry, process.env.DEEPSEEK_API_KEY?.trim() ?? '')
+    registerDeepseekModels(modelRegistry, process.env.DEEPSEEK_API_KEY?.trim() ?? '', process.env.DEEPSEEK_BASE_URL)
 
     shared = { loader: resourceLoader, authStorage, modelRegistry, agentDir, skillsDir: skillsDirs.join('|') }
     sharedWebosServices.set(systemKey, shared)
@@ -2505,18 +2539,44 @@ export async function createWebosSession(
     }
   }
 
+  // 2026-08-17 搜索 API 状态可视化：包装 session.prompt，使每次 prompt 执行
+  // 都处于 withSearchUser(scope) 上下文中（scope = principal.key，如 user:<id> /
+  // guest:<deviceId>），搜索工具落库时可记录调用方 user_key。
+  // 不修改 webos.ts：webos.ts 通过 session.prompt()（runPiPrompt）调用，命中实例属性。
+  const originalPrompt = s.prompt.bind(s)
+  s.prompt = ((content: string, options?: unknown) =>
+    withSearchUser(scope, () => originalPrompt(content, options as never))) as typeof s.prompt
+
   webosSessions.set(key, s)
   return s
 }
 
-/** 释放某 scope 的 webOS sessions（不传 conversationId 时释放该 scope 全部会话） */
+/** 释放某 scope 的 webOS sessions（不传 conversationId 时释放该 scope 全部会话）
+ *  2026-08-17：rebuild=true（编辑/回退重来）时同时删除会话文件——
+ *  否则 SessionManager.create 会从旧 JSONL 恢复历史，与「重来」语义冲突。 */
 export function disposeWebosSessions(scope: string, conversationId?: string): void {
-  const prefix = conversationId ? `webos:${scope}:${conversationId}:` : `webos:${scope}:`
+  const prefix = conversationId ? `webos:${scope}:${conversationId}` : `webos:${scope}:`
   for (const [key, s] of webosSessions) {
     if (key.startsWith(prefix)) {
       webosSessions.delete(key)
       try { s.dispose?.() } catch { /* ignore */ }
     }
+  }
+  // 删除会话文件（若有）：下次 createWebosSession 从头开始
+  try {
+    const cwd = process.cwd()
+    const base = process.env.WEBOS_SESSION_DIR ?? join(cwd, 'data', 'webos-sessions')
+    const scopeDir = join(base, encodeURIComponent(scope))
+    const targetDirs = conversationId
+      ? [join(scopeDir, encodeURIComponent(conversationId))]
+      : (existsSync(scopeDir) ? readdirSync(scopeDir).map((d) => join(scopeDir, d)) : [])
+    for (const dir of targetDirs) {
+      if (existsSync(dir)) {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+  } catch (error) {
+    console.warn('[PiBridge] disposeWebosSessions file cleanup failed:', error instanceof Error ? error.message : String(error))
   }
 }
 
@@ -2527,6 +2587,13 @@ export function getWebosSessionForDebug(scope: string, conversationId?: string):
     if (key.startsWith(prefix)) return s
   }
   return null
+}
+
+/** 2026-08-18：判断 webOS 会话当前是否已存在（内存缓存命中）。
+ *  rebuild（编辑/回退重来）时，若会话仍存活则复用上下文（不重跑开场 skill、
+ *  不重复计算整段历史）；仅当会话不存在（服务重启/超时清理）才需回退重放历史。 */
+export function hasWebosSession(scope: string, conversationId?: string): boolean {
+  return getWebosSessionForDebug(scope, conversationId) != null
 }
 
 /**
@@ -2568,7 +2635,7 @@ export async function generateConversationTitle(texts: string[]): Promise<string
     }
     const modelRegistry = ModelRegistry.create(authStorage)
     // 覆盖 pi 内置 DeepSeek 模型定义（与 createWebosSession 一致，四档可用）
-    registerDeepseekModels(modelRegistry, deepseekKey ?? '')
+    registerDeepseekModels(modelRegistry, deepseekKey ?? '', process.env.DEEPSEEK_BASE_URL)
     const modelRef = process.env.DEEPSEEK_MODEL?.trim() || 'deepseek/deepseek-v4-flash'
     const [providerName = 'deepseek', ...modelParts] = modelRef.split('/')
     const modelName = modelParts.join('/') || 'deepseek-v4-flash'
@@ -2587,7 +2654,7 @@ export async function generateConversationTitle(texts: string[]): Promise<string
       // pi-ai 的 SimpleStreamOptions.reasoning 不含 'off'；minimal 会被模型的
       // thinkingLevelMap clamp 到 low（我们已覆盖四档定义），标题生成保持轻量
       reasoning: 'minimal',
-      maxTokens: 64,
+      maxTokens: 384,
       temperature: 0.3,
     })
 
