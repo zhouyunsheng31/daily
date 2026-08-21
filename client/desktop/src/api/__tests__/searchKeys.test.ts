@@ -61,7 +61,7 @@ describe('searchKeys API client', () => {
   test('1. listSearchKeys 调用 GET /search/keys', async () => {
     const mockResponse = {
       providers: [
-        { provider: 'metaso' as const, hasKey: true, updatedAt: 1000 },
+        { provider: 'exa' as const, hasKey: true, updatedAt: 1000 },
         { provider: 'github' as const, hasKey: false, updatedAt: null },
       ],
     }
@@ -76,15 +76,15 @@ describe('searchKeys API client', () => {
 
   test('2. getSearchKey 调用 GET /search/keys/:provider', async () => {
     const mockResponse = {
-      provider: 'metaso' as const,
+      provider: 'exa' as const,
       hasKey: true,
       updatedAt: 12345,
     }
     vi.mocked(api.get).mockResolvedValue(mockResponse)
 
-    const result = await getSearchKey('metaso')
+    const result = await getSearchKey('exa')
 
-    expect(api.get).toHaveBeenCalledWith('/search/keys/metaso')
+    expect(api.get).toHaveBeenCalledWith('/search/keys/exa')
     expect(result).toEqual(mockResponse)
   })
 
@@ -99,12 +99,12 @@ describe('searchKeys API client', () => {
   })
 
   test('4. deleteSearchKey 调用 DELETE /search/keys/:provider', async () => {
-    const mockResponse = { ok: true as const, provider: 'metaso' }
+    const mockResponse = { ok: true as const, provider: 'exa' }
     vi.mocked(api.delete).mockResolvedValue(mockResponse)
 
-    const result = await deleteSearchKey('metaso')
+    const result = await deleteSearchKey('exa')
 
-    expect(api.delete).toHaveBeenCalledWith('/search/keys/metaso')
+    expect(api.delete).toHaveBeenCalledWith('/search/keys/exa')
     expect(result).toEqual(mockResponse)
   })
 
@@ -131,7 +131,7 @@ describe('searchKeys API client', () => {
     vi.mocked(api.get).mockRejectedValue(error)
 
     await expect(listSearchKeys()).rejects.toThrow('Unauthorized')
-    await expect(getSearchKey('metaso')).rejects.toMatchObject({ status: 401 })
+    await expect(getSearchKey('exa')).rejects.toMatchObject({ status: 401 })
   })
 
   test('7. 错误处理：400 时抛出 ApiError', async () => {
@@ -149,6 +149,6 @@ describe('searchKeys API client', () => {
     const networkError = new TypeError('Failed to fetch')
     vi.mocked(api.delete).mockRejectedValue(networkError)
 
-    await expect(deleteSearchKey('metaso')).rejects.toThrow('Failed to fetch')
+    await expect(deleteSearchKey('exa')).rejects.toThrow('Failed to fetch')
   })
 })

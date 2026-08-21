@@ -18,12 +18,15 @@ import {
   generateConversationTitle,
   cancelChat,
   getBootstrap,
+  getServerConversationMessages,
+  getServerConversations,
   installApp,
   logoutSession,
   reorderApps,
   rollbackApp,
   streamChat,
   updateAiConfig,
+  type WebOsServerChatMessage,
 } from './api'
 
 /**
@@ -132,6 +135,9 @@ interface ShellStore {
    *  否则 app_created → refreshBootstrap → hydrate → resume → 重放 app_created
    *  → …死循环：App 每隔几秒被自动打开一次） */
   hydrate: (bootstrap: WebOsBootstrap, options?: { skipResume?: boolean }) => void
+  /** 2026-08-17 会话持久化（换设备/登录）：从服务端拉取历史会话并合并进本地列表
+   *  （本地已有会话保留权威缓存，只补服务端独有 id；静默失败不阻塞） */
+  syncServerConversations: () => Promise<void>
 
   // ---- 多会话操作（2026-08-05）----
   createConversation: () => string
@@ -263,7 +269,9 @@ function loadConversations(scopeKey: string): { conversations: ChatConversation[
     if (raw) {
       const parsed = JSON.parse(raw) as { conversations?: unknown; activeId?: unknown }
       if (parsed && Array.isArray(parsed.conversations)) {
-        const conversations = (parsed.conversations as ChatConversation[]).filter((conv) => conv && typeof conv.id === 'string')
+        let conversations = (parsed.conversations as ChatConversation[]).filter((conv) => conv && typeof conv.id === 'string')
+        // 2026-08-17 防脏缓存：历史版本并发 sync 可能写入重复 id，恢复时按 id 去重
+        conversations = Array.from(new Map(conversations.map((conv) => [conv.id, conv])).values())
         if (conversations.length > 0) {
               // 2026-08-11 SSE 重连（架构统一）：不再注入「任务仍在后台运行」提示——
     // 刷新恢复由 resumeConversation 无缝渲染任务真实进度到同一气泡；注入
@@ -293,6 +301,21 @@ function clearConversations(scopeKey: string): void {
   try { localStorage.removeItem(`${CONV_CACHE_PREFIX}${scopeKey}`) } catch { /* 忽略 */ }
   try { localStorage.removeItem(`${CHAT_CACHE_PREFIX}${scopeKey}`) } catch { /* 忽略 */ }
   try { localStorage.removeItem(`${VIEW_CACHE_PREFIX}${scopeKey}`) } catch { /* 忽略 */ }
+}
+
+/** 2026-08-17 会话同步防重入锁：hydrate 身份变化 + boot 会都触发 sync——
+ *  不加锁时两次并发都基于空初始态拉取，会话 id 会重复进列表 */
+let syncServerConversationsInFlight = false
+
+/** 2026-08-17 服务端历史纯文本消息 → 前端时间线消息（assistant 组装成单 text 段气泡） */
+function serverMessageToUi(msg: WebOsServerChatMessage): UiChatMessage {
+  const createdAt = typeof msg.createdAt === 'number' ? msg.createdAt : Date.now()
+  if (msg.role === 'user') return { role: 'user', content: msg.content, createdAt }
+  return {
+    role: 'assistant',
+    createdAt,
+    segments: msg.content.trim() ? [{ type: 'text', content: msg.content }] : [],
+  }
 }
 
 function loadLegacyChat(scopeKey: string): UiChatMessage[] | null {
@@ -344,6 +367,38 @@ function messagePlainText(message: UiChatMessage): string {
     return message.segments.filter((segment) => segment.type === 'text').map((segment) => segment.content).join('')
   }
   return message.content ?? ''
+}
+
+/** 可靠复制：优先 Async Clipboard API，失败/不可用时回退到临时 textarea + execCommand */
+export async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (!text) return false
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    // 继续走 fallback（权限拒绝 / sandbox iframe / 非安全上下文等）
+  }
+  let textarea: HTMLTextAreaElement | null = null
+  try {
+    textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.top = '0'
+    textarea.style.left = '-9999px'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.focus()
+    textarea.select()
+    textarea.setSelectionRange(0, text.length)
+    return document.execCommand('copy')
+  } catch {
+    return false
+  } finally {
+    textarea?.remove()
+  }
 }
 
 function emptyAssistantMessage(): UiChatMessage {
@@ -622,11 +677,15 @@ async function runConversationTurn(
   // 对话里残留一条「幽灵 user 消息 + 空 assistant 占位」（第一次的回复已在）。
   const prevMessages = useShellStore.getState().conversations.find((candidate) => candidate.id === convId)?.messages ?? localMessages
   // 先更新本地会话消息（乐观更新：立即显示用户消息 + 空 assistant 占位）
+  // 同步清空该会话已持久化的 draft，避免刷新/重开后输入框恢复成上一条已发送内容；
+  // 只在此消费草稿时清一次，不在流式结束 finally 清，以免误删发送期间新输入的草稿。
   useShellStore.setState((state) => ({
     conversations: state.conversations.map((conv) => conv.id === convId
-      ? { ...conv, messages: localMessages, updatedAt: Date.now() }
+      ? { ...conv, messages: localMessages, draft: '', updatedAt: Date.now() }
       : conv),
   }))
+  // 立即落盘一次，确保清空后的 draft 不会因刷新发生在防抖保存前而仍读到旧值。
+  persistNow()
   if (useShellStore.getState().activeConversationId === convId) {
     useShellStore.setState({ messages: localMessages, draft: '', streaming: true, streamAbort: abort, error: null })
   }
@@ -1147,8 +1206,76 @@ export const useShellStore = create<ShellStore>((set, get) => ({
       if (active?.id && shouldResume) {
         void get().resumeConversation(active.id)
       }
+      // 2026-08-17 会话持久化：身份变化（换设备/登录/注册/登出）时异步拉取服务端历史，
+      // 合并进本地列表（localStorage 仍是缓存，服务端是兜底来源；静默失败不阻塞）
+      void get().syncServerConversations()
     } else if (resumeTargetId && nextKey !== null && shouldResume) {
       void get().resumeConversation(resumeTargetId)
+    }
+  },
+
+  /** 2026-08-17 会话持久化（换设备/登录）：服务端历史 → 本地会话列表合并。
+   *  - 只补服务端独有会话 id（本地已有 id 保留权威缓存：完整 segments + AI 标题，不被纯文本覆盖）
+   *  - 拉回的消息组装成 ChatConversation（assistant 单个 text 段气泡），按 updatedAt 倒序合并
+   *  - 若当前没有激活会话（新设备首次进入），激活最新拉回的历史会话
+   *  - 任何失败静默（本地缓存仍可用，不打断使用） */
+  syncServerConversations: async () => {
+    const scopeKey = chatScopeKey(get().session)
+    if (!scopeKey || syncServerConversationsInFlight) return
+    syncServerConversationsInFlight = true
+    try {
+      const { conversations: metas } = await getServerConversations()
+      if (!metas || !Array.isArray(metas) || metas.length === 0) return
+      const existingIds = new Set(get().conversations.map((conv) => conv.id))
+      const missing = metas.filter((meta) => meta && typeof meta.conversationId === 'string' && !existingIds.has(meta.conversationId))
+      if (missing.length === 0) return
+
+      const results = await Promise.all(missing.map(async (meta): Promise<ChatConversation | null> => {
+        try {
+          const detail = await getServerConversationMessages(meta.conversationId)
+          const messages = Array.isArray(detail?.messages) ? detail.messages.map(serverMessageToUi) : []
+          if (messages.length === 0) return null
+          const updatedAt = typeof meta.updatedAt === 'number' ? meta.updatedAt : Date.now()
+          return {
+            id: meta.conversationId,
+            title: (meta.title && meta.title !== '新会话' ? meta.title : '新会话').slice(0, 40),
+            createdAt: updatedAt,
+            updatedAt,
+            messages,
+            usedTokens: 0,
+            titleAuto: false,
+            titleAiDone: false,
+          }
+        } catch {
+          return null
+        }
+      }))
+      const added = results.filter((conv): conv is ChatConversation => conv !== null)
+      if (added.length === 0) return
+
+      // 2026-08-17 防并发重复：合并前按 id 去重（含与既有列表的交叉），再按更新时间倒序
+      const seen = new Set(existingIds)
+      const merged = [...get().conversations]
+      for (const conv of added) {
+        if (seen.has(conv.id)) continue
+        seen.add(conv.id)
+        merged.push(conv)
+      }
+      merged.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+
+      const nextActive = get().activeConversationId ?? added[0].id
+      const activeConv = merged.find((conv) => conv.id === nextActive) ?? null
+      set({
+        conversations: merged,
+        activeConversationId: nextActive,
+        messages: activeConv?.messages ?? get().messages,
+        draft: activeConv?.draft ?? get().draft,
+      })
+      saveConversations(scopeKey, merged, nextActive)
+    } catch {
+      // 网络/鉴权异常静默：本地缓存仍可用（历史同步是增强，不是必需）
+    } finally {
+      syncServerConversationsInFlight = false
     }
   },
 
@@ -1187,6 +1314,9 @@ export const useShellStore = create<ShellStore>((set, get) => ({
       }
       if (!bootstrap) throw lastError ?? new Error('无法连接服务器')
       get().hydrate(bootstrap)
+      // 2026-08-17 会话持久化：页面加载完成后再做一次幂等历史同步
+      // （覆盖「身份未变刷新」场景——其他设备新会话也能拉回来；只补缺失 id，不覆盖本地）
+      void get().syncServerConversations()
       // 2026-08-06 整套系统分享安装：?share=<shareId>&install=<appId|all>
       // 从分享包安装所选应用到桌面，完成后进入桌面视图
       try {
@@ -1344,12 +1474,7 @@ export const useShellStore = create<ShellStore>((set, get) => ({
     if (!target) return false
     const text = messagePlainText(target).trim()
     if (!text) return false
-    try {
-      await navigator.clipboard.writeText(text)
-      return true
-    } catch {
-      return false
-    }
+    return copyTextToClipboard(text)
   },
 
   sendMessage: async (content?: string) => {

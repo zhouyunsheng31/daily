@@ -51,6 +51,23 @@ agent_fs_write apps/我的应用/index.html  # 写入完整代码（系统自动
 - 大对象写入失败要提示用户（不要静默）。
 - 实现"保存/记住"需求后，自测：添加 → 关掉重开 → 数据还在。
 
+## 4.5 App 数据出口（api 包：让 AI 能读到 App 数据，2026-08-21 W2/W3 上线）
+
+> **为什么需要**：AI 无法直接读 App 的私有存储（隐私边界）。要让 AI 回答"我在 App 里记了什么/进度如何"，必须在 `packages/<id>/` 建 **api 包**，系统会把端点注册为 `appapi_<namespace>_<endpoint>` 工具，AI 在对话里调用即可读数据。
+
+```
+agent_fs_mkdir packages/zz-notes/                    # id 全局唯一（建议前缀你的标识）
+agent_fs_write packages/zz-notes/daily.pkg.json      # {"schema_version":2,"id":"zz-notes","type":"api","version":"1.0.0","api":{"spec":"api.json"}}
+agent_fs_write packages/zz-notes/api.json            # namespace + endpoints（name/method/path/handler/storage）
+agent_fs_write packages/zz-notes/handlers/list.js    # handler：main(ctx) { ctx.storage.get/set/del; ctx.http; ctx.secrets }
+```
+
+- **api.json 要点**：`namespace` 唯一；每个 endpoint 声明 `name / method(GET=只读,POST=有副作用) / path / handler(相对路径) / storage.read / storage.write`（**严格最小范围**，只有声明过的前缀才可读写）；可加 `visibility: "public"`（W3 后他人可调用）。
+- **handler 写法**：`async function main(ctx) { const rows = await ctx.storage.get('notes') || []; return { ok: true, rows } }`；结果自动截断 ≤64KB。
+- **生效时序**：写文件后系统自动校验 → 通过注册+建版本（`agent_fs_write` 结果里的 ⚠️ 是人话错误，按提示修正）；**`appapi_*` 工具在下一轮对话/重建会话后注入**——本轮告诉用户"已建好，下条消息我就能读了"，然后下轮调用验证。
+- **常见坑**：manifest 的 `id` 必须与文件夹名一致；api.json 必须通过契约校验（缺 name/method/handler 会被拒）；handler 里不要硬编码密钥（上架会扫描拒绝，密钥走 api.json secrets + ctx.secrets）。
+- **关联**：AI 做好 App 后**主动补一致 api 包**（list/add/delete 三端点足够大多数场景），这样用户后续问数据时你能直接答。
+
 ## 5. App 内 SDK 能力（写进 HTML 就能用）
 
 - `DailyWebOs.apps.open('appId')`：跳转另一个 App。

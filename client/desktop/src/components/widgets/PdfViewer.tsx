@@ -3,6 +3,38 @@ import { ClipboardList, FileText, FolderOpen } from 'lucide-react'
 import { TextLayer } from 'pdfjs-dist'
 import type { PDFDocumentProxy, PDFDocumentLoadingTask, RenderTask } from 'pdfjs-dist'
 
+/** 可靠复制：优先 Async Clipboard API，失败/不可用时回退到临时 textarea + execCommand */
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (!text) return false
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    // 继续走 fallback（权限拒绝 / 非安全上下文 / WebView 等）
+  }
+  let textarea: HTMLTextAreaElement | null = null
+  try {
+    textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.top = '0'
+    textarea.style.left = '-9999px'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.focus()
+    textarea.select()
+    textarea.setSelectionRange(0, text.length)
+    return document.execCommand('copy')
+  } catch {
+    return false
+  } finally {
+    textarea?.remove()
+  }
+}
+
 interface Props {
   widgetId: string
   panelId: string
@@ -179,17 +211,8 @@ export default function PdfViewer({ state, onUpdateState, onEditingChange }: Pro
     const text = selection.toString().trim()
     if (!text) return
 
-    if (!navigator.clipboard) {
-      setCopyStatus('failed')
-      setTimeout(() => setCopyStatus('idle'), 1500)
-      return
-    }
-
-    navigator.clipboard.writeText(text).then(() => {
-      setCopyStatus('copied')
-      setTimeout(() => setCopyStatus('idle'), 1500)
-    }).catch(() => {
-      setCopyStatus('failed')
+    void copyTextToClipboard(text).then((ok) => {
+      setCopyStatus(ok ? 'copied' : 'failed')
       setTimeout(() => setCopyStatus('idle'), 1500)
     })
   }, [])

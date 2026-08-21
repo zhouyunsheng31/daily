@@ -9,6 +9,7 @@ import type {
   WebOsPayOrder,
   WebOsPaymentState,
   WebOsThinkingLevel,
+  WebOsTimeInfo,
   WebOsWorkspaceListing,
 } from '@shared/webos-contracts'
 
@@ -24,6 +25,16 @@ export class WebOsApiError extends Error {
     this.status = status
     this.code = code
   }
+}
+
+/** 工作区文件条目（list/index/api 上传返回的 file 类型；既有欠账补全定义） */
+export interface WebOsWorkspaceEntry {
+  name: string
+  path?: string
+  size?: number
+  type?: string
+  publicUrl?: string | null
+  modifiedAt?: number
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -65,11 +76,35 @@ export async function createGuestSession(deviceId: string): Promise<void> {
   }
 }
 
+/** 2026-08-16 系统时间（北京时间）：供前端展示或调试，低敏感但沿用 /webos/api 鉴权 */
+export function fetchServerTime(): Promise<WebOsTimeInfo> {
+  return request('/webos/api/time')
+}
+
+/**
+ * 老设备兼容的超时 AbortSignal（2026-08-20）：
+ * `AbortSignal.timeout()` 需要 Chrome 103+ / Safari 17.4+（iOS 17.4+），
+ * Android 10 自带 WebView（Chrome ~78）与 iPhone 6S（iOS 15.8）没有它会直接抛
+ * TypeError → 而 bootstrap 是启动必经路径 → 白屏只剩背景。
+ * 兜底用 `AbortController` + `setTimeout`（AbortController：Chrome 66+ / iOS 12.1+，安全）。
+ * 不传 ms 时返回空对象（不用 signal）。
+ */
+function createTimeoutSignal(timeoutMs?: number): { signal?: AbortSignal } {
+  if (!timeoutMs) return {}
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    return { signal: AbortSignal.timeout(timeoutMs) }
+  }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  controller.signal.addEventListener('abort', () => clearTimeout(timer), { once: true })
+  return { signal: controller.signal }
+}
+
 export function getBootstrap(timeoutMs?: number): Promise<WebOsBootstrap> {
   // 2026-08-07 加载页卡死兜底：仅 boot() 首屏传 20s 超时（服务端慢/挂起时不再无限卡
   // 加载页，重试 3 次后显示错误页）；refreshBootstrap/logout 等事件驱动刷新**不传**——
   // 避免 AI 创建 App 后刷新被 abort（"The user aborted a request." 弹错、桌面不更新）。
-  const init: RequestInit = timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}
+  const init: RequestInit = createTimeoutSignal(timeoutMs) as RequestInit
   return request<WebOsBootstrap>('/webos/api/bootstrap', init)
 }
 
@@ -86,6 +121,30 @@ export interface CreditsHistoryItem {
 
 export function getCreditsHistory(limit = 30): Promise<{ items: CreditsHistoryItem[] }> {
   return request(`/webos/api/usage/credits-history?limit=${limit}`)
+}
+
+/** 2026-08-17 会话持久化（登录/换设备）：服务端历史会话列表（按 conversation_id 聚合） */
+export interface WebOsServerConversationMeta {
+  conversationId: string
+  messageCount: number
+  updatedAt: number
+  title: string
+}
+export function getServerConversations(): Promise<{ conversations: WebOsServerConversationMeta[] }> {
+  return request('/webos/api/conversations')
+}
+
+/** 2026-08-17 会话持久化：单会话完整消息（按时间重建，user/assistant 纯文本） */
+export interface WebOsServerChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+  createdAt: number
+}
+export function getServerConversationMessages(conversationId: string): Promise<{
+  conversationId: string
+  messages: WebOsServerChatMessage[]
+}> {
+  return request(`/webos/api/conversations/${encodeURIComponent(conversationId)}/messages`)
 }
 
 /** 2026-08-08 ap- 轻量分享：读取分享包元数据（单个 App 快照） */
@@ -315,8 +374,9 @@ export function listWorkspaceFiles(dir = ''): Promise<WebOsWorkspaceListing> {
   return request(`/webos/api/workspace/files${query}`)
 }
 
-/** 上传文件到用户可见区（默认 home/uploads/；body 传 base64） */
-export function uploadWorkspaceFile(fileName: string, contentBase64: string, dir?: string): Promise<{ ok: boolean; file: { name: string; size: number } }> {
+/** 上传文件到用户可见区（默认 home/uploads/；body 传 base64）
+ *  返回 file 含 publicUrl（图片：免鉴权公开 URL，桌面/App 沙箱 iframe 可加载） */
+export function uploadWorkspaceFile(fileName: string, contentBase64: string, dir?: string): Promise<{ ok: boolean; file: WebOsWorkspaceEntry }> {
   return request('/webos/api/workspace/files', {
     method: 'POST',
     body: JSON.stringify({ fileName, contentBase64, dir }),
@@ -329,13 +389,14 @@ export function uploadWorkspaceFile(fileName: string, contentBase64: string, dir
 // 每片独立请求（不超时、内存恒定），服务端边收边写；同文件未完成自动续传（重试即续）。
 // ---------------------------------------------------------------------------
 
-/** 大文件分片上传（>20MB 用；自动 init → 顺序 part → complete；失败重试当前片） */
+/** 大文件分片上传（>20MB 用；自动 init → 顺序 part → complete；失败重试当前片）
+ *  返回 file 含 publicUrl（图片：免鉴权公开 URL，桌面/App 沙箱 iframe 可加载） */
 export async function uploadWorkspaceFileLarge(
   fileName: string,
   file: Blob,
   dir = 'uploads',
   onProgress?: (ratio: number) => void,
-): Promise<{ ok: boolean; file: { name: string; size: number } }> {
+): Promise<{ ok: boolean; file: WebOsWorkspaceEntry }> {
   const CHUNK_BYTES = 8 * 1024 * 1024 // 8MB/片（base64 ~10.7MB，远低于 600MB body 上限）
   const totalBytes = file.size
   const initPayload = await request<{ ok: boolean; uploadId: string; partsCount: number; totalBytes: number; resumed: boolean }>('/webos/api/workspace/files/upload', {
@@ -395,6 +456,39 @@ export function deleteWorkspaceFile(pathName: string): Promise<{ ok: boolean }> 
 /** 用户可见区文件 raw URL（图片预览/下载用；仅 home/ 内） */
 export function workspaceFileRawUrl(pathName: string): string {
   return `/webos/api/workspace/files/raw?path=${encodeURIComponent(pathName)}`
+}
+
+// ---------------------------------------------------------------------------
+// 2026-08-18 AI 工作区只读浏览（文件管理器直接看 AI 工作区内容，只读）
+// 与 home 区不同：走 /workspace/agent-files 端点，可浏览工作区根目录
+// （home/ agent/ apps/ shared/ skills/ system/ logs 等），文件只读预览/下载。
+// ---------------------------------------------------------------------------
+
+/** 列出 AI 工作区目录（只读浏览；dir 为空=工作区根） */
+export function listAgentWorkspaceFiles(dir = ''): Promise<WebOsWorkspaceListing> {
+  const query = dir ? `?path=${encodeURIComponent(dir)}` : ''
+  return request(`/webos/api/workspace/agent-files${query}`)
+}
+
+/** AI 工作区文件 raw URL（只读预览/下载用；path 相对工作区根） */
+export function agentWorkspaceFileRawUrl(pathName: string): string {
+  return `/webos/api/workspace/agent-files/raw?path=${encodeURIComponent(pathName)}`
+}
+
+/** 读取 AI 工作区文本文件内容（只读） */
+export async function readAgentWorkspaceTextFile(pathName: string): Promise<string> {
+  const response = await fetch(agentWorkspaceFileRawUrl(pathName), { credentials: 'include' })
+  if (!response.ok) {
+    let message = `读取失败（HTTP ${response.status}）`
+    let code = 'AGENT_FILE_READ_FAILED'
+    try {
+      const payload = await response.json() as { error?: { message?: string; code?: string } }
+      if (payload.error?.message) message = payload.error.message
+      if (payload.error?.code) code = payload.error.code
+    } catch { /* 保留默认信息 */ }
+    throw new WebOsApiError(response.status, code, message)
+  }
+  return response.text()
 }
 
 /** 系统 Logo（bootstrap 已带；刷新用） */
@@ -696,6 +790,10 @@ export interface StoreSkillItem {
   sizeBytes: number
   installable: boolean
   installed: boolean
+  /** 2026-08-18 用户发布技能（来源扩展）：技能目录名 / 发布者 标注 */
+  skillId?: string
+  ownerName?: string
+  system?: boolean
 }
 
 export function storeSkillsList(): Promise<{ items: StoreSkillItem[] }> {
@@ -706,12 +804,136 @@ export function storeSkillInstall(skillId: string): Promise<{ ok: boolean; skill
   return request(`/webos/api/store/skills/${encodeURIComponent(skillId)}/install`, { method: 'POST' })
 }
 
+/** 2026-08-18 技能发布：把自己的工作区 skills/<id>/ 发布到市场（重复发布 = 更新快照） */
+export function storeSkillPublish(skillId: string, description?: string): Promise<{ ok: boolean; shareId: string; message: string }> {
+  return request('/webos/api/store/skills', {
+    method: 'POST',
+    body: JSON.stringify({ skillId, description: description ?? '' }),
+  })
+}
+
+/** 2026-08-18 技能下架（仅发布者本人） */
+export function storeSkillUnpublish(id: string): Promise<{ ok: boolean; message: string }> {
+  return request(`/webos/api/store/skills/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+/** 2026-08-18 我的可用技能（工作区 skills/ 下的，发布选择用；标注是否已发布） */
+export function storeSkillsMine(): Promise<{ items: Array<{ id: string; name: string; description: string; sizeBytes?: number; published?: boolean }> }> {
+  return request('/webos/api/store/skills/mine')
+}
+
+/** 2026-08-18 我的已发布技能（发布者视角管理/下架） */
+export function storeSkillsMy(): Promise<{ items: Array<{ id: string; skillId: string; name: string; description: string; sizeBytes?: number }> }> {
+  return request('/webos/api/store/skills/my')
+}
+
 /** 外部 API 代理（App 接入第三方/自建 API；服务端防 SSRF + 限频） */
 export function proxyHttp(input: { method?: string; url: string; headers?: Record<string, string>; body?: unknown }): Promise<{ status: number; body: string; contentType: string | null }> {
   return request('/webos/api/http', {
     method: 'POST',
     body: JSON.stringify(input),
   })
+}
+
+/**
+ * App API（W2 2026-08-21）：调用本人/安装 api 包的端点（owner 级）。
+ * SDK 侧 sdk.useApi(ns).<endpoint>(params) → 宿主 MessageChannel api.invoke → 本函数。
+ * @returns { result, costMinor }（服务端 /webos/api/appapi/:ns/:ep 的 {ok,result,costMinor}）
+ */
+export function invokeAppApi(
+  namespace: string,
+  endpoint: string,
+  params?: Record<string, unknown>,
+): Promise<{ result: unknown; costMinor: number }> {
+  return request(`/webos/api/appapi/${encodeURIComponent(namespace)}/${encodeURIComponent(endpoint)}`, {
+    method: 'POST',
+    body: JSON.stringify({ params: params ?? {} }),
+  })
+}
+
+/** App API 文档/调试（W2）：读取某 api 包命名空间的端点清单（文档页数据源） */
+export function getAppApiSpec(namespace: string): Promise<{ namespace: string; displayName?: string; network?: { domains?: string[] }; secrets: string[]; endpoints: Array<Record<string, unknown>> }> {
+  return request(`/webos/api/appapi/${encodeURIComponent(namespace)}`, { method: 'GET' })
+}
+
+/** 包列表条目（W2 2026-08-21：GET /webos/api/packages?type= 返回的 items 摘要） */
+export interface WebOsPackageListItem {
+  id: string
+  type: string
+  displayName: string
+  icon: string | null
+  version: string | null
+  source: string
+  installed: boolean
+  owner: boolean
+  capabilities: string[]
+  activeVersionId: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+/** 包列表（W2）：type='api' 列出本人 api 包——「我的 API 包 → 文档/在线调试」入口 */
+export function listPackages(type?: string, q?: string): Promise<{ ok: boolean; items: WebOsPackageListItem[]; total: number }> {
+  const query = new URLSearchParams()
+  if (type) query.set('type', type)
+  if (q) query.set('q', q)
+  const qs = query.toString()
+  return request(`/webos/api/packages${qs ? `?${qs}` : ''}`)
+}
+
+// ========================= 统一包市场（W3 R14） =========================
+// 万物皆可包：同一市场按 type 浏览/安装；app 不发布进 market_entries，
+// 经 /packages?type=app 只读适配并入「App」列（商店模板消费）。
+
+export interface MarketEntryClient {
+  packageId: string
+  type: string
+  displayName: string
+  version: string
+  description: string | null
+  owner: string
+  endpoints: number | null
+}
+
+export function marketList(params?: { type?: string; q?: string }): Promise<{ entries: MarketEntryClient[] }> {
+  const query = new URLSearchParams()
+  if (params?.type) query.set('type', params.type)
+  if (params?.q) query.set('q', params.q)
+  const qs = query.toString()
+  return request(`/webos/api/market${qs ? `?${qs}` : ''}`)
+}
+
+export function marketDetail(packageId: string): Promise<{
+  entry: {
+    packageId: string
+    type: string
+    displayName: string
+    version: string
+    description: string | null
+    apiNamespace: string | null
+    dataScope: { storage?: { read: string[]; write: string[] }; endpoints?: string[]; publishes?: string[] } | null
+    updatedAt: number
+  }
+  isInstalled: boolean
+  myHandle: string
+}> {
+  return request(`/webos/api/market/${encodeURIComponent(packageId)}`)
+}
+
+export function marketInstall(packageId: string): Promise<{ ok: boolean; installed: string[]; note: string }> {
+  return request(`/webos/api/market/${encodeURIComponent(packageId)}/install`, { method: 'POST' })
+}
+
+export function marketMine(): Promise<{ items: Array<{ packageId: string; type: string; installedAt: number }> }> {
+  return request('/webos/api/market/mine')
+}
+
+export function marketUnpublish(packageId: string): Promise<{ ok: boolean; packageId: string }> {
+  return request(`/webos/api/market/${encodeURIComponent(packageId)}/unpublish`, { method: 'POST' })
+}
+
+export async function marketApps(): Promise<{ apps: Array<{ id: string; name: string; source: string; version: string | null; owner?: string; description?: string | null }> }> {
+  return request('/webos/api/market/apps')
 }
 
 /**

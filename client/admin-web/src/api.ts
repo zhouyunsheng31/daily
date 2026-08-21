@@ -129,7 +129,9 @@ export interface ImageGenUsageItem {
 }
 
 // ============================================================================
-// MiniMax-M3 视觉桥接监测（2026-08-14）：AI 的眼睛（DeepSeek 非视觉 → M3 描述）
+// 视觉桥接监测（2026-08-14 起；2026-08-21 双 provider）：
+// AI 的眼睛——DeepSeek 非视觉，图片/视频经视觉模型转文字描述。
+// 图片优先 deepseek-v4-flash-vision-exp，视频/兜底 MiniMax-M3。
 // ============================================================================
 
 export interface VisionStats {
@@ -151,7 +153,23 @@ export interface VisionStats {
   byTrigger: Record<string, { calls: number; tokens: number; costMinor: number }>
   byKind: Record<string, number>
   byStatus: Record<string, number>
-  pricing: { model: string; inputPerMillion: number; outputPerMillion: number; cacheReadPerMillion: number; note: string }
+  byModel: Record<string, { calls: number; ok: number; failed: number; tokens: number; costMinor: number }>
+  pricing: {
+    model: string
+    inputPerMillion: number
+    outputPerMillion: number
+    cacheReadPerMillion: number
+    note: string
+    provider: string
+    providers: Array<{
+      model: string
+      active: boolean
+      inputPerMillion: number
+      outputPerMillion: number
+      cacheReadPerMillion: number
+      note: string
+    }>
+  }
 }
 
 export interface VisionUsageItem {
@@ -162,6 +180,7 @@ export interface VisionUsageItem {
   conversationId: string | null
   trigger: string
   kind: string
+  model: string | null
   mediaCount: number
   prompt: string | null
   description: string | null

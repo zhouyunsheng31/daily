@@ -7,6 +7,7 @@ import {
   listAppFiles,
   mkdirAppFile,
   proxyHttp,
+  invokeAppApi,
   readAppFile,
   setAppStorageValue,
   deleteAppStorageValue,
@@ -302,6 +303,18 @@ async function handleHostRequest(
       return
     }
 
+    // App API（W2 2026-08-21）：调用本人/安装 api 包的端点（服务端 /webos/api/appapi/:ns/:ep）
+    // App 前端 sdk.useApi(ns).<endpoint>(params) → 宿主代理 → 服务端受限 vm 执行（owner 级）
+    if (method === 'api.invoke') {
+      const namespace = typeof params.namespace === 'string' && params.namespace ? params.namespace : ''
+      const endpoint = typeof params.endpoint === 'string' && params.endpoint ? params.endpoint : ''
+      if (!namespace || !endpoint) throw new Error('api.invoke 需要 namespace 和 endpoint')
+      const p = params.params && typeof params.params === 'object' ? params.params as Record<string, unknown> : {}
+      const res = await invokeAppApi(namespace, endpoint, p)
+      respond(true, res)
+      return
+    }
+
     throw new Error(`Unsupported Runtime method: ${method}`)
   } catch (error) {
     respond(false, undefined, error instanceof Error ? error.message : String(error))
@@ -377,6 +390,29 @@ export function createWebOsSdk(port: MessagePort, context: WebOsRuntimeContext) 
         return request(port, 'api.call', { targetAppId: String(targetAppId), name: String(name), params: params !== undefined ? params : null })
       },
     }),
+    // App API（W2 2026-08-21）：sdk.useApi(namespace).<endpoint>(params)
+    // 端点名即 api.json 的 name（支持 camelCase 别名，服务端自动转 snake_case）；
+    // 返回 { ok, result, costMinor }（服务端受限 vm 执行结果）
+    useApi(namespace: string): Record<string, (params?: Record<string, unknown>) => Promise<{ ok: boolean; result?: unknown; costMinor: number; error?: string }>> {
+      const ns = String(namespace ?? '')
+      return new Proxy({} as Record<string, (params?: Record<string, unknown>) => Promise<{ ok: boolean; result?: unknown; costMinor: number; error?: string }>>, {
+        get: (_target, prop) => {
+          if (typeof prop !== 'string') return undefined
+          const endpoint = prop
+          return (params?: Record<string, unknown>) =>
+            request<{ ok: boolean; result?: unknown; costMinor: number; error?: string; message?: string }>(
+              port,
+              'api.invoke',
+              { namespace: ns, endpoint, params: params ?? {} },
+            ).then((res) => ({
+              ok: res.ok === true,
+              result: res.result,
+              costMinor: res.costMinor ?? 0,
+              error: res.ok === true ? undefined : (res.error ?? res.message ?? 'API 调用失败'),
+            }))
+        },
+      })
+    },
   })
 }
 
@@ -705,6 +741,17 @@ export interface StoreSdkAdapters {
   /** 2026-08-09 技能市场：列出可安装技能 / 安装到用户工作区 skills/ */
   skillsList: () => Promise<{ items: Array<Record<string, unknown>> }>
   skillsInstall: (skillId: string) => Promise<{ ok: boolean; skillId: string; message: string }>
+  /** 2026-08-18 技能发布：我的可用技能 / 我的发布 / 发布 / 下架（对齐 App 商店链路） */
+  skillsMine: () => Promise<{ items: Array<Record<string, unknown>> }>
+  skillsMy: () => Promise<{ items: Array<Record<string, unknown>> }>
+  skillsPublish: (skillId: string, description?: string) => Promise<{ ok: boolean; shareId: string; message: string }>
+  skillsUnpublish: (id: string) => Promise<{ ok: boolean; message: string }>
+  /** 2026-08-21（W3 统一包市场 R14）：type 维度浏览 / 详情 / 安装 / 我的安装 / App 只读适配 */
+  marketList: (params?: { type?: string; q?: string }) => Promise<{ entries: Array<Record<string, unknown>> }>
+  marketDetail: (packageId: string) => Promise<Record<string, unknown>>
+  marketInstall: (packageId: string) => Promise<{ ok: boolean; installed: string[]; note: string }>
+  marketMine: () => Promise<{ items: Array<Record<string, unknown>> }>
+  marketApps: () => Promise<{ apps: Array<Record<string, unknown>> }>
 }
 
 export interface StoreRuntimeHandle {
@@ -812,6 +859,55 @@ async function handleStoreRequest(
       const skillId = typeof params.skillId === 'string' ? params.skillId : ''
       if (!skillId) throw new Error('skills.install 需要 skillId')
       respond(true, await adapters.skillsInstall(skillId))
+      return
+    }
+    // 2026-08-18 技能发布（对齐 App 商店链路：我的可用 / 我的发布 / 发布 / 下架）
+    if (method === 'skills.mine') {
+      respond(true, await adapters.skillsMine())
+      return
+    }
+    if (method === 'skills.my') {
+      respond(true, await adapters.skillsMy())
+      return
+    }
+    if (method === 'skills.publish') {
+      const skillId = typeof params.skillId === 'string' ? params.skillId : ''
+      if (!skillId) throw new Error('skills.publish 需要 skillId')
+      const description = typeof params.description === 'string' ? params.description : undefined
+      respond(true, await adapters.skillsPublish(skillId, description))
+      return
+    }
+    if (method === 'skills.unpublish') {
+      const id = typeof params.id === 'string' ? params.id : ''
+      if (!id) throw new Error('skills.unpublish 需要 id')
+      respond(true, await adapters.skillsUnpublish(id))
+      return
+    }
+    // 2026-08-21（W3 统一包市场 R14）：market.list/detail/install/mine/apps
+    if (method === 'market.list') {
+      const type = typeof params.type === 'string' && params.type.trim() ? params.type.trim().slice(0, 32) : undefined
+      const q = typeof params.q === 'string' && params.q.trim() ? params.q.trim().slice(0, 60) : undefined
+      respond(true, await adapters.marketList({ type, q }))
+      return
+    }
+    if (method === 'market.detail') {
+      const packageId = typeof params.packageId === 'string' ? params.packageId : ''
+      if (!packageId) throw new Error('market.detail 需要 packageId')
+      respond(true, await adapters.marketDetail(packageId))
+      return
+    }
+    if (method === 'market.install') {
+      const packageId = typeof params.packageId === 'string' ? params.packageId : ''
+      if (!packageId) throw new Error('market.install 需要 packageId')
+      respond(true, await adapters.marketInstall(packageId))
+      return
+    }
+    if (method === 'market.mine') {
+      respond(true, await adapters.marketMine())
+      return
+    }
+    if (method === 'market.apps') {
+      respond(true, await adapters.marketApps())
       return
     }
     throw new Error(`Unsupported Store method: ${method}`)

@@ -857,9 +857,9 @@ function ToolsConfigTab({ engines, loading, error, onReload }: ToolsConfigTabPro
   // 本地编辑的 api_key 缓存
   const [keyInputs, setKeyInputs] = useState<Record<string, string>>({})
 
-  /** 哪些引擎需要 API Key */
+  /** 哪些引擎需要 API Key（2026-08-17：web 用 Exa） */
   function needsApiKey(name: string): boolean {
-    return name === 'metaso' || name === 'github'
+    return name === 'exa' || name === 'github'
   }
 
   async function handleToggleEngine(name: string, enabled: boolean) {
@@ -977,7 +977,7 @@ function ToolsConfigTab({ engines, loading, error, onReload }: ToolsConfigTabPro
       )}
 
       <div style={{ marginTop: 16, padding: 12, background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 8, fontSize: 12, color: 'var(--text-tertiary)' }}>
-        metaso 和 github 的 API Key 会同步到 ai_settings 表，供 piBridge 工具调用时读取。
+        exa 和 github 的 API Key 会同步到 ai_settings 表，供 piBridge 工具调用时读取。
         也可在「AI 配置」tab 的工具权限区域控制文件系统工具的默认开关。
       </div>
     </>

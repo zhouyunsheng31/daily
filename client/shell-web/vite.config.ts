@@ -27,5 +27,10 @@ export default defineConfig(({ command }) => ({
   build: {
     outDir: 'dist',
     sourcemap: false,
+    // 老设备兼容（2026-08-20）：Android 10 自带 WebView（Chrome ~78）与 iPhone 6S
+    // /老 iPad（iOS <14 的 Safari）对 es2020 语法（?. ?? ??= ||=）会整段解析失败 → 白屏。
+    // 显式降到 es2018，让 esbuild 把新语法转译为老内核可解析的低版本代码；
+    // （CSS 产物经检查无 oklch/@layer 等现代特性，是干净的，无需处理。）
+    target: 'es2018',
   },
 }))

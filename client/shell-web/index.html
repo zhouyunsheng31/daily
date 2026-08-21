@@ -7,6 +7,31 @@
     <meta name="description" content="Daily webOS · 安静智能" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <title>Daily webOS</title>
+    <!-- 老设备故障诊断兜底（2026-08-20）：先于主 bundle 执行，捕获 module 解析/执行错误，
+         页顶显示错误条 + <img> 上报 /daily/__booterr 到服务器日志；正常设备无副作用。 -->
+    <script>
+      (function(){
+        function report(t){
+          try{ var i=document.createElement('img'); i.style.display='none';
+            i.src='/daily/__booterr?m='+encodeURIComponent(String(t||'').slice(0,600));
+            (document.body||document.documentElement).appendChild(i); }catch(e){}
+        }
+        function show(t){
+          try{ var b=document.createElement('div'); b.textContent='加载失败：'+t;
+            b.style.cssText='position:fixed;left:10px;right:10px;top:10px;z-index:999999;background:rgba(124,45,18,.93);color:#fff;font:12px/1.5 -apple-system,sans-serif;padding:9px 11px;border-radius:8px;white-space:pre-wrap';
+            (document.body||document.documentElement).appendChild(b); }catch(e){}
+        }
+        window.addEventListener('error',function(e){
+          var m=(e&&e.message)?e.message:'unknown';
+          if(e&&e.filename&&e.filename.indexOf('/daily/')!==-1){ m+=' ['+String(e.filename).split('/').pop()+':'+(e.lineno||0)+':'+(e.colno||0)+']'; }
+          report('err:'+m);show(m);
+        },true);
+        window.addEventListener('unhandledrejection',function(e){
+          var r=e&&e.reason; var m=r&&(r.stack||r.message||r)||'rejection';
+          report('rej:'+String(m).slice(0,400));show(String(m).slice(0,200));
+        },true);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

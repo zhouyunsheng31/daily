@@ -5,7 +5,7 @@ import { api } from './client'
 // 5 个端点，全部走 Authorization: Bearer（由 api.getAuthHeaders() 自动注入）
 // ============================================================================
 
-export type SearchKeyProvider = 'metaso' | 'github'
+export type SearchKeyProvider = 'exa' | 'github'
 
 export interface SearchKeyStatus {
   provider: SearchKeyProvider

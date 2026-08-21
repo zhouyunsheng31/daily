@@ -27,8 +27,8 @@ interface ProviderMeta {
 }
 
 const PROVIDERS: ProviderMeta[] = [
-  { id: 'metaso', label: '秘塔搜索', description: 'web_search 工具使用（0.03元/次，新用户5000点免费额度）' },
-  { id: 'github', label: 'GitHub', description: 'github_search 工具使用（token 可选，无 token 60 req/hour，search_code 需 token）' },
+  { id: 'exa', label: 'Exa 搜索', description: 'web_search/read_webpage/exa_find_similar 工具使用（$0.007-0.013/次，预充值，dashboard.exa.ai）' },
+  { id: 'github', label: 'GitHub', description: 'GitHub 下载代理使用（token 可选，无 token 60 req/hour）' },
 ]
 
 interface ProviderRowState {

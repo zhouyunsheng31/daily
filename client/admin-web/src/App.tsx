@@ -387,11 +387,11 @@ function UsageModal({ userKey, name, onClose }: { userKey: string; name: string;
         <div className="usage-head"><span>时间</span><span>模型/思考</span><span>tokens</span><span>状态</span><span>IP</span></div>
         {items.length === 0 ? <p className="muted">暂无记录。</p> : items.map((item) => (
           <div className="usage-row" key={item.id}>
-            <span>{formatDate(item.createdAt)}</span>
-            <span>{item.model} · {item.thinking}</span>
-            <span>{item.totalTokens}（{item.promptTokens}+{item.completionTokens}）</span>
-            <span className={`status-${item.status}`}>{item.status}{item.errorCode ? ` · ${item.errorCode}` : ''}</span>
-            <span>{item.ip ?? '—'}</span>
+            <span data-label="时间">{formatDate(item.createdAt)}</span>
+            <span data-label="模型/思考">{item.model} · {item.thinking}</span>
+            <span data-label="Tokens">{item.totalTokens}（{item.promptTokens}+{item.completionTokens}）</span>
+            <span data-label="状态" className={`status-${item.status}`}>{item.status}{item.errorCode ? ` · ${item.errorCode}` : ''}</span>
+            <span data-label="IP">{item.ip ?? '—'}</span>
           </div>
         ))}
       </div>
@@ -494,13 +494,13 @@ function ImageGenView() {
         <div className="usage-head"><span>时间</span><span>用户</span><span>提示词</span><span>图/张数</span><span>耗时</span><span>tokens / 费用</span><span>状态</span></div>
         {items.length === 0 ? <p className="muted">暂无记录。</p> : items.map((item) => (
           <div className="usage-row" key={item.id}>
-            <span>{formatDate(item.createdAt)}</span>
-            <span title={item.userKey}>{item.userEmail ?? item.userKey.slice(0, 20)}</span>
-            <span className="prompt-cell" title={item.prompt}>{item.prompt || '—'}</span>
-            <span>{item.images}/{item.n}</span>
-            <span>{item.durationMs}s</span>
-            <span>{item.totalTokens} · ¥{(item.costMinor / 100).toFixed(2)}</span>
-            <span className={`status-${item.status}`}>{STATUS_LABEL[item.status] ?? item.status}{item.errorCode ? ` · ${item.errorCode}` : ''}</span>
+            <span data-label="时间">{formatDate(item.createdAt)}</span>
+            <span data-label="用户" title={item.userKey}>{item.userEmail ?? item.userKey.slice(0, 20)}</span>
+            <span data-label="提示词" className="prompt-cell full" title={item.prompt}>{item.prompt || '—'}</span>
+            <span data-label="图/张数">{item.images}/{item.n}</span>
+            <span data-label="耗时">{item.durationMs}s</span>
+            <span data-label="tokens/费用">{item.totalTokens} · ¥{(item.costMinor / 100).toFixed(2)}</span>
+            <span data-label="状态" className={`status-${item.status}`}>{STATUS_LABEL[item.status] ?? item.status}{item.errorCode ? ` · ${item.errorCode}` : ''}</span>
           </div>
         ))}
       </div>
@@ -575,16 +575,16 @@ function OrdersView() {
         <div className="order-head"><span>时间</span><span>订单号</span><span>档位 / 金额</span><span>留言（邮箱）</span><span>渠道</span><span>积分</span><span>状态</span><span>操作</span></div>
         {items.length === 0 ? <p className="muted">暂无订单。</p> : items.map((order) => (
           <div className="order-row" key={order.out_trade_no}>
-            <span>{formatDate(order.created_at)}</span>
-            <span className="mono" title={order.out_trade_no}>{order.out_trade_no.slice(-12)}</span>
-            <span>{order.plan_name ?? order.plan_id.slice(0, 8)}<small className="muted"> ¥{order.amount}{order.product_type === 1 ? ' · 尝鲜包' : ` · ${order.month}个月`}</small></span>
-            <span className="mono" title={order.remark ?? ''}>{order.remark || '—'}</span>
-            <span>{order.channel === 'webhook' ? '回调' : '对账'}</span>
-            <span className={order.credits > 0 ? 'income' : 'muted'}>{order.credits > 0 ? `+${order.credits}` : '0'}</span>
-            <span>{order.delivered === 1
+            <span data-label="时间">{formatDate(order.created_at)}</span>
+            <span data-label="订单号" className="mono" title={order.out_trade_no}>{order.out_trade_no.slice(-12)}</span>
+            <span data-label="档位/金额">{order.plan_name ?? order.plan_id.slice(0, 8)}<small className="muted"> ¥{order.amount}{order.product_type === 1 ? ' · 尝鲜包' : ` · ${order.month}个月`}</small></span>
+            <span data-label="留言（邮箱）" className="mono full" title={order.remark ?? ''}>{order.remark || '—'}</span>
+            <span data-label="渠道">{order.channel === 'webhook' ? '回调' : '对账'}</span>
+            <span data-label="积分" className={order.credits > 0 ? 'income' : 'muted'}>{order.credits > 0 ? `+${order.credits}` : '0'}</span>
+            <span data-label="状态">{order.delivered === 1
               ? <span className="status-ok">已发货{order.match_mode === 'duplicate' ? '（重复购买）' : ''}</span>
               : <span className="status-failed">未发货{order.error ? ` · ${order.error.slice(0, 40)}` : ''}</span>}</span>
-            <span className="order-actions">
+            <span className="order-actions full">
               {order.delivered === 1
                 ? <small className="muted" title={order.matched_user ?? ''}>{order.matched_user?.slice(0, 16) ?? '—'}</small>
                 : <button className="ghost-btn" disabled={busyNo === order.out_trade_no} onClick={() => void redeliver(order.out_trade_no)}>{busyNo === order.out_trade_no ? <LoaderCircle className="spin" size={12} /> : <Check size={12} />}补发</button>}
@@ -757,14 +757,14 @@ function RedeemCodesView() {
         {items.length === 0 ? <p className="muted">暂无兑换码。</p> : items.map((item) => {
           const canSelect = item.status === 'unused'
           return <div className="redeem-row" key={item.code}>
-            <span className="mono" title={item.code}>{item.code}</span>
-            <span>{item.plan_name ?? item.plan_id.slice(0, 8)}</span>
-            <span className={`status-${item.status}`}>{REDEEM_STATUS_LABEL[item.status] ?? item.status}</span>
-            <span title={item.redeemed_by ?? ''}>{item.redeemed_by ? item.redeemed_by.slice(0, 20) : '—'}</span>
-            <span>{formatDate(item.redeemed_at)}</span>
-            <span className="note-cell" title={item.note ?? ''}>{item.note ?? '—'}</span>
-            <span className="order-actions">
-              {canSelect ? <input type="checkbox" checked={!!selected[item.code]} onChange={(e) => setSelected((s) => ({ ...s, [item.code]: e.target.checked }))} /> : null}
+            <span data-label="兑换码" className="mono" title={item.code}>{item.code}</span>
+            <span data-label="档位">{item.plan_name ?? item.plan_id.slice(0, 8)}</span>
+            <span data-label="状态" className={`status-${item.status}`}>{REDEEM_STATUS_LABEL[item.status] ?? item.status}</span>
+            <span data-label="兑换人" title={item.redeemed_by ?? ''}>{item.redeemed_by ? item.redeemed_by.slice(0, 20) : '—'}</span>
+            <span data-label="兑换时间">{formatDate(item.redeemed_at)}</span>
+            <span data-label="备注" className="note-cell full" title={item.note ?? ''}>{item.note ?? '—'}</span>
+            <span className="order-actions full">
+              {canSelect ? <label className="check-hit"><input type="checkbox" checked={!!selected[item.code]} onChange={(e) => setSelected((s) => ({ ...s, [item.code]: e.target.checked }))} /></label> : null}
               {canSelect ? <button className="link-btn" onClick={() => void doRevoke([item.code])} disabled={revoking}>撤销</button> : null}
             </span>
           </div>
@@ -776,12 +776,14 @@ function RedeemCodesView() {
 }
 
 // ============================================================================
-// MiniMax-M3 视觉桥接监测（2026-08-14）：AI 的眼睛——DeepSeek 非视觉，
-// 图片/视频经 M3 转文字描述，这里看平台在 M3 上的实时消耗（金额 + token）
+// 视觉桥接监测（2026-08-14 起；2026-08-21 双 provider）：AI 的眼睛——DeepSeek
+// 非视觉，图片/视频经视觉模型转文字描述。图片优先 DeepSeek V4 Flash Vision，
+// 视频/兜底 MiniMax-M3，byModel 按实际执行模型拆分金额 + token。
 // ============================================================================
 
 const VISION_TRIGGER_LABEL: Record<string, string> = { chat_bridge: '对话自动桥接', read_tool: 'AI 读图', describe_media: '主动调用' }
 const VISION_KIND_LABEL: Record<string, string> = { image: '图片', video: '视频', mixed: '混合', unsupported: '不支持' }
+const VISION_MODEL_LABEL: Record<string, string> = { 'deepseek-v4-flash-vision-exp': 'DeepSeek Vision', 'MiniMax-M3': 'MiniMax-M3' }
 
 function VisionView() {
   const [stats, setStats] = useState<VisionStats | null>(null)
@@ -818,29 +820,40 @@ function VisionView() {
   const maxDay = Math.max(1, ...stats.byDay.map((d) => d.calls))
   const triggers = Object.entries(stats.byTrigger)
   const statuses = Object.entries(stats.byStatus)
+  const models = Object.entries(stats.byModel ?? {})
+  const providers = stats.pricing?.providers ?? []
 
   return <div className="dashboard">
     <div className="stat-grid">
       <div className="stat-card"><span>近 {stats.days} 天视觉调用</span><strong>{t.calls} 次</strong><small>成功 {t.ok} · 失败 {t.failed} · 媒体 {t.media} 条</small></div>
-      <div className="stat-card"><span>M3 消耗金额</span><strong className={t.costMinor > 0 ? '' : ''}>¥{(t.costMinor / 100).toFixed(2)}</strong><small>按官方五折价 {stats.pricing?.inputPerMillion ?? 2.1}/{stats.pricing?.outputPerMillion ?? 8.4} 元/M</small></div>
+      <div className="stat-card"><span>视觉消耗金额</span><strong className={t.costMinor > 0 ? '' : ''}>¥{(t.costMinor / 100).toFixed(2)}</strong><small>
+        {models.length > 0 ? models.map(([m, v]) => `${VISION_MODEL_LABEL[m] ?? m} ¥${(v.costMinor / 100).toFixed(2)}`).join(' · ') : `活跃 ${stats.pricing?.model ?? '—'}`}
+      </small></div>
       <div className="stat-card"><span>消耗 tokens</span><strong>{formatTokens(t.totalTokens)}</strong><small>输入 {formatTokens(t.inputTokens)} · 输出 {formatTokens(t.outputTokens)} · 缓存 {formatTokens(t.cachedTokens)}</small></div>
       <div className="stat-card"><span>成功率</span><strong className={successRate < 90 ? 'danger' : ''}>{successRate}%</strong><small>{statuses.map(([k, v]) => `${k} ${v}`).join(' / ') || '暂无失败'}</small></div>
     </div>
 
     <div className="panel-card">
       <div className="panel-head">
-        <strong>视觉桥接（AI 的眼睛）· {stats.pricing?.model ?? 'MiniMax-M3'}</strong>
-        <div className="meta"><span className="chip">输入 ¥{stats.pricing?.inputPerMillion ?? 2.1} / 百万</span><span className="chip">输出 ¥{stats.pricing?.outputPerMillion ?? 8.4} / 百万</span><span className="chip">缓存 ¥{stats.pricing?.cacheReadPerMillion ?? 0.42} / 百万</span><span className="chip">{stats.pricing?.note ?? ''}</span>
+        <strong>视觉桥接（AI 的眼睛）· {stats.pricing?.model ?? '—'}（图片优先 / M3 兜底）</strong>
+        <div className="meta">
+          {providers.map((p) => (
+            <span className="chip" key={p.model} title={p.note}>{VISION_MODEL_LABEL[p.model] ?? p.model}{p.active ? ' ✓' : '（未配置）'} · 输入 ¥{p.inputPerMillion} / 输出 ¥{p.outputPerMillion}</span>
+          ))}
+          <span className="chip">{stats.pricing?.note ?? ''}</span>
           <button className="ghost-btn" onClick={() => { void load(days); void loadUsage(page, userKey) }}><Sparkles size={13} />刷新</button>
           <select value={days} onChange={(e) => { setDays(Number(e.target.value)); setPage(1) }} className="ghost-select">
             <option value={1}>近 1 天</option><option value={7}>近 7 天</option><option value={30}>近 30 天</option>
           </select>
         </div>
       </div>
-      <p className="muted">DeepSeek 无视觉能力，用户消息中的图片/视频或 AI 读取的图片文件，自动调用 MiniMax-M3 转成文字描述后再进入对话；每次调用按真实 token 用量计费（平台成本，不扣用户积分）。</p>
+      <p className="muted">DeepSeek 无视觉能力，用户消息中的图片/视频或 AI 读取的图片文件，自动经视觉模型转成文字描述后再进入对话；图片优先走 DeepSeek V4 Flash Vision（deepseek-v4-flash-vision-exp，官方价、图片 ≤384 token/张），失败或视频自动降级 MiniMax-M3。每次调用按真实 token 用量计费（平台成本，不扣用户积分）。</p>
       <div className="day-bars">{stats.byDay.length === 0 ? <p className="muted">近 {stats.days} 天暂无视觉调用。</p> : stats.byDay.map((d) => (
         <div className="day-bar" key={d.day} title={`${d.day}：${d.calls} 次 / ${formatTokens(d.tokens)} tokens / ¥${(d.costMinor / 100).toFixed(2)}`}><div className="day-bar-track"><span style={{ height: `${Math.max(4, Math.round((d.calls / maxDay) * 100))}%` }} /></div><small>{d.day.slice(5)}</small><b>{d.calls}</b></div>
       ))}</div>
+      {models.length > 0 ? <div className="trigger-row">{models.map(([m, v]) => (
+        <span className="chip" key={m} title={`成功 ${v.ok} · 失败 ${v.failed}`}>{VISION_MODEL_LABEL[m] ?? m}：{v.calls} 次 · {formatTokens(v.tokens)} tokens · ¥{(v.costMinor / 100).toFixed(2)}</span>
+      ))}</div> : null}
       {triggers.length > 0 ? <div className="trigger-row">{triggers.map(([k, v]) => (
         <span className="chip" key={k}>{VISION_TRIGGER_LABEL[k] ?? k}：{v.calls} 次 · {formatTokens(v.tokens)} tokens · ¥{(v.costMinor / 100).toFixed(2)}</span>
       ))}</div> : null}
@@ -852,11 +865,11 @@ function VisionView() {
         <div className="usage-head"><span>用户</span><span>调用</span><span>成功</span><span>tokens</span><span>金额</span></div>
         {stats.byUser.map((u) => (
           <div className="usage-row" key={u.userKey}>
-            <span>{u.userEmail ?? u.userKey}</span>
-            <span>{u.calls}</span>
-            <span>{u.ok}</span>
-            <span>{formatTokens(u.tokens)}</span>
-            <span>¥{(u.costMinor / 100).toFixed(2)}</span>
+            <span data-label="用户">{u.userEmail ?? u.userKey}</span>
+            <span data-label="调用">{u.calls}</span>
+            <span data-label="成功">{u.ok}</span>
+            <span data-label="Tokens">{formatTokens(u.tokens)}</span>
+            <span data-label="金额">¥{(u.costMinor / 100).toFixed(2)}</span>
           </div>
         ))}
       </div>
@@ -870,16 +883,17 @@ function VisionView() {
       </div>
       {items.length === 0 ? <p className="muted">暂无记录。</p> : <>
         <div className="usage-table">
-          <div className="usage-head"><span>时间</span><span>用户</span><span>触发/类型</span><span>tokens</span><span>费用</span><span>状态</span><span>描述摘要</span></div>
+          <div className="usage-head"><span>时间</span><span>用户</span><span>模型</span><span>触发/类型</span><span>tokens</span><span>费用</span><span>状态</span><span>描述摘要</span></div>
           {items.map((item) => (
             <div className="usage-row" key={item.id}>
-              <span>{formatDate(item.createdAt)}</span>
-              <span title={item.userKey}>{item.userEmail ?? item.userKey.slice(0, 20)}</span>
-              <span>{VISION_TRIGGER_LABEL[item.trigger] ?? item.trigger} · {VISION_KIND_LABEL[item.kind] ?? item.kind}{item.mediaCount ? ` ×${item.mediaCount}` : ''}</span>
-              <span>{formatTokens(item.totalTokens)}（{item.inputTokens}+{item.outputTokens}）</span>
-              <span>¥{(item.costMinor / 100).toFixed(4)}</span>
-              <span className={`status-${item.status}`}>{item.status}{item.errorCode ? ` · ${item.errorCode}` : ''}</span>
-              <span className="note-cell" title={item.description ?? item.errorMessage ?? ''}>{item.description ? item.description.slice(0, 40) + '…' : (item.errorMessage ?? '—')}</span>
+              <span data-label="时间">{formatDate(item.createdAt)}</span>
+              <span data-label="用户" title={item.userKey}>{item.userEmail ?? item.userKey.slice(0, 20)}</span>
+              <span data-label="模型" title={item.model ?? ''}>{item.model ? (VISION_MODEL_LABEL[item.model] ?? item.model) : '—'}</span>
+              <span data-label="触发/类型">{VISION_TRIGGER_LABEL[item.trigger] ?? item.trigger} · {VISION_KIND_LABEL[item.kind] ?? item.kind}{item.mediaCount ? ` ×${item.mediaCount}` : ''}</span>
+              <span data-label="Tokens">{formatTokens(item.totalTokens)}（{item.inputTokens}+{item.outputTokens}）</span>
+              <span data-label="费用">¥{(item.costMinor / 100).toFixed(4)}</span>
+              <span data-label="状态" className={`status-${item.status}`}>{item.status}{item.errorCode ? ` · ${item.errorCode}` : ''}</span>
+              <span data-label="描述摘要" className="note-cell full" title={item.description ?? item.errorMessage ?? ''}>{item.description ? item.description.slice(0, 40) + '…' : (item.errorMessage ?? '—')}</span>
             </div>
           ))}
         </div>
@@ -896,10 +910,10 @@ function VisionView() {
 // ============================================================================
 
 const SEARCH_TOOL_LABEL: Record<string, string> = {
-  web_search: '网页搜索（秘塔）',
-  read_webpage: '读取网页（秘塔）',
+  web_search: '网页搜索（Exa）',
+  read_webpage: '读取网页（Exa）',
   academic_search: '学术搜索（ArXiv）',
-  github_search: 'GitHub 搜索',
+  exa_find_similar: '相似内容（Exa）',
 }
 
 function SearchView() {
@@ -922,7 +936,7 @@ function SearchView() {
   const t = stats.total
   const maxDay = Math.max(1, ...stats.byDay.map((d) => d.calls))
   const engineLabel = (provider: string): string =>
-    ({ metaso: '秘塔搜索', arxiv: '学术搜索(ArXiv)', github: 'GitHub搜索', github_proxy: 'GitHub代理下载', local: '本地搜索' })[provider] ?? provider
+    ({ exa: 'Exa 搜索', arxiv: '学术搜索(ArXiv)', github_proxy: 'GitHub代理下载', local: '本地搜索' })[provider] ?? provider
 
   return <div className="dashboard">
     <div className="stat-grid">
@@ -947,13 +961,13 @@ function SearchView() {
         <div className="usage-head"><span>引擎</span><span>调用</span><span>成功/失败</span><span>成功率</span><span>平均耗时</span><span>秘塔积分</span><span>最近调用</span></div>
         {stats.byEngine.length === 0 ? <p className="muted">该时间段暂无搜索调用。</p> : stats.byEngine.map((e) => (
           <div className="usage-row" key={e.provider}>
-            <span><strong>{engineLabel(e.provider)}</strong><small className="muted"> {e.provider}</small></span>
-            <span>{e.calls}</span>
-            <span><span className="status-ok">{e.ok}</span> / <span className={e.failed > 0 ? 'status-failed' : 'muted'}>{e.failed}</span></span>
-            <span className={e.successRate < 90 ? 'danger' : ''}>{e.successRate}%</span>
-            <span>{e.avgLatencyMs}ms{Number.isFinite(e.avgOkLatencyMs) ? <small className="muted">（成功 {e.avgOkLatencyMs}ms）</small> : null}</span>
-            <span>{e.creditsConsumed || '—'}</span>
-            <span>{e.lastCallAt ? formatDate(e.lastCallAt) : '—'}</span>
+            <span data-label="引擎"><strong>{engineLabel(e.provider)}</strong><small className="muted"> {e.provider}</small></span>
+            <span data-label="调用">{e.calls}</span>
+            <span data-label="成功/失败"><span className="status-ok">{e.ok}</span> / <span className={e.failed > 0 ? 'status-failed' : 'muted'}>{e.failed}</span></span>
+            <span data-label="成功率" className={e.successRate < 90 ? 'danger' : ''}>{e.successRate}%</span>
+            <span data-label="平均耗时">{e.avgLatencyMs}ms{Number.isFinite(e.avgOkLatencyMs) ? <small className="muted">（成功 {e.avgOkLatencyMs}ms）</small> : null}</span>
+            <span data-label="秘塔积分">{e.creditsConsumed || '—'}</span>
+            <span data-label="最近调用">{e.lastCallAt ? formatDate(e.lastCallAt) : '—'}</span>
           </div>
         ))}
       </div>
@@ -976,10 +990,10 @@ function SearchView() {
         <div className="usage-head"><span>用户</span><span>调用</span><span>成功</span><span>失败</span></div>
         {stats.byUser.map((u) => (
           <div className="usage-row" key={u.userKey}>
-            <span title={u.userKey}>{u.userKey}</span>
-            <span>{u.calls}</span>
-            <span className="status-ok">{u.ok}</span>
-            <span className={u.failed > 0 ? 'status-failed' : 'muted'}>{u.failed}</span>
+            <span data-label="用户" title={u.userKey}>{u.userKey}</span>
+            <span data-label="调用">{u.calls}</span>
+            <span data-label="成功" className="status-ok">{u.ok}</span>
+            <span data-label="失败" className={u.failed > 0 ? 'status-failed' : 'muted'}>{u.failed}</span>
           </div>
         ))}
       </div>
@@ -991,12 +1005,12 @@ function SearchView() {
         <div className="usage-head"><span>时间</span><span>引擎/工具</span><span>用户</span><span>query</span><span>耗时</span><span>错误信息</span></div>
         {stats.failures.map((f, idx) => (
           <div className="usage-row" key={`${f.createdAt}-${idx}`}>
-            <span>{formatDate(f.createdAt)}</span>
-            <span>{engineLabel(f.provider)}<small className="muted"> {SEARCH_TOOL_LABEL[f.tool ?? ''] ?? f.tool ?? f.endpoint}</small></span>
-            <span title={f.userKey ?? ''}>{f.userKey ? f.userKey.slice(0, 24) : '—'}</span>
-            <span className="prompt-cell" title={f.query ?? ''}>{f.query || '—'}</span>
-            <span>{f.latencyMs != null ? `${f.latencyMs}ms` : '—'}</span>
-            <span className="note-cell danger" title={f.errorMsg ?? ''}>{f.errorMsg ?? '—'}</span>
+            <span data-label="时间">{formatDate(f.createdAt)}</span>
+            <span data-label="引擎/工具">{engineLabel(f.provider)}<small className="muted"> {SEARCH_TOOL_LABEL[f.tool ?? ''] ?? f.tool ?? f.endpoint}</small></span>
+            <span data-label="用户" title={f.userKey ?? ''}>{f.userKey ? f.userKey.slice(0, 24) : '—'}</span>
+            <span data-label="Query" className="prompt-cell full" title={f.query ?? ''}>{f.query || '—'}</span>
+            <span data-label="耗时">{f.latencyMs != null ? `${f.latencyMs}ms` : '—'}</span>
+            <span data-label="错误信息" className="note-cell full danger" title={f.errorMsg ?? ''}>{f.errorMsg ?? '—'}</span>
           </div>
         ))}
       </div>}
@@ -1046,13 +1060,13 @@ export function App() {
     <header className="topbar">
       <div className="brand"><span className="logo-mark">D</span><strong>Daily 管理后台</strong></div>
       <nav className="tabs">
-        <button className={view === 'dashboard' ? 'active' : ''} onClick={() => setView('dashboard')}><BarChart3 size={15} />仪表盘</button>
-        <button className={view === 'users' ? 'active' : ''} onClick={() => setView('users')}><Users size={15} />用户与用量</button>
-        <button className={view === 'orders' ? 'active' : ''} onClick={() => setView('orders')}><CircleDollarSign size={15} />爱发电订单</button>
-        <button className={view === 'redeem' ? 'active' : ''} onClick={() => setView('redeem')}><Ticket size={15} />兑换码管理</button>
-        <button className={view === 'imagegen' ? 'active' : ''} onClick={() => setView('imagegen')}><Sparkles size={15} />生图监测</button>
-        <button className={view === 'vision' ? 'active' : ''} onClick={() => setView('vision')}><Eye size={15} />视觉模型</button>
-        <button className={view === 'search' ? 'active' : ''} onClick={() => setView('search')}><Search size={15} />搜索 API</button>
+        <button className={view === 'dashboard' ? 'active' : ''} onClick={() => setView('dashboard')} data-short="仪表盘"><BarChart3 size={15} /><span>仪表盘</span></button>
+        <button className={view === 'users' ? 'active' : ''} onClick={() => setView('users')} data-short="用户"><Users size={15} /><span>用户与用量</span></button>
+        <button className={view === 'orders' ? 'active' : ''} onClick={() => setView('orders')} data-short="订单"><CircleDollarSign size={15} /><span>爱发电订单</span></button>
+        <button className={view === 'redeem' ? 'active' : ''} onClick={() => setView('redeem')} data-short="兑换码"><Ticket size={15} /><span>兑换码管理</span></button>
+        <button className={view === 'imagegen' ? 'active' : ''} onClick={() => setView('imagegen')} data-short="生图"><Sparkles size={15} /><span>生图监测</span></button>
+        <button className={view === 'vision' ? 'active' : ''} onClick={() => setView('vision')} data-short="视觉"><Eye size={15} /><span>视觉模型</span></button>
+        <button className={view === 'search' ? 'active' : ''} onClick={() => setView('search')} data-short="搜索"><Search size={15} /><span>搜索 API</span></button>
       </nav>
       <div className="me"><Activity size={14} /><span>{me?.email ?? me?.username}</span><button className="ghost-btn" onClick={() => void logout()}><LogOut size={13} />退出</button></div>
     </header>
