@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-21：结合物理屏幕前摄挖孔（Punch-Hole Cutout）重构桌面大时钟与安全区排布
+
+**背景**：解决物理居中挖孔摄像头遮挡桌面“8月22日”中“日”字的问题。结合 Material 3 与移动端大屏桌面视觉设计规范，拉开状态栏/挖孔与核心内容之间的垂直呼吸空间。
+
+**改动**
+1. **原生 Cutout 挖孔高度采集（`DailyApp.kt`）**：
+   - 结合 `WindowInsets.displayCutout` 与 `WindowInsets.statusBars` 取极大值 `max(statusBars, displayCutout)`，并设置 `44dp` 保底；
+   - 精准向 Web 注入 `--safe-top`，确保在任何药丸屏/挖孔屏/水滴屏下均能精准识别物理摄像头侵占区域。
+2. **桌面大时钟避让挖孔（`server/src/webosDesktopV1.ts`）**：
+   - `#clock` 距离屏幕顶端重构为 `calc(var(--safe-top, 44px) + 36px)`，使整个时钟完全落于物理摄像头与系统状态栏下方 40px+ 的充裕留白区，彻底消除物理黑孔遮挡；
+   - `.page` 图标网格 `paddingTop` 顺延调整为 `calc(var(--safe-top, 44px) + 168px)`，图标与时钟呈现出舒适的 28px 纵向呼吸感。
+3. **沙箱 iframe 安全变量同步注入（`client/shell-web/src/App.tsx`）**：
+   - 在构建 `system.desktop` 与 App 沙箱时注入 `--safe-top: 44px` / `--safe-bottom: 18px`，保证跨端与沙箱内排布一致。
+
+**验证**
+- 香港云端构建 `BUILD SUCCESSFUL`（产出 23MB APK，`0312045c...`）。
+- 真机截图实测（`daily_cutout_desktop.png`）：桌面大时钟日期“8月22日·周六”与大时间“07:01”完全避开物理前摄挖孔与通知栏，排布优雅舒展。
+
+---
+
 ### 2026-08-21：系统桌面 iframe 安全区与时钟避让修复 + 真机截图验证全屏沉浸质感
 
 **背景**：解决桌面时间卡片与系统状态栏时间（如 01:44）垂直重叠的问题，确保 iframe 内部的系统桌面（`webosDesktopV1`）与外层 Shell 均具备精准的 `--safe-top` 状态栏避让与通顶通底壁纸铺满效果。

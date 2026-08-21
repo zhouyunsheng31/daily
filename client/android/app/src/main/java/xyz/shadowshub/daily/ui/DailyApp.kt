@@ -23,9 +23,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.ui.platform.LocalDensity
+import kotlin.math.max
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -90,11 +92,14 @@ fun DailyApp() {
         fileChooserCallback = null
     }
 
-    // 动态计算系统的状态栏与导航栏高度，安全注入到 Web 页面中（保持全屏壁纸铺满同时内容避让）
+    // 动态计算系统的状态栏、挖孔摄像头（DisplayCutout）与导航栏高度，安全注入到 Web 页面中（保持全屏壁纸铺满同时内容避让）
     val insets = WindowInsets.statusBars.asPaddingValues()
     val navInsets = WindowInsets.navigationBars.asPaddingValues()
-    val statusBarDp = insets.calculateTopPadding().value
-    val navBarDp = navInsets.calculateBottomPadding().value
+    val cutoutInsets = WindowInsets.displayCutout.asPaddingValues()
+    val rawStatusDp = insets.calculateTopPadding().value
+    val rawCutoutDp = cutoutInsets.calculateTopPadding().value
+    val statusBarDp = max(rawStatusDp, rawCutoutDp).let { if (it > 0) it else 44f }
+    val navBarDp = navInsets.calculateBottomPadding().value.let { if (it > 0) it else 18f }
 
     // 物理返回键处理：拦截并转发给 Web 端的 __dailySystemBack 钩子
     BackHandler(enabled = true) {

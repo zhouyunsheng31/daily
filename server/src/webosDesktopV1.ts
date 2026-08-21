@@ -77,10 +77,10 @@ export const WEBOS_DESKTOP_V1_HTML = `<!doctype html>
     width: 300px; height: 300px; top: 38%; right: -110px;
     background: radial-gradient(circle at 50% 50%, rgba(55,107,83,.07), rgba(55,107,83,0) 70%);
   }
-  /* 时钟：日期小字在上、时间大字在下，根据安全区避让系统状态栏，克制优雅 */
+  /* 时钟：日期小字在上、时间大字在下，根据安全区避让系统状态栏与居中前摄挖孔，克制优雅 */
   #clock {
     position: fixed;
-    top: calc(var(--safe-top, env(safe-area-inset-top, 36px)) + 14px);
+    top: calc(var(--safe-top, 44px) + 36px);
     left: 0;
     right: 0;
     z-index: 2;
@@ -88,10 +88,11 @@ export const WEBOS_DESKTOP_V1_HTML = `<!doctype html>
     pointer-events: none;
   }
   #clock .date {
-    font-size: 11px; font-weight: 600; letter-spacing: 3px; color: var(--ink-soft);
+    font-size: 12px; font-weight: 600; letter-spacing: 2px; color: var(--ink-soft);
+    margin-bottom: 2px;
   }
   #clock .time {
-    font-size: 56px; font-weight: 600; letter-spacing: 2px; line-height: 1.16;
+    font-size: 58px; font-weight: 600; letter-spacing: 1px; line-height: 1.12;
     font-variant-numeric: tabular-nums;
     text-shadow: 0 2px 18px rgba(255,255,255,.55);
   }
@@ -106,7 +107,7 @@ export const WEBOS_DESKTOP_V1_HTML = `<!doctype html>
     flex: 0 0 100%; height: 100%;
     scroll-snap-align: start;
     display: flex; flex-direction: column;
-    padding: calc(var(--safe-top, env(safe-area-inset-top, 36px)) + 128px) 14px calc(var(--safe-bottom, env(safe-area-inset-bottom, 16px)) + 90px);
+    padding: calc(var(--safe-top, 44px) + 168px) 16px calc(var(--safe-bottom, 18px) + 96px);
   }
   .grid {
     display: grid;
