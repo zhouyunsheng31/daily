@@ -228,6 +228,112 @@ class DailyJsBridge(
                             Triple(okInstall, buildJsonObject { put("ok", okInstall) }, if (!okInstall) "安装失败" else null)
                         }
                     }
+                    "market.detail" -> {
+                        val id = params["id"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        if (id.isBlank()) {
+                            Triple(false, JsonObject(emptyMap()), "market.detail 需要 id")
+                        } else {
+                            val detail = api.getMarketDetail(id)
+                            if (detail != null) {
+                                Triple(true, detail, null)
+                            } else {
+                                Triple(false, JsonObject(emptyMap()), "找不到市场包: $id")
+                            }
+                        }
+                    }
+                    "market.mine" -> {
+                        val mine = api.listMarketMine()
+                        val arr = buildJsonArray { mine.forEach { add(JsonPrimitive(it)) } }
+                        Triple(true, buildJsonObject { put("installed", arr) }, null)
+                    }
+                    "market.publish" -> {
+                        val packageId = params["packageId"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        if (packageId.isBlank()) {
+                            Triple(false, JsonObject(emptyMap()), "market.publish 需要 packageId")
+                        } else {
+                            val okPub = api.publishMarketPackage(packageId)
+                            Triple(okPub, buildJsonObject { put("ok", okPub) }, if (!okPub) "发布失败" else null)
+                        }
+                    }
+                    "market.unpublish" -> {
+                        val id = params["id"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        if (id.isBlank()) {
+                            Triple(false, JsonObject(emptyMap()), "market.unpublish 需要 id")
+                        } else {
+                            val okUnpub = api.unpublishMarketPackage(id)
+                            Triple(okUnpub, buildJsonObject { put("ok", okUnpub) }, if (!okUnpub) "下架失败" else null)
+                        }
+                    }
+                    // ---- App API 生产与托管 (M2-2) ----
+                    "appapi.publish" -> {
+                        val ns = params["namespace"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        if (ns.isBlank()) {
+                            Triple(false, JsonObject(emptyMap()), "appapi.publish 需要 namespace")
+                        } else {
+                            val okPub = api.publishAppApiNamespace(ns)
+                            Triple(okPub, buildJsonObject { put("ok", okPub) }, if (!okPub) "API 发布失败" else null)
+                        }
+                    }
+                    "appapi.unpublish" -> {
+                        val ns = params["namespace"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        if (ns.isBlank()) {
+                            Triple(false, JsonObject(emptyMap()), "appapi.unpublish 需要 namespace")
+                        } else {
+                            val okUnpub = api.unpublishAppApiNamespace(ns)
+                            Triple(okUnpub, buildJsonObject { put("ok", okUnpub) }, if (!okUnpub) "API 撤回失败" else null)
+                        }
+                    }
+                    "appapi.status" -> {
+                        val ns = params["namespace"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        val status = api.getAppApiStatus(ns)
+                        if (status != null) {
+                            Triple(true, status, null)
+                        } else {
+                            Triple(false, JsonObject(emptyMap()), "获取 API 状态失败")
+                        }
+                    }
+                    "appapi.secrets.set" -> {
+                        val ns = params["namespace"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        val valuesObj = params["values"] as? JsonObject ?: JsonObject(emptyMap())
+                        val map = valuesObj.mapNotNull { (k, v) -> (v as? JsonPrimitive)?.content?.let { k to it } }.toMap()
+                        val okSet = api.setAppApiSecrets(ns, map)
+                        Triple(okSet, buildJsonObject { put("ok", okSet) }, if (!okSet) "设置密钥失败" else null)
+                    }
+                    "appapi.secrets.get" -> {
+                        val ns = params["namespace"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        val status = api.getAppApiSecretsStatus(ns)
+                        if (status != null) {
+                            Triple(true, status, null)
+                        } else {
+                            Triple(false, JsonObject(emptyMap()), "获取密钥状态失败")
+                        }
+                    }
+                    // ---- 账号认证与漫游 (M2-3) ----
+                    "auth.sendCode" -> {
+                        val email = params["email"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        val okSend = api.sendEmailCode(email)
+                        Triple(okSend, buildJsonObject { put("ok", okSend) }, if (!okSend) "验证码发送失败" else null)
+                    }
+                    "auth.register" -> {
+                        val email = params["email"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        val code = params["code"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        val password = params["password"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        val okReg = api.registerWithEmail(email, code, password)
+                        Triple(okReg, buildJsonObject { put("ok", okReg) }, if (!okReg) "注册失败" else null)
+                    }
+                    "auth.login" -> {
+                        val email = params["email"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        val password = params["password"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        val okLog = api.loginWithEmail(email, password)
+                        Triple(okLog, buildJsonObject { put("ok", okLog) }, if (!okLog) "登录失败" else null)
+                    }
+                    "auth.resetPassword" -> {
+                        val email = params["email"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        val code = params["code"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        val password = params["password"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
+                        val okReset = api.resetPassword(email, code, password)
+                        Triple(okReset, buildJsonObject { put("ok", okReset) }, if (!okReset) "重置密码失败" else null)
+                    }
                     "files.manifest" -> {
                         val prefix = params["prefix"]?.let { if (it is JsonPrimitive) it.content else "" } ?: ""
                         val files = api.getFilesManifest(prefix)

@@ -6,6 +6,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.contentOrNull
@@ -337,6 +338,154 @@ class WebosApi(
         try {
             val body = "{}".toRequestBody(JSON)
             val req = Request.Builder().url("$baseUrl/webos/api/market/$id/install").post(body).build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) { false }
+    }
+
+    /** 市场详情：GET /webos/api/market/:id */
+    suspend fun getMarketDetail(id: String): JsonObject? = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder().url("$baseUrl/webos/api/market/$id").get().build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                json.parseToJsonElement(resp.body?.string() ?: "{}") as? JsonObject
+            }
+        } catch (_: Exception) { null }
+    }
+
+    /** 我的市场安装记录：GET /webos/api/market/mine */
+    suspend fun listMarketMine(): List<String> = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder().url("$baseUrl/webos/api/market/mine").get().build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext emptyList()
+                val root = json.parseToJsonElement(resp.body?.string() ?: "{}") as? JsonObject ?: return@withContext emptyList()
+                val arr = root["installed"] as? JsonArray ?: root["items"] as? JsonArray ?: return@withContext emptyList()
+                arr.mapNotNull { (it as? JsonPrimitive)?.content }
+            }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    /** 发布包到市场：POST /webos/api/market/publish { packageId } */
+    suspend fun publishMarketPackage(packageId: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val body = buildJsonObject { put("packageId", packageId) }.toString().toRequestBody(JSON)
+            val req = Request.Builder().url("$baseUrl/webos/api/market/publish").post(body).build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) { false }
+    }
+
+    /** 从市场下架包：POST /webos/api/market/:id/unpublish */
+    suspend fun unpublishMarketPackage(id: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val body = "{}".toRequestBody(JSON)
+            val req = Request.Builder().url("$baseUrl/webos/api/market/$id/unpublish").post(body).build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) { false }
+    }
+
+    // ========================================================================
+    // App API 发布与密钥托管 (W2/W3 & M2-2 服务即包)
+    // ========================================================================
+
+    /** 发布命名空间为公开 API：POST /webos/api/appapi/:namespace/publish */
+    suspend fun publishAppApiNamespace(namespace: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder().url("$baseUrl/webos/api/appapi/$namespace/publish").post("{}".toRequestBody(JSON)).build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) { false }
+    }
+
+    /** 撤回公开 API：POST /webos/api/appapi/:namespace/unpublish */
+    suspend fun unpublishAppApiNamespace(namespace: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder().url("$baseUrl/webos/api/appapi/$namespace/unpublish").post("{}".toRequestBody(JSON)).build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) { false }
+    }
+
+    /** 获取 API 发布状态：GET /webos/api/appapi/:namespace/status */
+    suspend fun getAppApiStatus(namespace: String): JsonObject? = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder().url("$baseUrl/webos/api/appapi/$namespace/status").get().build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                json.parseToJsonElement(resp.body?.string() ?: "{}") as? JsonObject
+            }
+        } catch (_: Exception) { null }
+    }
+
+    /** 托管/更新 API 密钥（服务端安全托管，脱敏）：PUT /webos/api/appapi/:namespace/secrets */
+    suspend fun setAppApiSecrets(namespace: String, values: Map<String, String>): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val body = buildJsonObject {
+                put("values", buildJsonObject {
+                    values.forEach { (k, v) -> put(k, v) }
+                })
+            }.toString().toRequestBody(JSON)
+            val req = Request.Builder().url("$baseUrl/webos/api/appapi/$namespace/secrets").put(body).build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) { false }
+    }
+
+    /** 查询 API 密钥设置状态（不含明文）：GET /webos/api/appapi/:namespace/secrets */
+    suspend fun getAppApiSecretsStatus(namespace: String): JsonObject? = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder().url("$baseUrl/webos/api/appapi/$namespace/secrets").get().build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                json.parseToJsonElement(resp.body?.string() ?: "{}") as? JsonObject
+            }
+        } catch (_: Exception) { null }
+    }
+
+    // ========================================================================
+    // 账号认证与漫游 (M2-3)
+    // ========================================================================
+
+    /** 发送邮箱验证码：POST /api/auth/email/send-code */
+    suspend fun sendEmailCode(email: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val body = buildJsonObject { put("email", email) }.toString().toRequestBody(JSON)
+            val req = Request.Builder().url("$baseUrl/api/auth/email/send-code").post(body).build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) { false }
+    }
+
+    /** 邮箱注册并自动登录：POST /api/auth/email/register */
+    suspend fun registerWithEmail(email: String, code: String, password: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val body = buildJsonObject {
+                put("email", email)
+                put("code", code)
+                put("password", password)
+            }.toString().toRequestBody(JSON)
+            val req = Request.Builder().url("$baseUrl/api/auth/email/register").post(body).build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) { false }
+    }
+
+    /** 邮箱登录（自动迁移游客资产）：POST /api/auth/email/login */
+    suspend fun loginWithEmail(email: String, password: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val body = buildJsonObject {
+                put("email", email)
+                put("password", password)
+            }.toString().toRequestBody(JSON)
+            val req = Request.Builder().url("$baseUrl/api/auth/email/login").post(body).build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) { false }
+    }
+
+    /** 重置密码并登录：POST /api/auth/email/reset-password */
+    suspend fun resetPassword(email: String, code: String, password: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val body = buildJsonObject {
+                put("email", email)
+                put("code", code)
+                put("newPassword", password)
+            }.toString().toRequestBody(JSON)
+            val req = Request.Builder().url("$baseUrl/api/auth/email/reset-password").post(body).build()
             client.newCall(req).execute().use { it.isSuccessful }
         } catch (_: Exception) { false }
     }

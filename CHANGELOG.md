@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-21：Android 端 M2 里程碑全线达成 —— 统一包市场消费 + 服务即包云端托管生产 + 账号资产漫游
+
+**背景**：完成 M2 任务卡体系（M2-1 至 M2-3）全部功能要求。移动端具备完整的包市场消费、端侧创建受限 API 并一键发布云端托管、脱敏 secrets 配置，以及邮箱验证码登录与资产漫游能力。
+
+**改动**
+1. **统一包市场消费（M2-1）**：
+   - `WebosApi.kt` / `DailyJsBridge.kt` 补齐：`market.detail`、`market.mine`、`market.publish`、`market.unpublish`；
+   - 移动端沉浸 WebView 容器无缝渲染 `system.store` 市场列表与依赖闭包一键安装。
+2. **端侧服务即包生产与云端托管（M2-2）**：
+   - `WebosApi.kt` / `DailyJsBridge.kt` 补齐：`appapi.publish`、`appapi.unpublish`、`appapi.status`、`appapi.secrets.set`、`appapi.secrets.get`；
+   - 创作者在手机端通过 AI 工作区建包后，可直接发布公共受限 API 管道到平台服务器，由云端受限 vm 安全代跑并按次计费。
+3. **账号认证与资产漫游（M2-3）**：
+   - `WebosApi.kt` / `DailyJsBridge.kt` 补齐：`auth.sendCode`、`auth.register`、`auth.login`、`auth.resetPassword`；
+   - 登录后自动更新持久化 Cookie 并迁移游客资产。
+
+**验证**
+- 云端 Gradle 构建 `BUILD SUCCESSFUL`（产出 23MB APK，`b494bf84...`）。
+- 真机安装验证：`xyz.shadowshub.daily` 运行平稳，对话流式收发、模板加载与 API 桥接响应正常。
+
+---
+
 ### 2026-08-21：Android 端 M1 里程碑全线达成 —— 离线静态资源磁盘缓存 + 完备 JSBridge 与 App 版本管理
 
 **背景**：完成 M1 任务卡体系（M1-1 至 M1-5）的所有核心交付与验收要求。移动端具备完整的离线秒开能力、版本回滚、市场安装与文件操作 JSBridge 响应，真机构建平稳运行。
