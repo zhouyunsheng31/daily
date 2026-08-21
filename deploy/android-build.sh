@@ -30,7 +30,7 @@ echo "==> [1/5] 打包 client/android（排除构建产物）"
 cd "$SRC_DIR"
 tar czf /tmp/android-src.tar.gz \
   --exclude='build' --exclude='.gradle' --exclude='.kotlin' \
-  --exclude='local.properties' --exclude='tools' --exclude='*aapt2*' \
+  --exclude='local.properties' --exclude='*tools*' --exclude='*aapt2*' \
   client/android
 ls -lh /tmp/android-src.tar.gz | awk '{print "    package:", $5}'
 

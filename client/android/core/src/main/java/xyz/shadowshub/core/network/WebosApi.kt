@@ -218,6 +218,256 @@ class WebosApi(
         } catch (_: Exception) { null }
     }
 
+    // ========================================================================
+    // Packages API (W1 体系)
+    // ========================================================================
+
+    /** 获取包列表：GET /webos/api/packages?type=&q= */
+    suspend fun listPackages(type: String? = null, query: String? = null): List<PackageSummary> = withContext(Dispatchers.IO) {
+        try {
+            val urlBuilder = "$baseUrl/webos/api/packages".toHttpUrl().newBuilder()
+            type?.let { urlBuilder.addQueryParameter("type", it) }
+            query?.let { urlBuilder.addQueryParameter("q", it) }
+            val req = Request.Builder().url(urlBuilder.build()).get().build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext emptyList()
+                val root = json.parseToJsonElement(resp.body?.string() ?: "{}") as? JsonObject ?: return@withContext emptyList()
+                val arr = root["packages"] as? JsonArray ?: return@withContext emptyList()
+                arr.mapNotNull { el ->
+                    val o = el as? JsonObject ?: return@mapNotNull null
+                    val id = o["id"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    PackageSummary(
+                        id = id,
+                        type = o["type"]?.jsonPrimitive?.content ?: "app",
+                        name = o["name"]?.jsonPrimitive?.content ?: id,
+                        icon = o["icon"]?.jsonPrimitive?.contentOrNull,
+                        activeVersionId = o["activeVersionId"]?.jsonPrimitive?.contentOrNull,
+                        installed = o["installed"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true,
+                    )
+                }
+            }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    /** 获取包详情：GET /webos/api/packages/:id */
+    suspend fun getPackageDetail(id: String): PackageDetail? = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder().url("$baseUrl/webos/api/packages/$id").get().build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                val root = json.parseToJsonElement(resp.body?.string() ?: "{}") as? JsonObject ?: return@withContext null
+                val pkg = root["package"] as? JsonObject ?: return@withContext null
+                val versionsArr = pkg["versions"] as? JsonArray ?: JsonArray(emptyList())
+                val versions = versionsArr.mapNotNull { el ->
+                    val o = el as? JsonObject ?: return@mapNotNull null
+                    PackageVersionDetail(
+                        id = o["id"]?.jsonPrimitive?.content ?: "",
+                        packageId = o["packageId"]?.jsonPrimitive?.content ?: id,
+                        version = o["version"]?.jsonPrimitive?.content ?: "",
+                        status = o["status"]?.jsonPrimitive?.content ?: "ready",
+                        manifest = o["manifest"] as? JsonObject,
+                        createdAt = o["createdAt"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
+                        createdBy = o["createdBy"]?.jsonPrimitive?.contentOrNull,
+                    )
+                }
+                PackageDetail(
+                    id = pkg["id"]?.jsonPrimitive?.content ?: id,
+                    type = pkg["type"]?.jsonPrimitive?.content ?: "app",
+                    name = pkg["name"]?.jsonPrimitive?.content ?: id,
+                    icon = pkg["icon"]?.jsonPrimitive?.contentOrNull,
+                    activeVersionId = pkg["activeVersionId"]?.jsonPrimitive?.contentOrNull,
+                    versions = versions,
+                )
+            }
+        } catch (_: Exception) { null }
+    }
+
+    /** 回滚包版本：POST /webos/api/packages/:id/rollback */
+    suspend fun rollbackPackage(id: String, toVersionId: String? = null): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val bodyObj = buildJsonObject { toVersionId?.let { put("toVersionId", it) } }
+            val body = bodyObj.toString().toRequestBody(JSON)
+            val req = Request.Builder().url("$baseUrl/webos/api/packages/$id/rollback").post(body).build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) { false }
+    }
+
+    /** 删除包：DELETE /webos/api/packages/:id */
+    suspend fun deletePackage(id: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder().url("$baseUrl/webos/api/packages/$id").delete().build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) { false }
+    }
+
+    // ========================================================================
+    // Market API (W3 统一包市场)
+    // ========================================================================
+
+    /** 市场列表：GET /webos/api/market?type=&q= */
+    suspend fun listMarket(type: String? = null, query: String? = null): MarketListing = withContext(Dispatchers.IO) {
+        try {
+            val urlBuilder = "$baseUrl/webos/api/market".toHttpUrl().newBuilder()
+            type?.let { urlBuilder.addQueryParameter("type", it) }
+            query?.let { urlBuilder.addQueryParameter("q", it) }
+            val req = Request.Builder().url(urlBuilder.build()).get().build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext MarketListing()
+                val root = json.parseToJsonElement(resp.body?.string() ?: "{}") as? JsonObject ?: return@withContext MarketListing()
+                val arr = root["items"] as? JsonArray ?: return@withContext MarketListing()
+                val items = arr.mapNotNull { el ->
+                    val o = el as? JsonObject ?: return@mapNotNull null
+                    MarketItem(
+                        id = o["id"]?.jsonPrimitive?.content ?: return@mapNotNull null,
+                        type = o["type"]?.jsonPrimitive?.content ?: "app",
+                        name = o["name"]?.jsonPrimitive?.content ?: "",
+                        description = o["description"]?.jsonPrimitive?.contentOrNull ?: "",
+                        icon = o["icon"]?.jsonPrimitive?.contentOrNull,
+                        author = o["author"]?.jsonPrimitive?.contentOrNull ?: "",
+                        installed = o["installed"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false,
+                    )
+                }
+                MarketListing(items = items, total = root["total"]?.jsonPrimitive?.content?.toIntOrNull() ?: items.size)
+            }
+        } catch (_: Exception) { MarketListing() }
+    }
+
+    /** 安装市场包：POST /webos/api/market/:id/install */
+    suspend fun installMarketPackage(id: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val body = "{}".toRequestBody(JSON)
+            val req = Request.Builder().url("$baseUrl/webos/api/market/$id/install").post(body).build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) { false }
+    }
+
+    // ========================================================================
+    // File Service API (W-F 体系)
+    // ========================================================================
+
+    /** 获取文件清单：GET /webos/api/files/manifest?prefix= */
+    suspend fun getFilesManifest(prefix: String = ""): List<FileManifestEntry> = withContext(Dispatchers.IO) {
+        try {
+            val urlBuilder = "$baseUrl/webos/api/files/manifest".toHttpUrl().newBuilder()
+            if (prefix.isNotBlank()) urlBuilder.addQueryParameter("prefix", prefix)
+            val req = Request.Builder().url(urlBuilder.build()).get().build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext emptyList()
+                val root = json.parseToJsonElement(resp.body?.string() ?: "{}") as? JsonObject ?: return@withContext emptyList()
+                val arr = root["files"] as? JsonArray ?: return@withContext emptyList()
+                arr.mapNotNull { el ->
+                    val o = el as? JsonObject ?: return@mapNotNull null
+                    FileManifestEntry(
+                        path = o["path"]?.jsonPrimitive?.content ?: return@mapNotNull null,
+                        size = o["size"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
+                        sha256 = o["sha256"]?.jsonPrimitive?.content ?: "",
+                        updatedAt = o["updatedAt"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
+                    )
+                }
+            }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    /** 删除文件：DELETE /webos/api/files?path= */
+    suspend fun deleteFile(path: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val url = "$baseUrl/webos/api/files".toHttpUrl().newBuilder().addQueryParameter("path", path).build()
+            val req = Request.Builder().url(url).delete().build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) { false }
+    }
+
+    // ========================================================================
+    // NetSpaces API (W3 互通原语)
+    // ========================================================================
+
+    /** 共享空间列表：GET /webos/api/net/spaces */
+    suspend fun listNetSpaces(): List<NetSpace> = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder().url("$baseUrl/webos/api/net/spaces").get().build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext emptyList()
+                val root = json.parseToJsonElement(resp.body?.string() ?: "{}") as? JsonObject ?: return@withContext emptyList()
+                val arr = root["spaces"] as? JsonArray ?: return@withContext emptyList()
+                arr.mapNotNull { el ->
+                    val o = el as? JsonObject ?: return@mapNotNull null
+                    val id = o["id"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    NetSpace(
+                        id = id,
+                        name = o["name"]?.jsonPrimitive?.content ?: id,
+                        ownerHandle = o["ownerHandle"]?.jsonPrimitive?.content ?: "",
+                        mode = o["mode"]?.jsonPrimitive?.content ?: "private",
+                        createdAt = o["createdAt"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
+                    )
+                }
+            }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    /** 创建共享空间：POST /webos/api/net/spaces */
+    suspend fun createNetSpace(name: String, mode: String = "private"): NetSpace? = withContext(Dispatchers.IO) {
+        try {
+            val body = buildJsonObject {
+                put("name", name)
+                put("mode", mode)
+            }.toString().toRequestBody(JSON)
+            val req = Request.Builder().url("$baseUrl/webos/api/net/spaces").post(body).build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                val root = json.parseToJsonElement(resp.body?.string() ?: "{}") as? JsonObject ?: return@withContext null
+                val s = root["space"] as? JsonObject ?: return@withContext null
+                val id = s["id"]?.jsonPrimitive?.content ?: return@withContext null
+                NetSpace(
+                    id = id,
+                    name = s["name"]?.jsonPrimitive?.content ?: name,
+                    ownerHandle = s["ownerHandle"]?.jsonPrimitive?.content ?: "",
+                    mode = s["mode"]?.jsonPrimitive?.content ?: mode,
+                    createdAt = s["createdAt"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
+                )
+            }
+        } catch (_: Exception) { null }
+    }
+
+    /** 发送空间事件：POST /webos/api/net/spaces/:id/events */
+    suspend fun postNetSpaceEvent(spaceId: String, kind: String, payload: JsonObject, to: String? = null): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val body = buildJsonObject {
+                put("kind", kind)
+                put("payload", payload)
+                to?.let { put("to", it) }
+            }.toString().toRequestBody(JSON)
+            val req = Request.Builder().url("$baseUrl/webos/api/net/spaces/$spaceId/events").post(body).build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) { false }
+    }
+
+    /** 获取空间事件列表：GET /webos/api/net/spaces/:id/events?afterSeq=&to= */
+    suspend fun getNetSpaceEvents(spaceId: String, afterSeq: Long? = null, to: String? = null): List<NetEvent> = withContext(Dispatchers.IO) {
+        try {
+            val urlBuilder = "$baseUrl/webos/api/net/spaces/$spaceId/events".toHttpUrl().newBuilder()
+            afterSeq?.let { urlBuilder.addQueryParameter("afterSeq", it.toString()) }
+            to?.let { urlBuilder.addQueryParameter("to", it) }
+            val req = Request.Builder().url(urlBuilder.build()).get().build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext emptyList()
+                val root = json.parseToJsonElement(resp.body?.string() ?: "{}") as? JsonObject ?: return@withContext emptyList()
+                val arr = root["events"] as? JsonArray ?: return@withContext emptyList()
+                arr.mapNotNull { el ->
+                    val o = el as? JsonObject ?: return@mapNotNull null
+                    NetEvent(
+                        seq = o["seq"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
+                        spaceId = o["spaceId"]?.jsonPrimitive?.content ?: spaceId,
+                        fromHandle = o["fromHandle"]?.jsonPrimitive?.content ?: "",
+                        toHandle = o["toHandle"]?.jsonPrimitive?.contentOrNull,
+                        type = o["kind"]?.jsonPrimitive?.content ?: o["type"]?.jsonPrimitive?.content ?: "event",
+                        payload = o["payload"] as? JsonObject ?: buildJsonObject {},
+                        timestamp = o["timestamp"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
+                    )
+                }
+            }
+        } catch (_: Exception) { emptyList() }
+    }
+
     companion object {
         private val JSON = "application/json; charset=utf-8".toMediaType()
     }

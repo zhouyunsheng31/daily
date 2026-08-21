@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-21：Android 端 API 契约层与数据仓库全线追平 Web 端（Packages / Market / Files / NetSpaces）
+
+**背景**：继续推进移动端同构与契约对齐，全面补齐 Kotlin 侧与服务端 `shared/webos-contracts` 的类型映射及网络调用，为离线持久化与端侧包/应用/数据流提供完备类型安全支撑。
+
+**改动**
+1. **Kotlin 契约模型体系补齐（`client/android/core`）**：
+   - `Contracts.kt`：补齐 `ThinkingLevel`、`DesignTokens`、`TimeInfo`、`BillingBalance`、`SessionInfo` 等通用契约；
+   - `PackageContracts.kt`：补齐 `PackageSummary`、`PackageVersionDetail`、`PackageDetail`（W1 体系）；
+   - `MarketContracts.kt`：补齐 `MarketItem`、`MarketListing`（W3 统一包市场）；
+   - `FileContracts.kt`：补齐 `FileManifestEntry`、`FileUploadInitResult`（W-F 文件体系）；
+   - `NetContracts.kt`：补齐 `NetSpace`、`NetEvent`（W3 共享数据空间与事件总线）。
+2. **`WebosApi.kt` 网络客户端扩展**：
+   - 新增 Packages 接口：`listPackages`、`getPackageDetail`、`rollbackPackage`、`deletePackage`；
+   - 新增 Market 接口：`listMarket`、`installMarketPackage`；
+   - 新增 Files 接口：`getFilesManifest`、`deleteFile`；
+   - 新增 NetSpaces 接口：`listNetSpaces`、`createNetSpace`、`postNetSpaceEvent`、`getNetSpaceEvents`。
+3. **`WebosRepository.kt` 响应式数据仓库扩展**：
+   - 增加 `apps`、`packages`、`market` 状态流（`StateFlow`）与响应式刷新机制（`refreshApps` / `refreshPackages` / `refreshMarket` / `installMarketPackage`）。
+4. **构建脚本优化**：
+   - `deploy/android-build.sh`：排除 `*tools*` 二进制，打包体积由 39MB 显著精简。
+
+**验证**
+- 云端 Gradle 构建 `BUILD SUCCESSFUL`（产出 23MB APK，be467128...）。
+- 真机安装验证：`xyz.shadowshub.daily` 启动正常，WebOS 模板加载与 SSE 流式对话运行平稳。
+
+---
+
 ### 2026-08-21：Android 端同构沉浸客户端重构 + 规范文档体系精简收敛
 
 **背景**：按用户最新决策与最高执行纲领，消除 Android 原生 Compose 对话页带来的双端分裂，确立**双端同构**原则；彻底剔除 Shizuku、无障碍、系统全局悬浮窗等外部特权杂质；技能统一装入包内；模型走统一标准服务端链路。
