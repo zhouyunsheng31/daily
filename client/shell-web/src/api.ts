@@ -350,6 +350,11 @@ export function resetPassword(email: string, password: string, code: string): Pr
   })
 }
 
+/** 获取当前登录用户的持久 JWT API Token（用于 HTTP API / 外部 AI 上传包使用） */
+export function getUserApiToken(): Promise<{ ok: boolean; token: string; userId: string; role: string; hint: string }> {
+  return request('/webos/api/user/token')
+}
+
 /** 退出登录（清 cookie） */
 export function logoutSession(): Promise<{ authenticated: false }> {
   return request('/api/auth/logout', { method: 'POST' })

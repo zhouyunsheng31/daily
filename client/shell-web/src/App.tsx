@@ -58,7 +58,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import type { WebOsApp, WebOsPayOrder, WebOsThinkingLevel } from '@shared/webos-contracts'
-import { blobToBase64, agentWorkspaceFileRawUrl, changePassword, createApp, createPackage, createPayOrder, createSystemShare, deleteWorkspaceFile, fetchShareMeta, getAppDetail, getAppStorage, getCreditsHistory, getEmailPuzzle, getPayOrder, listAgentWorkspaceFiles, listWorkspaceFiles, loginWithEmail, readAgentWorkspaceTextFile, redeemAfdianCode, registerWithEmail, resetPassword, sendAuthEmailCodeWithPuzzle, shareAppToFriend, storeExportUrl, storeGet, storeInstall, storeList, storeMy, storePublish, storeSkillInstall, storeSkillPublish, storeSkillsList, storeSkillsMine, storeSkillsMy, storeSkillUnpublish, storeUnpublish, storeVisit, updateDisplayName, uploadAvatar, uploadWorkspaceFile, uploadWorkspaceFileLarge, workspaceFileRawUrl, invokeAppApi, getAppApiSpec, listPackages, marketList, marketDetail, marketInstall, marketMine, marketApps, type CreditsHistoryItem, type RedeemResult, type StoreAppItem, type WebOsPackageListItem, type WebOsWorkspaceEntry } from './api'
+import { blobToBase64, agentWorkspaceFileRawUrl, changePassword, createApp, createPackage, createPayOrder, createSystemShare, deleteWorkspaceFile, fetchShareMeta, getAppDetail, getAppStorage, getCreditsHistory, getEmailPuzzle, getPayOrder, getUserApiToken, listAgentWorkspaceFiles, listWorkspaceFiles, loginWithEmail, readAgentWorkspaceTextFile, redeemAfdianCode, registerWithEmail, resetPassword, sendAuthEmailCodeWithPuzzle, shareAppToFriend, storeExportUrl, storeGet, storeInstall, storeList, storeMy, storePublish, storeSkillInstall, storeSkillPublish, storeSkillsList, storeSkillsMine, storeSkillsMy, storeSkillUnpublish, storeUnpublish, storeVisit, updateDisplayName, uploadAvatar, uploadWorkspaceFile, uploadWorkspaceFileLarge, workspaceFileRawUrl, invokeAppApi, getAppApiSpec, listPackages, marketList, marketDetail, marketInstall, marketMine, marketApps, type CreditsHistoryItem, type RedeemResult, type StoreAppItem, type WebOsPackageListItem, type WebOsWorkspaceEntry } from './api'
 import type { ChatConversation, UiChatMessage, UiSegment } from './store'
 import { createRuntimeChannel, createDesktopRuntime, createStoreRuntime, setRuntimeOpenApp, type DesktopRuntimeHandle, type StoreRuntimeHandle, type StoreSdkAdapters, type WebOsRuntimeHandle } from './runtime'
 import { copyTextToClipboard, useShellStore } from './store'
@@ -3026,6 +3026,8 @@ function ProfileView({ onOpenLogin }: { onOpenLogin: () => void }) {
   const [guideOpen, setGuideOpen] = useState<boolean>(false)
   // 私有包直装（Sideload）弹窗
   const [sideloadOpen, setSideloadOpen] = useState<boolean>(false)
+  // 开发者 API Token 弹窗
+  const [tokenModalOpen, setTokenModalOpen] = useState<boolean>(false)
   useEffect(() => {
     let cancelled = false
     getCreditsHistory(30)
@@ -3184,7 +3186,7 @@ function ProfileView({ onOpenLogin }: { onOpenLogin: () => void }) {
 
     {afdianOpen ? <AfdianView onBack={() => setAfdianOpen(false)} /> : null}
     {apiCenterOpen ? <AppApiCenter onBack={() => setApiCenterOpen(false)} /> : null}
-    {guideOpen ? <PackageMarketGuideCenter onBack={() => setGuideOpen(false)} onOpenSideload={() => setSideloadOpen(true)} /> : null}
+    {guideOpen ? <PackageMarketGuideCenter onBack={() => setGuideOpen(false)} onOpenSideload={() => setSideloadOpen(true)} onOpenApiToken={() => setTokenModalOpen(true)} /> : null}
     {sideloadOpen ? (
       <PackageSideloadModal
         onClose={() => setSideloadOpen(false)}
@@ -3192,6 +3194,9 @@ function ProfileView({ onOpenLogin }: { onOpenLogin: () => void }) {
           void useShellStore.getState().refreshBootstrap()
         }}
       />
+    ) : null}
+    {tokenModalOpen ? (
+      <ApiTokenModal onClose={() => setTokenModalOpen(false)} />
     ) : null}
 
     <Surface className="settings-card">
@@ -3205,7 +3210,7 @@ function ProfileView({ onOpenLogin }: { onOpenLogin: () => void }) {
       <p className="muted-copy" style={{ marginTop: 8, marginBottom: 2 }}>
         支持 13 种包类型与 App API。既可查看开发文档，也可免进市场直接将私有包（运维、NAS、自定义 API）部署至个人工作区。
       </p>
-      <button className="link-row" onClick={() => setGuideOpen(true)}>
+        <button className="link-row" onClick={() => setGuideOpen(true)}>
         <span className="setting-icon blue">
           <BookOpen size={16} />
         </span>
@@ -3221,10 +3226,22 @@ function ProfileView({ onOpenLogin }: { onOpenLogin: () => void }) {
         </span>
         <span className="setting-copy">
           <strong>导入私有包（Sideload 直装）</strong>
-          <small>0 审核 · 绕过市场 · 直接导入部署至私有工作区 packages/&lt;id&gt;/</small>
+          <small>0 审核 · 绕过市场 · ZIP/目录直接导入部署至私有工作区</small>
         </span>
         <ChevronRight size={16} />
       </button>
+      {loggedIn ? (
+        <button className="link-row" onClick={() => setTokenModalOpen(true)} style={{ marginTop: 6 }}>
+          <span className="setting-icon blue">
+            <KeyRound size={16} />
+          </span>
+          <span className="setting-copy">
+            <strong>开发者 API Token 凭证</strong>
+            <small>查看与复制持久 JWT Token · 用于 HTTP API 与外部 AI 直传</small>
+          </span>
+          <ChevronRight size={16} />
+        </button>
+      ) : null}
     </Surface>
 
     <Surface className="settings-card"><div className="card-heading"><div><Eyebrow>CONTACT</Eyebrow><h2>联系站长 · 分享讨论</h2></div><MessageCircle size={18} /></div><p className="muted-copy">遇到问题、想要更多额度，或想一起交流玩法与想法，欢迎加站长：</p><div className="contact-row"><span className="setting-icon ink"><MessageCircle size={16} /></span><span className="setting-copy"><strong>QQ</strong><small>2893334965 · 加好友时备注「Daily」</small></span></div><div className="contact-row"><span className="setting-icon blue"><MessageCircle size={16} /></span><span className="setting-copy"><strong>微信</strong><small>fangyan876 · 额度 / 购买相关</small></span></div></Surface>
@@ -3426,7 +3443,7 @@ function AppApiCenter({ onBack }: { onBack: () => void }) {
 /* ============================================================================ */
 /* 包体系与统一市场开发者指南（通用全景文档）                                    */
 /* ============================================================================ */
-function PackageMarketGuideCenter({ onBack, onOpenSideload }: { onBack: () => void; onOpenSideload?: () => void }) {
+function PackageMarketGuideCenter({ onBack, onOpenSideload, onOpenApiToken }: { onBack: () => void; onOpenSideload?: () => void; onOpenApiToken?: () => void }) {
   const [tab, setTab] = useState<'manifest' | 'types' | 'api' | 'http' | 'checklist'>('manifest')
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
 
@@ -3647,33 +3664,52 @@ async function main(ctx) {
         )}
 
         {tab === 'http' && (
-          <Surface className="settings-card">
-            <div className="card-heading">
-              <div>
-                <Eyebrow>REST API & PUBLISH</Eyebrow>
-                <h2>标准 HTTP 接口速查</h2>
+          <>
+            <Surface className="settings-card">
+              <div className="card-heading">
+                <div>
+                  <Eyebrow>API CREDENTIALS</Eyebrow>
+                  <h2>开发者 API Token 凭证</h2>
+                </div>
+                <KeyRound size={18} />
               </div>
-              <Globe size={18} />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
-              <div className="privacy-row">
-                <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>POST /webos/api/packages</span>
-                <span>创建/批量上传私有包（0 审核直装）</span>
+              <p className="muted-copy" style={{ marginTop: 8, marginBottom: 12 }}>
+                外部脚本、CI/CD 自动化或本地 Agent 调用 HTTP API 时，需在 Header 中携带此 JWT Token。
+              </p>
+              {onOpenApiToken ? (
+                <button type="button" className="os-button os-button-primary" onClick={onOpenApiToken}>
+                  <KeyRound size={14} style={{ marginRight: 4 }} /> 查看与复制我的 API Token
+                </button>
+              ) : null}
+            </Surface>
+            <Surface className="settings-card">
+              <div className="card-heading">
+                <div>
+                  <Eyebrow>REST API & PUBLISH</Eyebrow>
+                  <h2>标准 HTTP 接口速查</h2>
+                </div>
+                <Globe size={18} />
               </div>
-              <div className="privacy-row">
-                <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>POST /webos/api/market/publish</span>
-                <span>将包发布上架到统一市场</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
+                <div className="privacy-row">
+                  <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>POST /webos/api/packages</span>
+                  <span>创建/批量上传私有包（0 审核直装）</span>
+                </div>
+                <div className="privacy-row">
+                  <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>POST /webos/api/market/publish</span>
+                  <span>将包发布上架到统一市场</span>
+                </div>
+                <div className="privacy-row">
+                  <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>GET /webos/api/market?type=&q=</span>
+                  <span>按类型与关键词浏览搜索市场</span>
+                </div>
+                <div className="privacy-row">
+                  <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>POST /webos/api/market/:id/install</span>
+                  <span>安装包并自动安装依赖闭包</span>
+                </div>
               </div>
-              <div className="privacy-row">
-                <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>GET /webos/api/market?type=&q=</span>
-                <span>按类型与关键词浏览搜索市场</span>
-              </div>
-              <div className="privacy-row">
-                <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>POST /webos/api/market/:id/install</span>
-                <span>安装包并自动安装依赖闭包</span>
-              </div>
-            </div>
-          </Surface>
+            </Surface>
+          </>
         )}
 
         {tab === 'checklist' && (
@@ -3716,6 +3752,155 @@ async function main(ctx) {
         )}
       </div>
     </section>
+  )
+}
+
+/** 开发者 API Token 凭证弹窗（支持一键查看/复制持久 JWT Token 及 curl 上传代码范例） */
+function ApiTokenModal({ onClose }: { onClose: () => void }) {
+  const [token, setToken] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const [copiedCurl, setCopiedCurl] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    getUserApiToken()
+      .then((res) => {
+        if (!cancelled) {
+          setToken(res.token)
+          setLoading(false)
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : '获取 Token 失败')
+          setLoading(false)
+        }
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  const copyToken = () => {
+    if (!token) return
+    void copyTextToClipboard(token).then((ok) => {
+      if (ok) {
+        setCopied(true)
+        window.setTimeout(() => setCopied(false), 1600)
+      }
+    })
+  }
+
+  const curlExample = token ? `curl -X POST https://shadowshub.xyz/webos/api/packages \\
+  -H "Authorization: Bearer ${token}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "manifest": {
+      "schema_version": 2,
+      "id": "com.my.tool",
+      "type": "app",
+      "version": "1.0.0",
+      "display_name": { "zh": "我的应用" }
+    },
+    "files": {
+      "index.html": "<!DOCTYPE html><html><body><h1>Hello webOS</h1></body></html>"
+    }
+  }'` : ''
+
+  const copyCurl = () => {
+    if (!curlExample) return
+    void copyTextToClipboard(curlExample).then((ok) => {
+      if (ok) {
+        setCopiedCurl(true)
+        window.setTimeout(() => setCopiedCurl(false), 1600)
+      }
+    })
+  }
+
+  return (
+    <div className="login-overlay" onClick={onClose}>
+      <div className="login-panel" style={{ maxWidth: '500px' }} onClick={(event) => event.stopPropagation()}>
+        <div className="login-heading">
+          <span className="setting-icon blue" style={{ width: 34, height: 34, borderRadius: 10 }}>
+            <KeyRound size={18} />
+          </span>
+          <div>
+            <strong>开发者 API Token 凭证</strong>
+            <small>用于 HTTP API 调用、CI/CD 自动化与外部 AI 开发</small>
+          </div>
+          <button type="button" className="login-close" aria-label="关闭" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="login-step">
+          {loading ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 0', gap: 8, color: 'var(--muted)' }}>
+              <LoaderCircle className="spin" size={16} /> 正在获取 API Token…
+            </div>
+          ) : error ? (
+            <div className="login-error" style={{ margin: 0 }}>
+              {error}
+            </div>
+          ) : (
+            <>
+              <div>
+                <label className="login-label">你的 Bearer JWT Token：</label>
+                <div style={{ position: 'relative', marginTop: 4 }}>
+                  <textarea
+                    className="login-input"
+                    style={{
+                      height: '84px',
+                      fontFamily: 'monospace',
+                      fontSize: '11px',
+                      padding: '8px 10px',
+                      wordBreak: 'break-all',
+                      resize: 'none',
+                    }}
+                    readOnly
+                    value={token ?? ''}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className={`os-button os-button-primary ${copied ? 'os-button-done' : ''}`}
+                  style={{ width: '100%', marginTop: 8 }}
+                  onClick={copyToken}
+                >
+                  {copied ? <Check size={14} style={{ marginRight: 4 }} /> : <Copy size={14} style={{ marginRight: 4 }} />}
+                  {copied ? '已复制 Token 到剪贴板' : '复制 API Token'}
+                </button>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <label className="login-label">直接在终端运行的上传示例（curl）：</label>
+                  <button type="button" className="login-link" onClick={copyCurl}>
+                    {copiedCurl ? '✓ 已复制' : '复制 curl 命令'}
+                  </button>
+                </div>
+                <pre
+                  className="file-preview-text"
+                  style={{
+                    maxHeight: '160px',
+                    fontSize: '11px',
+                    margin: 0,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  {curlExample}
+                </pre>
+              </div>
+
+              <p className="muted-copy" style={{ fontSize: '11px', margin: 0, marginTop: 4 }}>
+                此 Token 具备你当前账号的完全读写权限，请妥善保管。在 HTTP 请求中通过请求头 <code>Authorization: Bearer &lt;Token&gt;</code> 携带。
+              </p>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 

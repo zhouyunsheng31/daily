@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 01:25 · feat(auth-token): 增加开发者 API Token 凭证获取端点与前端一键查看/复制弹窗
+
+**修改文件路径**：
+- `server/src/routes/webos.ts`
+- `client/shell-web/src/api.ts`
+- `client/shell-web/src/App.tsx`
+- `CHANGELOG.md`
+
+**改动内容**：
+1. **新增持久 API Token 查询端点**：
+   - 增加 `GET /webos/api/user/token`，为登录用户签发可用于 HTTP 调用的持久 JWT Bearer Token；
+2. **前端开发者 Token 弹窗与指南整合**：
+   - 在个人设置主页「包体系与私有部署」中开放「开发者 API Token 凭证」入口；
+   - 新增 `ApiTokenModal` 弹窗，支持一键复制 Bearer Token 与开箱即用的 `curl` 上传命令行示例；
+   - 在「包体系与市场开发指南」的「市场 HTTP 接口」Tab 中同步提供 Token 查看与复制通道。
+3. **验证**：
+   - 前后端类型与打包构建全部通过，服务部署上线。
+
 ### 2026-08-23 01:10 · 47b3059 · 修正首充月卡叠加注册赠送额度逻辑、修复兑换码尝鲜包防重复校验与API开发文档全量同步
 
 **修改文件路径**：

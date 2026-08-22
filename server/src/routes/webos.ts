@@ -8,6 +8,7 @@ import { Script as VmScript } from 'node:vm'
 import { Type } from 'typebox'
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { getPool } from '../db/connection.js'
+import { signTokenForUser, type UserRole } from '../utils/jwt.js'
 import { createError } from '../middleware/error.js'
 import {
   logAgentAction,
@@ -4617,6 +4618,31 @@ async function webosAppTools(principal: Principal): Promise<ToolDefinition[]> {
     ...workflowTools(principal).map(wrapTool),
   ]
 }
+
+// ---------------------------------------------------------------------------
+// 2026-08-23 开发者与外部 API 凭证：获取当前账号的持久 JWT Token（供 curl/脚本/外部 AI 上传包使用）
+// ---------------------------------------------------------------------------
+
+webosRouter.get('/user/token', async (req, res, next) => {
+  try {
+    const principal = requirePrincipal(req)
+    if (principal.guest) {
+      throw createError(403, 'GUEST_NO_API_TOKEN', '游客身份无持久 API Token，请先登录邮箱账号')
+    }
+    const userId = principal.key.replace(/^user:/, '')
+    const role: UserRole = (principal.role === 'admin' ? 'admin' : 'member')
+    const token = signTokenForUser(userId, role)
+    res.json({
+      ok: true,
+      token,
+      userId,
+      role: principal.role,
+      hint: '在 HTTP 请求头中携带：Authorization: Bearer ' + token,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
 
 // ---------------------------------------------------------------------------
 // Bootstrap / configuration
