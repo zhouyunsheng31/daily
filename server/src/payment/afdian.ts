@@ -17,7 +17,7 @@
 
 import crypto from 'node:crypto'
 import { getPool } from '../db/connection.js'
-import { loadState, saveState, type Principal } from '../routes/webos.js'
+import { loadState, saveState, MEMBER_CREDITS, type Principal } from '../routes/webos.js'
 import { WORKSPACE_TIER_BYTES } from '../utils/webosWorkspace.js'
 import { createError } from '../middleware/error.js'
 
