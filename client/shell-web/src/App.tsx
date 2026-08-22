@@ -1431,7 +1431,9 @@ const MessageBubble = memo(function MessageBubble({ message, messageIndex, isLas
   }
   const doRegenerateFromMenu = (): void => {
     setLongPressMenu(null)
-    if (window.confirm('重新生成此条：内容不变，AI 会重新流式输出这条回复。')) {
+    // 2026-08-22：AI 消息原位重流——删除本条及之后的内容，重发触发它的那条
+    // 用户输入，AI 在原位置重新流式输出这条回复（解决回答卡住/不完整）。
+    if (window.confirm('重新生成此条：AI 将基于前面的对话，在原位置重新流式输出这条回复。')) {
       void regenerateAt(messageIndex)
     }
   }
@@ -1506,11 +1508,12 @@ const MessageBubble = memo(function MessageBubble({ message, messageIndex, isLas
     <button type="button" className="chat-action" onClick={doRegenerate} aria-label="回退重来"><RotateCcw size={12} /><span>回退重来</span></button>
   </div>
 
-  // 用户消息：平铺右对齐，名称=称呼，头像可点击更换；支持编辑（textaread）后回退重来
+  // 用户消息：平铺右对齐，名称=称呼，头像可点击更换；支持编辑（textarea）后回退重来
+  // 2026-08-22：长按菜单仅对 AI 消息开放（用户消息不弹菜单）
   if (message.role === 'user') {
-    return <div className="chat-row user-row" {...longPressHandlers}><div className="chat-body user-body"><div className="chat-name">{userLabel}</div>{editing
+    return <div className="chat-row user-row"><div className="chat-body user-body"><div className="chat-name">{userLabel}</div>{editing
       ? <div className="chat-edit"><textarea autoFocus value={editValue} onChange={(event) => setEditValue(event.target.value)} rows={3} aria-label="编辑消息内容" /><div className="chat-edit-actions"><button type="button" className="chat-edit-cancel" onClick={cancelEdit}>取消</button><button type="button" className="chat-edit-save" onClick={saveEdit} disabled={!editValue.trim()}>发送修改</button></div></div>
-      : <div className="chat-text"><UserMessageContent text={message.content} /></div>}{actions}</div><button type="button" className="chat-avatar user-avatar user-avatar-btn" onClick={onAvatarClick} aria-label="更换头像">{avatar ? <img src={`data:${avatar.mime};base64,${avatar.base64}`} alt="头像" /> : <span>{userLabel.slice(0, 1).toUpperCase()}</span>}</button>{longPressMenu ? <LongPressMenu x={longPressMenu.x} y={longPressMenu.y} onClose={() => setLongPressMenu(null)} onRegenerate={doRegenerateFromMenu} onCopy={doCopyFromMenu} /> : null}</div>
+      : <div className="chat-text"><UserMessageContent text={message.content} /></div>}{actions}</div><button type="button" className="chat-avatar user-avatar user-avatar-btn" onClick={onAvatarClick} aria-label="更换头像">{avatar ? <img src={`data:${avatar.mime};base64,${avatar.base64}`} alt="头像" /> : <span>{userLabel.slice(0, 1).toUpperCase()}</span>}</button></div>
   }
   // AI 消息：一个回合 = 一条消息，内部按时间顺序分段（文字/工具调用连贯展示，不另起头像）
   const segments = 'segments' in message
