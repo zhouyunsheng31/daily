@@ -6,7 +6,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
-### 2026-08-22：协作同步与部署纪律确立 + 远端主干多项关键健壮性提交合入
+### 2026-08-22 18:40 · b977d5b · 确立 Changelog 规范与版本感知纪律
+
+**修改文件路径**：
+- `AGENT.md`
+- `CHANGELOG.md`
+
+**改动内容**：
+1. 在 `AGENT.md` 写入第 7 条执行纪律：要求 Changelog 记录必须包含精确时间（YYYY-MM-DD HH:mm）、版本编号（Commit Hash）、修改的具体文件路径及内容说明；
+2. 规定每次操作前必须比照本地版本号与 GitHub 最新版本号，明确本地缺失或修改的文件；
+3. 规定完成工作后自动推送 GitHub 并更新最新版本日志。
+
+---
+
+### 2026-08-22 18:20 · cc0f999 · 恢复 funbar 图片/文件快捷按钮修复
+
+**修改文件路径**：
+- `client/shell-web/src/App.tsx`
+- `client/shell-web/src/styles.css`
+
+**改动内容**：
+1. 隐藏 input 常驻渲染，保证菜单未打开时 file input ref 可直接触发；
+2. 移除图片按钮的 `funbar-primary` 蓝色高亮，统一整体沉浸配色。
+
+---
+
+### 2026-08-22 18:05 · 6a93fa6 · 消息长按操作菜单（重新生成 / 复制消息）
+
+**修改文件路径**：
+- `client/shell-web/src/App.tsx`
+- `client/shell-web/src/styles.css`
+
+**改动内容**：
+1. 实现 AI 消息与用户消息的长按交互菜单；
+2. 支持点击「重新生成此条」（基于原上下文重新发起流式回复）与「复制消息」到系统剪贴板。
+
+---
+
+### 2026-08-22 17:15 · e800a16 · 协作同步与部署纪律确立 + 远端主干多项关键健壮性提交合入
 
 **背景**：明确工作区最高执行纪律——开发完成后必须先拉取 GitHub 远端最新版本并合并验证，推送到 GitHub 后再部署至服务器；同时合入远端 4 个关于剪贴板容错、截断标记与智能自动续写的主干提交。
 
