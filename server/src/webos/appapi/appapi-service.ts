@@ -142,7 +142,7 @@ export async function loadApiSpecs(userKey: string): Promise<LoadedApiSpec[]> {
       packageId: row.id,
       ownerKey: row.ownerKey,
       activeVersionId: row.activeVersionId,
-      spec: raw as WebOsApiSpecLike,
+      spec: (cr.normalized ?? raw) as WebOsApiSpecLike,
       manifestActive: manifest,
     })
   }

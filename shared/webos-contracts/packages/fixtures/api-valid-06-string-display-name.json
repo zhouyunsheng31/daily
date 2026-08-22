@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "namespace": "notes",
+  "display_name": "便签服务",
+  "description": "提供便签读取与写入能力",
+  "endpoints": [
+    {
+      "name": "get_note",
+      "method": "get",
+      "path": "/get",
+      "description": "获取便签",
+      "storage": {
+        "read": "notes/*"
+      },
+      "handler": "./handlers/get.js"
+    }
+  ]
+}

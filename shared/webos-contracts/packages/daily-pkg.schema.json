@@ -310,5 +310,5 @@
       "pattern": "^\\d+\\.\\d+\\.\\d+$"
     }
   },
-  "additionalProperties": false
+  "additionalProperties": true
 }

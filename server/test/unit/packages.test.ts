@@ -166,11 +166,13 @@ describe('W1：校验反馈回路 —— 写错包 3 次内修正闭环', () => 
     })
   }
 
-  it('第 1 次失败：写 manifest 但缺 SKILL.md → 反馈指路且不建版本', async () => {
+  it('第 1 次失败：写 manifest 但缺 SKILL.md → 反馈指路且不建版本（含 ⏳ info 反馈）', async () => {
     const full = writePkgFile('com.daily.test-skill', 'daily.pkg.json', skillManifest())
     const feedback = (await syncPackageFromFs(USER_KEY, full)) as string
     expect(feedback).toContain('SKILL.md')
     expect(feedback).toContain('未建版本')
+    expect(feedback).toContain('⏳')
+    expect(feedback).not.toContain('校验未通过')
     expect(await getPackage('com.daily.test-skill')).toBeNull() // 包事务：不留半成品
     expect((await listVersions('com.daily.test-skill')).length).toBe(0)
   })
@@ -182,6 +184,55 @@ describe('W1：校验反馈回路 —— 写错包 3 次内修正闭环', () => 
     const feedback = (await syncPackageFromFs(USER_KEY, writePkgFile('com.daily.test-skill', 'daily.pkg.json', skillManifest()))) as string
     expect(feedback).toContain('已注册')
     expect((await listVersions('com.daily.test-skill')).length).toBe(1)
+  })
+
+  it('fs 路径注册后版本快照 manifest 为 normalized 形态（问题 #5 修复回归）', async () => {
+    // 传入宽松字符串 display_name 且缺 schema_version
+    const rawManifest = JSON.stringify({
+      id: 'com.daily.fs-norm-test',
+      type: 'theme',
+      version: '1.0.0',
+      display_name: '容错主题',
+    })
+    const full = writePkgFile('com.daily.fs-norm-test', 'daily.pkg.json', rawManifest)
+    const feedback = (await syncPackageFromFs(USER_KEY, full)) as string
+    expect(feedback).toContain('已注册')
+
+    const versions = await listVersions('com.daily.fs-norm-test')
+    expect(versions.length).toBe(1)
+    const snap = versions[0]!.manifest as { schema_version?: number; display_name?: { zh?: string } }
+    expect(snap.schema_version).toBe(2)
+    expect(snap.display_name?.zh).toBe('容错主题')
+  })
+
+  it('内容校验：data:image/png 200KB 通过；image/svg+xml base64 60KB 拒绝', async () => {
+    // 1) data:image/png 200KB (base64 length ≈ 270KB > 48KB but < 256KB) → 通过
+    const pngBase64 = 'A'.repeat(200 * 1024)
+    const validPet = writePkgFile(
+      'com.daily.pet-png',
+      'daily.pkg.json',
+      JSON.stringify({ schema_version: 2, id: 'com.daily.pet-png', type: 'pet-layer', version: '1.0.0', entry: 'index.html' }),
+    )
+    writePkgFile('com.daily.pet-png', 'index.html', `<html><body><img src="data:image/png;base64,${pngBase64}"></body></html>`)
+    const feedbackValid = (await syncPackageFromFs(USER_KEY, validPet)) as string
+    expect(feedbackValid).toContain('已注册')
+
+    // 2) data:image/svg+xml 60KB (> 48KB) → 拒绝
+    const svgBase64 = 'A'.repeat(60 * 1024)
+    const badSvgPet = writePkgFile(
+      'com.daily.pet-svg',
+      'daily.pkg.json',
+      JSON.stringify({ schema_version: 2, id: 'com.daily.pet-svg', type: 'pet-layer', version: '1.0.0', entry: 'index.html' }),
+    )
+    writePkgFile('com.daily.pet-svg', 'index.html', `<html><body><img src="data:image/svg+xml;base64,${svgBase64}"></body></html>`)
+    const feedbackBad = (await syncPackageFromFs(USER_KEY, badSvgPet)) as string
+    expect(feedbackBad).toContain('base64 内联块过大')
+    expect(await getPackage('com.daily.pet-svg')).toBeNull()
+  })
+
+  it('删除/目录不存在场景静默返回 undefined', async () => {
+    const r = await syncPackageFromFs(USER_KEY, path.join(wsRoot(), 'packages', 'non-existent-pkg', 'daily.pkg.json'))
+    expect(r).toBeUndefined()
   })
 
   it('非法能力词 → 反馈点名词汇表；非法 semver → 反馈点名版本号', async () => {
@@ -345,5 +396,106 @@ describe('W1：辅助纯函数', () => {
     expect(nextPackageVersion(['1.2.0'], '1.2.0')).toBe('1.2.1')
     expect(nextPackageVersion(['1.2.0', '1.2.1'], '1.2.0')).toBe('1.2.2')
     expect(nextPackageVersion(['1.2.0-beta.1'], '1.2.0-beta.1')).toBe('1.2.0-beta.2')
+  })
+})
+
+describe('验收旅程（Validation UX Overhaul 验收）', () => {
+  it('旅程 A（内部 AI）：mkdir → 写 manifest → 写 SKILL.md，全程仅 1 次 ⏳，终态 ✅ v1.0.0 注册，无 ⚠️', async () => {
+    // 1. mkdir
+    const pkgDir = path.join(wsRoot(), 'packages', 'com.daily.journey-a')
+    fs.mkdirSync(pkgDir, { recursive: true })
+    const manifestPath = path.join(pkgDir, 'daily.pkg.json')
+
+    // 2. 写 manifest（此时缺 SKILL.md）
+    fs.writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        schema_version: 2,
+        id: 'com.daily.journey-a',
+        type: 'skill',
+        version: '1.0.0',
+        entry: 'SKILL.md',
+      }),
+      'utf-8',
+    )
+    const fb1 = (await syncPackageFromFs(USER_KEY, manifestPath)) as string
+    expect(fb1).toContain('⏳')
+    expect(fb1).toContain('未建版本')
+    expect(fb1).not.toContain('⚠️')
+    expect(await getPackage('com.daily.journey-a')).toBeNull()
+
+    // 3. 写 SKILL.md
+    const skillPath = path.join(pkgDir, 'SKILL.md')
+    fs.writeFileSync(skillPath, '# Journey A Skill\n\nAI skill content', 'utf-8')
+    const fb2 = (await syncPackageFromFs(USER_KEY, skillPath)) as string
+    expect(fb2).toContain('✅')
+    expect(fb2).toContain('v1.0.0')
+    expect(fb2).not.toContain('⚠️')
+    expect(fb2).not.toContain('⏳')
+
+    const pkg = await getPackage('com.daily.journey-a')
+    expect(pkg).not.toBeNull()
+  })
+
+  it('旅程 B（外部开发者）：提交含字符串 display_name / 小写 method 的 api 包 → 容错注册成功', async () => {
+    const res = await createFromPaste(USER_KEY, {
+      manifest: {
+        id: 'com.daily.journey-b-api',
+        type: 'api',
+        display_name: '旅程B服务',
+      },
+      files: {
+        'api.json': JSON.stringify({
+          namespace: 'journey_b',
+          display_name: '旅程B接口',
+          endpoints: [
+            {
+              name: 'ping',
+              method: 'get',
+              path: '/ping',
+              handler: './handlers/ping.js',
+            },
+          ],
+        }),
+        'handlers/ping.js': 'async function main(ctx) { return { ok: true }; }',
+      },
+    })
+    expect(res.ok).toBe(true)
+    expect(res.feedback).toContain('✅')
+    const pkg = await getPackage('com.daily.journey-b-api')
+    expect(pkg).not.toBeNull()
+  })
+
+  it('旅程 C（恶意/事故回归）：eval、内网域名拦截阻断', async () => {
+    // 1. eval 拦截
+    const evalFull = writePkgFile(
+      'com.daily.evil-eval',
+      'daily.pkg.json',
+      JSON.stringify({ schema_version: 2, id: 'com.daily.evil-eval', type: 'toolpkg', version: '1.0.0', entry: 'main.js' }),
+    )
+    writePkgFile('com.daily.evil-eval', 'main.js', 'eval("console.log(1)")')
+    const fbEval = (await syncPackageFromFs(USER_KEY, evalFull)) as string
+    expect(fbEval).toContain('⚠️')
+    expect(fbEval).toContain('eval')
+    expect(await getPackage('com.daily.evil-eval')).toBeNull()
+
+    // 2. 内网域名拦截
+    const ssrfFull = writePkgFile(
+      'com.daily.evil-ssrf',
+      'daily.pkg.json',
+      JSON.stringify({
+        schema_version: 2,
+        id: 'com.daily.evil-ssrf',
+        type: 'toolpkg',
+        version: '1.0.0',
+        entry: 'main.js',
+        network: { domains: ['127.0.0.1'] },
+      }),
+    )
+    writePkgFile('com.daily.evil-ssrf', 'main.js', 'function run() {}')
+    const fbSsrf = (await syncPackageFromFs(USER_KEY, ssrfFull)) as string
+    expect(fbSsrf).toContain('⚠️')
+    expect(fbSsrf).toContain('SSRF')
+    expect(await getPackage('com.daily.evil-ssrf')).toBeNull()
   })
 })

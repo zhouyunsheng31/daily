@@ -25,16 +25,104 @@ export interface ContractIssue {
   path: string
   /** 人话错误信息（直接回流给 AI/用户） */
   message: string
+  /** 级别：blocking（默认阻断）| warning（警告）| info（进行中） */
+  level?: 'blocking' | 'warning' | 'info'
 }
 
 export interface ContractResult {
   ok: boolean
   issues: ContractIssue[]
+  warnings?: ContractIssue[]
   normalized?: Record<string, unknown>
 }
 
-function asIssues(ok: boolean, issues: ContractIssue[], normalized?: Record<string, unknown>): ContractResult {
-  return { ok, issues, normalized }
+function asIssues(
+  ok: boolean,
+  issues: ContractIssue[],
+  normalized?: Record<string, unknown>,
+  warnings?: ContractIssue[],
+): ContractResult {
+  return { ok, issues, warnings: warnings && warnings.length > 0 ? warnings : undefined, normalized }
+}
+
+const PACKAGE_KNOWN_KEYS = new Set([
+  'schema_version',
+  'id',
+  'type',
+  'version',
+  'entry',
+  'display_name',
+  'description',
+  'icon',
+  'capabilities',
+  'network',
+  'dependencies',
+  'pets',
+  'api',
+  'url',
+  'contents',
+  'children',
+  'minShell',
+])
+
+const API_KNOWN_KEYS = new Set([
+  'schema_version',
+  'namespace',
+  'display_name',
+  'description',
+  'network',
+  'secrets',
+  'endpoints',
+])
+
+const API_ENDPOINT_KNOWN_KEYS = new Set([
+  'name',
+  'method',
+  'path',
+  'description',
+  'params',
+  'storage',
+  'handler',
+  'returns',
+  'visibility',
+])
+
+function normalizeKeyName(key: string): string {
+  return key.toLowerCase().replace(/[_-]/g, '')
+}
+
+function checkUnknownAndSpellingKeys(
+  obj: Record<string, unknown>,
+  knownKeys: Set<string>,
+  basePath = '',
+): { blocking: ContractIssue[]; warnings: ContractIssue[] } {
+  const blocking: ContractIssue[] = []
+  const warnings: ContractIssue[] = []
+  const normalizedKnownMap = new Map<string, string>()
+  for (const k of knownKeys) {
+    normalizedKnownMap.set(normalizeKeyName(k), k)
+  }
+
+  for (const key of Object.keys(obj)) {
+    if (knownKeys.has(key)) continue
+    const p = basePath ? `${basePath}.${key}` : key
+    const norm = normalizeKeyName(key)
+    const matchedKnown = normalizedKnownMap.get(norm)
+    if (matchedKnown) {
+      blocking.push({
+        path: p,
+        message: `字段疑似拼写错误：想写 ${matchedKnown}？`,
+        level: 'blocking',
+      })
+    } else {
+      warnings.push({
+        path: p,
+        message: `未知字段「${key}」：已按元数据保留，无功能影响`,
+        level: 'warning',
+      })
+    }
+  }
+  return { blocking, warnings }
 }
 
 /**
@@ -97,6 +185,92 @@ export function normalizePackageManifest(raw: unknown): Record<string, unknown> 
   delete m.$schema
 
   return m
+}
+
+/**
+ * 容错自愈规范化：对 AI / 外部开发者传入的宽松 api.json 进行智能修复与格式规整
+ * 1. 顶层及 endpoints[].description 的 display_name/description 纯字符串 → { zh: str }
+ * 2. method 小写 → 大写（'get' → 'GET'）
+ * 3. storage.read/write 单字符串 → 单元素数组（"read": "notes/*" → ["notes/*"]）
+ * 4. 缺 schema_version → 补 1
+ * 5. 剔除 $schema
+ * 6. endpoints[].handler 前导 ./ 剥离（仅当剩余路径仍合法）
+ */
+export function normalizeApiSpec(raw: unknown): Record<string, unknown> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return {}
+  }
+  const spec: Record<string, unknown> = { ...(raw as Record<string, unknown>) }
+
+  // 1. schema_version 缺省自愈
+  if (spec.schema_version === undefined) {
+    spec.schema_version = 1
+  }
+
+  // 2. display_name 宽松兼容（字符串 → { zh: str }）
+  if (typeof spec.display_name === 'string') {
+    const text = spec.display_name.trim() || '未命名服务'
+    spec.display_name = { zh: text }
+  } else if (spec.display_name && typeof spec.display_name === 'object' && !Array.isArray(spec.display_name)) {
+    const dn = spec.display_name as Record<string, unknown>
+    if (!dn.zh && !dn.en) {
+      dn.zh = '未命名服务'
+    }
+  }
+
+  // 3. description 宽松兼容（字符串 → { zh: str }）
+  if (typeof spec.description === 'string') {
+    const text = spec.description.trim()
+    spec.description = text ? { zh: text } : undefined
+  }
+
+  // 4. endpoints 规整
+  if (Array.isArray(spec.endpoints)) {
+    spec.endpoints = spec.endpoints.map((epRaw) => {
+      if (typeof epRaw !== 'object' || epRaw === null || Array.isArray(epRaw)) {
+        return epRaw
+      }
+      const ep: Record<string, unknown> = { ...(epRaw as Record<string, unknown>) }
+
+      // method 小写转大写
+      if (typeof ep.method === 'string') {
+        ep.method = ep.method.toUpperCase()
+      }
+
+      // ep.description 字符串 → { zh: str }
+      if (typeof ep.description === 'string') {
+        const text = ep.description.trim()
+        ep.description = text ? { zh: text } : undefined
+      }
+
+      // storage.read / storage.write 单字符串 → 数组
+      if (ep.storage && typeof ep.storage === 'object' && !Array.isArray(ep.storage)) {
+        const st: Record<string, unknown> = { ...(ep.storage as Record<string, unknown>) }
+        if (typeof st.read === 'string' && st.read.trim()) {
+          st.read = [st.read.trim()]
+        }
+        if (typeof st.write === 'string' && st.write.trim()) {
+          st.write = [st.write.trim()]
+        }
+        ep.storage = st
+      }
+
+      // handler 前导 ./ 剥离
+      if (typeof ep.handler === 'string') {
+        const stripped = ep.handler.replace(/^\.\//, '')
+        if (stripped && !stripped.startsWith('.')) {
+          ep.handler = stripped
+        }
+      }
+
+      return ep
+    })
+  }
+
+  // 5. 剔除 $schema
+  delete spec.$schema
+
+  return spec
 }
 
 // 复用 capabilities 的词汇表静态数据：为避免在 server/src 直接 import shared 的 .ts
@@ -201,13 +375,23 @@ function checkChildrenDepth(children: readonly unknown[] | undefined, depthSoFar
  */
 export function validatePackageManifest(raw: unknown, depth = 1): ContractResult {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    return asIssues(false, [{ path: '', message: 'daily.pkg.json 必须是 JSON 对象' }])
+    return asIssues(false, [{ path: '', message: 'daily.pkg.json 必须是 JSON 对象', level: 'blocking' }])
   }
   // 先执行容错规范化自愈（字符串文本转多语言、补全默认版本等）
   const manifest = normalizePackageManifest(raw)
 
-  // 1) 语义校验（先做：不依赖 schema——即使结构有小瑕疵也要报出语义问题，回流更友好）
   const issues: ContractIssue[] = []
+  const warnings: ContractIssue[] = []
+
+  // 1) 顶层未知字段与拼写守护
+  const { blocking: spellingIssues, warnings: unknownWarnings } = checkUnknownAndSpellingKeys(
+    manifest,
+    PACKAGE_KNOWN_KEYS,
+  )
+  issues.push(...spellingIssues)
+  warnings.push(...unknownWarnings)
+
+  // 2) 语义校验（先做：不依赖 schema——即使结构有小瑕疵也要报出语义问题，回流更友好）
   const caps = manifest['capabilities']
   if (caps !== undefined) issues.push(...checkCapabilities(caps as readonly unknown[], 'capabilities'))
   const net = manifest['network']
@@ -221,31 +405,31 @@ export function validatePackageManifest(raw: unknown, depth = 1): ContractResult
     issues.push(...checkChildrenDepth(children as readonly unknown[] | undefined, depth, 'children'))
   }
 
-  // 2) schema 结构校验（typebox Check，从 shared JSON 快照）
+  // 3) schema 结构校验（typebox Check，从 shared JSON 快照）
   const schemaOk = Check(packageSchema, manifest)
   if (!schemaOk) {
     const schemaIssues: ContractIssue[] = []
-    if (manifest['schema_version'] !== 2) schemaIssues.push({ path: 'schema_version', message: 'schema_version 必须为 2（当前组合式包版本）' })
-    if (typeof manifest['id'] !== 'string' || manifest['id'].length === 0) schemaIssues.push({ path: 'id', message: '缺少包 id（全局唯一，如 com.daily.notes）' })
-    else if (!/^[\p{L}\p{N}._ -]{1,128}$/u.test(manifest['id'] as string)) schemaIssues.push({ path: 'id', message: `包 id「${manifest['id'] as string}」含非法字符：只允许 Unicode 字母/数字/._- 与空格，禁止路径分隔符与 ..` })
-    if (typeof manifest['type'] !== 'string') schemaIssues.push({ path: 'type', message: '缺少包类型' })
+    if (manifest['schema_version'] !== 2) schemaIssues.push({ path: 'schema_version', message: 'schema_version 必须为 2（当前组合式包版本）', level: 'blocking' })
+    if (typeof manifest['id'] !== 'string' || manifest['id'].length === 0) schemaIssues.push({ path: 'id', message: '缺少包 id（全局唯一，如 com.daily.notes）', level: 'blocking' })
+    else if (!/^[\p{L}\p{N}._ -]{1,128}$/u.test(manifest['id'] as string)) schemaIssues.push({ path: 'id', message: `包 id「${manifest['id'] as string}」含非法字符：只允许 Unicode 字母/数字/._- 与空格，禁止路径分隔符与 ..`, level: 'blocking' })
+    if (typeof manifest['type'] !== 'string') schemaIssues.push({ path: 'type', message: '缺少包类型', level: 'blocking' })
     else {
       const validTypes = ['app', 'pet-layer', 'api', 'skill', 'theme', 'toolpkg', 'mcp', 'workflow', 'model-pack', 'url-app', 'provider', 'subagent', 'bundle']
-      if (!validTypes.includes(manifest['type'] as string)) schemaIssues.push({ path: 'type', message: `包类型「${manifest['type'] as string}」不在支持列表（${validTypes.join('/')}）` })
+      if (!validTypes.includes(manifest['type'] as string)) schemaIssues.push({ path: 'type', message: `包类型「${manifest['type'] as string}」不在支持列表（${validTypes.join('/')}）`, level: 'blocking' })
     }
     if (typeof manifest['version'] !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest['version'] as string)) {
-      schemaIssues.push({ path: 'version', message: `版本号「${String(manifest['version'] ?? '')}」不是合法 semver（如 1.2.0 或 1.2.0-beta.1）` })
+      schemaIssues.push({ path: 'version', message: `版本号「${String(manifest['version'] ?? '')}」不是合法 semver（如 1.2.0 或 1.2.0-beta.1）`, level: 'blocking' })
     }
-    // 3) 提取 TypeBox 具体的属性错误人话提示
+    // 提取 TypeBox 具体的属性错误人话提示
     if (schemaIssues.length === 0) {
       for (const err of Errors(packageSchema, manifest)) {
         const rawPath = typeof err.instancePath === 'string' ? err.instancePath : ''
         const p = rawPath.replace(/^\//, '').replace(/\//g, '.') || 'manifest'
-        schemaIssues.push({ path: p, message: `字段 ${p} 格式不符：${err.message}` })
+        schemaIssues.push({ path: p, message: `字段 ${p} 格式不符：${err.message}`, level: 'blocking' })
       }
     }
     if (schemaIssues.length === 0) {
-      schemaIssues.push({ path: 'schema', message: 'manifest 结构不完整，请确认必需字段 id / type / version 是否准确' })
+      schemaIssues.push({ path: 'schema', message: 'manifest 结构不完整，请确认必需字段 id / type / version 是否准确', level: 'blocking' })
     }
     // 合并：结构错误优先（schemaIssues），语义错误随后（去重 path）
     const seen = new Set<string>()
@@ -253,13 +437,15 @@ export function validatePackageManifest(raw: unknown, depth = 1): ContractResult
       const key = issue.path + '|' + issue.message
       if (!seen.has(key)) {
         seen.add(key)
-        issues.push(issue)
+        if (!issue.level) issue.level = 'blocking'
       }
     }
-    return asIssues(false, issues, manifest)
+    const blockingIssues = [...schemaIssues, ...issues].filter((i) => (i.level ?? 'blocking') === 'blocking')
+    return asIssues(false, blockingIssues, manifest, warnings)
   }
 
-  return asIssues(issues.length === 0, issues, manifest)
+  const blockingIssues = issues.filter((i) => (i.level ?? 'blocking') === 'blocking')
+  return asIssues(blockingIssues.length === 0, blockingIssues, manifest, warnings)
 }
 
 /**
@@ -267,45 +453,59 @@ export function validatePackageManifest(raw: unknown, depth = 1): ContractResult
  */
 export function validateApiSpec(raw: unknown): ContractResult {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    return asIssues(false, [{ path: '', message: 'api.json 必须是 JSON 对象' }])
+    return asIssues(false, [{ path: '', message: 'api.json 必须是 JSON 对象', level: 'blocking' }])
   }
-  const spec = raw as Record<string, unknown>
+  // 先执行容错规范化自愈（字符串文本转多语言、补全默认版本等）
+  const spec = normalizeApiSpec(raw)
 
-  const schemaOk = Check(apiSchema, spec)
   const issues: ContractIssue[] = []
+  const warnings: ContractIssue[] = []
+
+  // 1) 顶层未知字段与拼写守护
+  const { blocking: topSpelling, warnings: topWarnings } = checkUnknownAndSpellingKeys(spec, API_KNOWN_KEYS)
+  issues.push(...topSpelling)
+  warnings.push(...topWarnings)
 
   const endpoints = spec['endpoints']
   if (!Array.isArray(endpoints) || endpoints.length === 0) {
-    issues.push({ path: 'endpoints', message: 'api.json 必须至少声明一个端点（endpoints 非空数组）' })
+    issues.push({ path: 'endpoints', message: 'api.json 必须至少声明一个端点（endpoints 非空数组）', level: 'blocking' })
   } else {
-    // 端点名唯一性 + handler 路径防穿越 + 端点方法合法
+    // 端点名唯一性 + handler 路径防穿越 + 端点方法合法 + endpoints[i] 未知字段与拼写守护
     const seen = new Set<string>()
     endpoints.forEach((epRaw, i) => {
       if (typeof epRaw !== 'object' || epRaw === null) return
       const ep = epRaw as Record<string, unknown>
+      const { blocking: epSpelling, warnings: epWarnings } = checkUnknownAndSpellingKeys(
+        ep,
+        API_ENDPOINT_KNOWN_KEYS,
+        `endpoints[${i}]`,
+      )
+      issues.push(...epSpelling)
+      warnings.push(...epWarnings)
+
       const name = ep['name']
       if (typeof name === 'string') {
-        if (seen.has(name)) issues.push({ path: `endpoints[${i}].name`, message: `端点名「${name}」重复` })
+        if (seen.has(name)) issues.push({ path: `endpoints[${i}].name`, message: `端点名「${name}」重复`, level: 'blocking' })
         seen.add(name)
-        if (!/^[a-z][a-z0-9_]*$/.test(name)) issues.push({ path: `endpoints[${i}].name`, message: `端点名「${name}」必须是小写字母开头的小写下划线命名（如 list_notes）` })
+        if (!/^[a-z][a-z0-9_]*$/.test(name)) issues.push({ path: `endpoints[${i}].name`, message: `端点名「${name}」必须是小写字母开头的小写下划线命名（如 list_notes）`, level: 'blocking' })
       }
       const handler = ep['handler']
       if (typeof handler === 'string') {
         if (!/^[a-zA-Z0-9_./-]+\.js$/.test(handler) || handler.includes('..')) {
-          issues.push({ path: `endpoints[${i}].handler`, message: `handler 路径「${handler}」不合法：必须是相对路径的 .js 文件（禁止 .. 越界）` })
+          issues.push({ path: `endpoints[${i}].handler`, message: `handler 路径「${handler}」不合法：必须是相对路径的 .js 文件（禁止 .. 越界）`, level: 'blocking' })
         }
       }
       const method = ep['method']
       if (method !== undefined && method !== 'GET' && method !== 'POST') {
-        issues.push({ path: `endpoints[${i}].method`, message: `method「${String(method)}」不支持（仅 GET/POST；GET=只读，POST=有副作用）` })
+        issues.push({ path: `endpoints[${i}].method`, message: `method「${String(method)}」不支持（仅 GET/POST；GET=只读，POST=有副作用）`, level: 'blocking' })
       }
       const path = ep['path']
       if (typeof path === 'string' && !path.startsWith('/')) {
-        issues.push({ path: `endpoints[${i}].path`, message: `path「${path}」必须以 / 开头` })
+        issues.push({ path: `endpoints[${i}].path`, message: `path「${path}」必须以 / 开头`, level: 'blocking' })
       }
       const visibility = ep['visibility']
       if (visibility !== undefined && visibility !== 'owner' && visibility !== 'public') {
-        issues.push({ path: `endpoints[${i}].visibility`, message: `visibility「${String(visibility)}」不受支持（owner/public）` })
+        issues.push({ path: `endpoints[${i}].visibility`, message: `visibility「${String(visibility)}」不受支持（owner/public）`, level: 'blocking' })
       }
       // storage 前缀语义：读/写列表非空
       const storage = ep['storage']
@@ -314,21 +514,23 @@ export function validateApiSpec(raw: unknown): ContractResult {
         const write = (storage as Record<string, unknown>)['write']
         for (const [k, arr] of [['read', read], ['write', write]] as const) {
           if (arr !== undefined && (!Array.isArray(arr) || arr.length === 0)) {
-            issues.push({ path: `endpoints[${i}].storage.${k}`, message: `storage.${k} 必须是非空数组（如 ["notes/*"]）` })
+            issues.push({ path: `endpoints[${i}].storage.${k}`, message: `storage.${k} 必须是非空数组（如 ["notes/*"]）`, level: 'blocking' })
           }
         }
       }
     })
   }
 
+  const schemaOk = Check(apiSchema, spec)
   // schema 结构本身失败但已通过语义补充时，给兜底提示
   if (!schemaOk && issues.length === 0) {
-    if (spec['schema_version'] !== 1) issues.push({ path: 'schema_version', message: 'schema_version 必须为 1' })
-    if (typeof spec['namespace'] !== 'string' || spec['namespace'].length === 0) issues.push({ path: 'namespace', message: '缺少 namespace（全局唯一，如 notes）' })
-    else if (!/^[a-z][a-z0-9.-]*$/.test(spec['namespace'] as string)) issues.push({ path: 'namespace', message: `namespace「${String(spec['namespace'])}」只允许小写字母/数字/点/连字符（以小写字母开头）` })
+    if (spec['schema_version'] !== 1) issues.push({ path: 'schema_version', message: 'schema_version 必须为 1', level: 'blocking' })
+    if (typeof spec['namespace'] !== 'string' || spec['namespace'].length === 0) issues.push({ path: 'namespace', message: '缺少 namespace（全局唯一，如 notes）', level: 'blocking' })
+    else if (!/^[a-z][a-z0-9.-]*$/.test(spec['namespace'] as string)) issues.push({ path: 'namespace', message: `namespace「${String(spec['namespace'])}」只允许小写字母/数字/点/连字符（以小写字母开头）`, level: 'blocking' })
   }
 
-  return asIssues(issues.length === 0, issues)
+  const blockingIssues = issues.filter((i) => (i.level ?? 'blocking') === 'blocking')
+  return asIssues(blockingIssues.length === 0, blockingIssues, spec, warnings)
 }
 
 /** 校验未知 JSON 是否为合法 package manifest 或 api spec（自动识别顶层字段） */

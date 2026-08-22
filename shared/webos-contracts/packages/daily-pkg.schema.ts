@@ -166,7 +166,7 @@ export const PACKAGE_SCHEMA = Type.Object(
     /** 需要的最低 Shell/服务端契约版本 */
     minShell: Type.Optional(Type.String({ pattern: '^\\d+\\.\\d+\\.\\d+$' })),
   },
-  { additionalProperties: false, required: ['schema_version', 'id', 'type', 'version'] },
+  { additionalProperties: true, required: ['schema_version', 'id', 'type', 'version'] },
 )
 
 /** 推导出的 TS 静态类型 */

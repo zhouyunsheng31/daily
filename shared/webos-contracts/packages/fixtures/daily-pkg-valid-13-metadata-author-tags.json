@@ -1,0 +1,9 @@
+{
+  "schema_version": 2,
+  "id": "com.daily.metadata-pkg",
+  "type": "theme",
+  "version": "1.0.0",
+  "author": "Alice",
+  "license": "MIT",
+  "tags": ["theme", "minimal"]
+}

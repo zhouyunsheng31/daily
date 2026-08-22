@@ -64,7 +64,7 @@ const Endpoint = Type.Object(
     /** 可见性：owner=仅本人+其 AI（默认）；public=任何安装者（web 先行） */
     visibility: Type.Optional(Type.Union(API_VISIBILITIES.map((v) => Type.Literal(v)))),
   },
-  { additionalProperties: false, required: ['name', 'path', 'handler'] },
+  { additionalProperties: true, required: ['name', 'path', 'handler'] },
 )
 
 // ---- 顶层 api.json ----
@@ -98,7 +98,7 @@ export const API_SCHEMA = Type.Object(
     secrets: Type.Optional(Type.Array(Type.String({ pattern: '^[A-Z][A-Z0-9_]*$', maxLength: 64 }), { maxItems: 16 })),
     endpoints: Type.Array(Endpoint, { minItems: 1, maxItems: 64 }),
   },
-  { additionalProperties: false, required: ['schema_version', 'namespace', 'endpoints'] },
+  { additionalProperties: true, required: ['schema_version', 'namespace', 'endpoints'] },
 )
 
 /** 推导出的 TS 静态类型 */

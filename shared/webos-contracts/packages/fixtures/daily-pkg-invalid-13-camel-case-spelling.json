@@ -1,0 +1,7 @@
+{
+  "schema_version": 2,
+  "id": "com.daily.camel-spell",
+  "type": "theme",
+  "version": "1.0.0",
+  "displayName": "驼峰拼写错误"
+}

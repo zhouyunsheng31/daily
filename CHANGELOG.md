@@ -6,7 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
-### 2026-08-23 02:45 · feat(model): 切换服务端模型提供商至 ChatST Gemini 3.7 Flash
+### 2026-08-23 03:02 · 1ade364 · 包体系校验体验全面改造（Validation UX Overhaul），实现分级反馈、API 自愈与 Schema 开放化
+
+**修改文件路径**：
+- `shared/webos-contracts/packages/daily-pkg.schema.ts`
+- `shared/webos-contracts/packages/daily-pkg.schema.json`
+- `shared/webos-contracts/packages/api.schema.ts`
+- `shared/webos-contracts/packages/api.schema.json`
+- `server/src/webos/contracts/index.ts`
+- `server/src/webos/packages/packages-service.ts`
+- `server/src/webos/appapi/appapi-service.ts`
+- `server/test/unit/contracts.test.ts`
+- `server/test/unit/packages.test.ts`
+- `docs/routes/web/03-package-system.md`
+- `/storage/emulated/0/Download/Operit/skills/daily-package-market/SKILL.md`
+- `CHANGELOG.md`
+
+**改动内容**：
+1. **P1 校验反馈分级（⏳/⚠️/ℹ️ 三级语义与零焦虑流水线）**：
+   - 过程态（如仅创建目录、缺入口文件或 api.json 尚未写入）调整为 ⏳ info 提示，不作为审核终局失败，消除 AI 中间态重复重写焦虑；删除/目录不存在场景静默返回；
+   - 危险模式（eval、内网 SSRF、iframe 等）与非法结构维持 ⚠️ blocking 拦截并精准点名；
+   - 未知元数据字段放行并回流 ℹ️ warning 提示；
+2. **P2 api.json 容错自愈（normalizeApiSpec）与版本快照规范化对齐**：
+   - 引入 `normalizeApiSpec`，支持纯字符串 `display_name`/`description`（自动转多语言对象）、小写 `method` 转大写、单字符串 `storage.read/write` 数组化、剥离 `./` 前缀 handler 等；
+   - 修复 fs 与 paste 注册路径行为漂移，统一使用 normalized 后的 manifest 写入不可变版本快照；
+   - `appapi-service.loadApiSpecs` 消费 normalized 结果，保证注册与调用 spec 一致；
+3. **P3 Schema 开放化与驼峰拼写守护**：
+   - `daily.pkg.json` 与 `api.json` 顶层及 `endpoints[]` 条目开放 `additionalProperties: true`，允许 `author`/`license`/`tags` 等元数据字段；
+   - 嵌套安全权限对象（`network`、`storage`、`dependencies` 等）维持严格封闭（`additionalProperties: false`）；
+   - 增加拼写守护，对驼峰/下划线变体（如 `displayName` vs `display_name`）执行 blocking 拦截并回流推荐修法；
+4. **P4a HTML 资源策略修正与图片分级**：
+   - 修正外部网络资源拦截的人话指引，清晰引导使用相对路径与 `DailyWebOs.http` SDK；
+   - 放宽常见光栅图片（png/jpg/gif/webp/avif）base64 内联块上限至 256KB，SVG 维持 48KB；
+5. **P5 文档同步与测试验收**：
+   - 同步更新 `docs/routes/web/03-package-system.md` 与 `daily-package-market` Skill 规范文档；
+   - 新增/完善契约与包单测用例（52/52 契约用例、25/25 包服务用例全数通过），覆盖 A（内部 AI）、B（外部开发者）、C（恶意/事故防护）完整验收旅程。
+
+### 2026-08-23 02:45 · 6b8cd7b · feat(model): 切换服务端模型提供商至 ChatST Gemini 3.7 Flash
 
 **修改文件路径**：
 - `server/src/piBridge.ts`

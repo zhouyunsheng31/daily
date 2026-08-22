@@ -1,0 +1,10 @@
+{
+  "schema_version": 2,
+  "id": "com.daily.bad-net-key",
+  "type": "theme",
+  "version": "1.0.0",
+  "network": {
+    "domains": ["api.example.com"],
+    "unknownKey": true
+  }
+}

@@ -193,6 +193,32 @@ describe('W0 契约基线：语义校验细项', () => {
     expect(result.ok).toBe(false)
     expect(result.issues.some((i) => i.message.includes('禁止'))).toBe(true)
   })
+
+  it('P3 Schema 开放化：manifest 带 author/tags 等未知元数据（ok=true 且 warnings 非空）', () => {
+    const raw = readFixture('daily-pkg-valid-13-metadata-author-tags.json')
+    const result = validatePackageManifest(raw)
+    expect(result.ok).toBe(true)
+    expect(result.warnings).toBeDefined()
+    expect(result.warnings!.length).toBeGreaterThanOrEqual(1)
+    expect(result.warnings!.some((w) => w.message.includes('元数据保留'))).toBe(true)
+  })
+
+  it('P3 拼写守护：displayName 驼峰变体被 blocking 拦截', () => {
+    const raw = readFixture('daily-pkg-invalid-13-camel-case-spelling.json')
+    const result = validatePackageManifest(raw)
+    expect(result.ok).toBe(false)
+    expect(result.issues.some((i) => i.message.includes('疑似拼写错误'))).toBe(true)
+  })
+
+  it('P2 自愈：api.json 字符串 display_name 与小写 method 容错通过', () => {
+    const raw = readFixture('api-valid-06-string-display-name.json')
+    const result = validateApiSpec(raw)
+    expect(result.ok).toBe(true)
+    expect(result.normalized).toBeDefined()
+    const norm = result.normalized as { display_name?: { zh?: string }; endpoints?: Array<{ method?: string }> }
+    expect(norm.display_name?.zh).toBe('便签服务')
+    expect(norm.endpoints?.[0]?.method).toBe('GET')
+  })
 })
 
 function readFixture(file: string): unknown {

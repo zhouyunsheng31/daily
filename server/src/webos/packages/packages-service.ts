@@ -40,7 +40,8 @@ export const PACKAGE_MAX_BYTES = 10 * 1024 * 1024 // 单包配额 10MB（与 sha
 export const PACKAGES_DIR = 'packages'
 export const PACKAGES_TRASH_DIR = 'packages/.trash'
 export const PACKAGE_MANIFEST = 'daily.pkg.json'
-const MAX_BASE64_BLOB = 48 * 1024 // 静态拒绝：超大 base64 连续块（混淆对抗）
+const MAX_BASE64_BLOB = 48 * 1024 // 静态拒绝：超大 base64 连续块（通用上限 48KB）
+const MAX_BASE64_IMAGE_BLOB = 256 * 1024 // 静态放宽：常见图片 base64 上限 256KB（非 svg）
 
 /** 各类型默认入口（entry 缺省时使用）；null = 不强求入口（bundle/theme/url-app 等） */
 const TYPE_ENTRY_DEFAULTS: Record<string, string | null> = {
@@ -171,9 +172,56 @@ function humanBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)}MB`
 }
 
-function formatIssues(target: string, issues: ContractIssue[]): string {
-  const lines = issues.map((i) => `- ${i.path ? `${i.path}：` : ''}${i.message}`)
-  return `⚠️ ${target} 校验未通过（未建版本，保持最近有效版本）：\n${lines.join('\n')}`
+function formatIssues(target: string, issues: ContractIssue[], warnings?: ContractIssue[]): string {
+  const blocking = issues.filter((i) => (i.level ?? 'blocking') === 'blocking')
+  const infos = issues.filter((i) => i.level === 'info')
+  const warns = [...(warnings ?? []), ...issues.filter((i) => i.level === 'warning')]
+
+  const parts: string[] = []
+
+  if (blocking.length > 0) {
+    const lines = blocking.map((i) => `- ${i.path ? `${i.path}：` : ''}${i.message}`)
+    parts.push(`⚠️ ${target} 校验未通过（未建版本，保持最近有效版本）：\n${lines.join('\n')}`)
+  } else if (infos.length > 0) {
+    if (infos.length === 1 && !infos[0].path) {
+      parts.push(`⏳ ${target}：${infos[0].message}`)
+    } else {
+      const lines = infos.map((i) => `- ${i.path ? `${i.path}：` : ''}${i.message}`)
+      parts.push(`⏳ ${target} 准备中：\n${lines.join('\n')}`)
+    }
+  }
+
+  if (warns.length > 0) {
+    const seen = new Set<string>()
+    const warnLines = warns
+      .filter((w) => {
+        const k = `${w.path}|${w.message}`
+        if (seen.has(k)) return false
+        seen.add(k)
+        return true
+      })
+      .map((w) => `- ${w.path ? `${w.path}：` : ''}${w.message}`)
+    if (warnLines.length > 0) {
+      parts.push(`ℹ️ 提示：\n${warnLines.join('\n')}`)
+    }
+  }
+
+  return parts.join('\n')
+}
+
+function appendWarnings(feedback: string, warnings?: ContractIssue[]): string {
+  if (!warnings || warnings.length === 0) return feedback
+  const seen = new Set<string>()
+  const warnLines = warnings
+    .filter((w) => {
+      const k = `${w.path}|${w.message}`
+      if (seen.has(k)) return false
+      seen.add(k)
+      return true
+    })
+    .map((w) => `- ${w.path ? `${w.path}：` : ''}${w.message}`)
+  if (warnLines.length === 0) return feedback
+  return `${feedback}\nℹ️ 提示：\n${warnLines.join('\n')}`
 }
 
 /** 递归收集包文件夹内相对路径 + 总字节（h = 隐藏约束：跳过 .git 等） */
@@ -216,12 +264,12 @@ function collectPackageFiles(folderDir: string): { files: string[]; total: numbe
 export function validatePackageContent(manifest: Record<string, unknown>, folderDir: string): ContractIssue[] {
   const issues: ContractIssue[] = []
   if (!fs.existsSync(folderDir) || !fs.statSync(folderDir).isDirectory()) {
-    issues.push({ path: '', message: `包目录不存在（${folderDir}）` })
+    issues.push({ path: '', message: `包目录不存在（${folderDir}）`, level: 'blocking' })
     return issues
   }
   const { files, total } = collectPackageFiles(folderDir)
   if (total > PACKAGE_MAX_BYTES) {
-    issues.push({ path: '', message: `包总大小 ${humanBytes(total)} 超过单包配额 ${humanBytes(PACKAGE_MAX_BYTES)}` })
+    issues.push({ path: '', message: `包总大小 ${humanBytes(total)} 超过单包配额 ${humanBytes(PACKAGE_MAX_BYTES)}`, level: 'blocking' })
   }
 
   const type = String(manifest.type ?? '')
@@ -229,7 +277,11 @@ export function validatePackageContent(manifest: Record<string, unknown>, folder
   if (entry) {
     const full = path.join(folderDir, entry)
     if (!fs.existsSync(full) || !fs.statSync(full).isFile()) {
-      issues.push({ path: `entry`, message: `入口文件「${entry}」不存在（type=「${type}」需要该入口）` })
+      issues.push({
+        path: `entry`,
+        message: `缺入口文件「${entry}」（type=「${type}」需要）。写入过程中的正常状态，非审核失败；补齐后自动校验注册。若已写完请检查文件名与 entry 声明是否一致（未建版本）`,
+        level: 'info',
+      })
     }
   }
 
@@ -238,14 +290,21 @@ export function validatePackageContent(manifest: Record<string, unknown>, folder
     const apiRel = (manifest.api as { spec?: string } | undefined)?.spec ?? 'api.json'
     const apiFull = path.join(folderDir, apiRel)
     if (!fs.existsSync(apiFull)) {
-      issues.push({ path: `api.spec`, message: `api 包缺少声明的 api.json（${apiRel}）` })
+      issues.push({
+        path: `api.spec`,
+        message: `缺入口文件「${apiRel}」（type=api 需要）。写入过程中的正常状态，非审核失败；补齐后自动校验注册。若已写完请检查文件名与 entry 声明是否一致（未建版本）`,
+        level: 'info',
+      })
     } else {
       try {
         const apiRaw = JSON.parse(fs.readFileSync(apiFull, 'utf-8')) as unknown
         const apiResult = validateApiSpec(apiRaw)
         for (const issue of apiResult.issues) issues.push(issue)
+        if (apiResult.warnings) {
+          for (const w of apiResult.warnings) issues.push(w)
+        }
       } catch (error) {
-        issues.push({ path: apiRel, message: `api.json 不是合法 JSON：${error instanceof Error ? error.message : String(error)}` })
+        issues.push({ path: apiRel, message: `api.json 不是合法 JSON：${error instanceof Error ? error.message : String(error)}`, level: 'blocking' })
       }
     }
   }
@@ -257,7 +316,11 @@ export function validatePackageContent(manifest: Record<string, unknown>, folder
       if (typeof mcp.entry === 'string' && mcp.entry) {
         const full = path.join(folderDir, mcp.entry)
         if (!fs.existsSync(full) || !fs.statSync(full).isFile()) {
-          issues.push({ path: `contents.mcp[${i}].entry`, message: `MCP 条目入口「${mcp.entry}」不存在` })
+          issues.push({
+            path: `contents.mcp[${i}].entry`,
+            message: `缺入口文件「${mcp.entry}」（type=mcp 需要）。写入过程中的正常状态，非审核失败；补齐后自动校验注册。若已写完请检查文件名与 entry 声明是否一致（未建版本）`,
+            level: 'info',
+          })
         }
       }
     })
@@ -270,49 +333,57 @@ export function validatePackageContent(manifest: Record<string, unknown>, folder
       const content = safeRead(folderDir, rel)
       if (content == null) continue
       if (/<\s*(iframe|object|embed|base)\b/i.test(content)) {
-        issues.push({ path: rel, message: '不允许 iframe/object/embed/base 元素（防嵌套/防改 base）' })
+        issues.push({ path: rel, message: '不允许 iframe/object/embed/base 元素（防嵌套/防改 base）', level: 'blocking' })
       }
       if (/(?:src|href|action|formaction)\s*=\s*["']?\s*(?:javascript:|vbscript:|file:|filesystem:)/i.test(content)) {
-        issues.push({ path: rel, message: '不允许 javascript:/vbscript:/file: 等危险协议资源' })
+        issues.push({ path: rel, message: '不允许 javascript:/vbscript:/file: 等危险协议资源', level: 'blocking' })
       }
       if (/\s(?:src|href)\s*=\s*["']?\s*data:text\/html/i.test(content)) {
-        issues.push({ path: rel, message: '不允许 data:text/html 资源' })
+        issues.push({ path: rel, message: '不允许 data:text/html 资源', level: 'blocking' })
       }
-      if (type !== 'url-app' && /(?:src|href|action|formaction)\s*=\s*["']?\s*(?:https?:|https?%3A|\x2f\x2f)/i.test(content)) {
-        issues.push({ path: rel, message: '静态包不允许外部网络资源（外部引用请用 url-app 类型或声明 network.domains 后经 App API 访问）' })
+      if (type !== 'url-app' && /(?:src|href|action|formaction)\s*=\s*["']?\s*(?:https?:|https?%3A|\/\/)/i.test(content)) {
+        issues.push({
+          path: rel,
+          message: '静态包不允许外部网络资源：素材放包内用相对路径（如 assets/bg.png）；外部数据走前端 SDK DailyWebOs.http 或 App API（network.domains 仅对 handler/SDK 出站生效，不放行 HTML 静态引用）',
+          level: 'blocking',
+        })
       }
-      const blobs = [...content.matchAll(/data:[a-z0-9/+.-]+;base64,([A-Za-z0-9+/=]+)/gi)]
+      const blobs = [...content.matchAll(/data:([a-z0-9/+.-]+);base64,([A-Za-z0-9+/=]+)/gi)]
       for (const b of blobs) {
-        if (b[1] && b[1].length > MAX_BASE64_BLOB) {
-          issues.push({ path: rel, message: `base64 内联块过大（${humanBytes((b[1].length / 4) * 3)}，疑似混淆载荷）` })
+        const mime = (b[1] || '').toLowerCase()
+        const base64Data = b[2] || ''
+        const isCommonRasterImage = /image\/(png|jpe?g|gif|webp|avif)/.test(mime)
+        const limit = isCommonRasterImage ? MAX_BASE64_IMAGE_BLOB : MAX_BASE64_BLOB
+        if (base64Data.length > limit) {
+          issues.push({ path: rel, message: `base64 内联块过大（${humanBytes((base64Data.length / 4) * 3)}，疑似混淆载荷）`, level: 'blocking' })
         }
       }
     } else if (lower.endsWith('.js') || lower.endsWith('.mjs')) {
       const content = safeRead(folderDir, rel)
       if (content == null) continue
-      if (/(?:^|\s)(?:\.\.\.|…)(?=\s*(?:[;{}()[\],:]|$))/m.test(content)) {
-        issues.push({ path: rel, message: 'JS 里出现省略号/代码占位符（…），疑似未完成代码' })
+      if (/(?:^|\s)(?:\.\.\.|…)(?=\s*(?:[;{}()[\\],:]|$))/m.test(content)) {
+        issues.push({ path: rel, message: 'JS 里出现省略号/代码占位符（…），疑似未完成代码', level: 'blocking' })
       }
       if (/\beval\s*\(/i.test(content) || /\bnew\s+Function\s*\(/i.test(content)) {
-        issues.push({ path: rel, message: '不允许 eval / new Function（远程代码执行向量）' })
+        issues.push({ path: rel, message: '不允许 eval / new Function（远程代码执行向量）', level: 'blocking' })
       }
       try {
         new VmScript(content, { filename: `pkg-${rel}` })
       } catch (error) {
-        issues.push({ path: rel, message: `JS 语法错误：${error instanceof Error ? error.message : String(error)}` })
+        issues.push({ path: rel, message: `JS 语法错误：${error instanceof Error ? error.message : String(error)}`, level: 'blocking' })
       }
     } else if (lower.endsWith('.svg')) {
       const content = safeRead(folderDir, rel)
       if (content != null && /<script\b/i.test(content)) {
-        issues.push({ path: rel, message: 'SVG 不允许内嵌 <script>' })
+        issues.push({ path: rel, message: 'SVG 不允许内嵌 <script>', level: 'blocking' })
       }
     }
   }
 
-  // 去重（同 path 同 message 只报一次）
+  // 去重（同 path 同 message 同 level 只报一次）
   const seen = new Set<string>()
   return issues.filter((i) => {
-    const k = `${i.path}|${i.message}`
+    const k = `${i.path}|${i.message}|${i.level ?? 'blocking'}`
     if (seen.has(k)) return false
     seen.add(k)
     return true
@@ -334,11 +405,13 @@ async function registerOrUpdate(
   folderId: string,
   manifest: Record<string, unknown>,
   createdBy: 'system' | 'guest' | 'user',
+  extraWarnings?: ContractIssue[],
 ): Promise<{ ok: boolean; feedback: string; versionCreated: boolean }> {
   const folderDir = packageDir(key, folderId)
   const contentIssues = validatePackageContent(manifest, folderDir)
-  if (contentIssues.length > 0) {
-    return { ok: false, feedback: formatIssues(`packages/${folderId}`, contentIssues), versionCreated: false }
+  const blockingOrInfo = contentIssues.filter((i) => i.level === 'info' || (i.level ?? 'blocking') === 'blocking')
+  if (blockingOrInfo.length > 0) {
+    return { ok: false, feedback: formatIssues(`packages/${folderId}`, contentIssues, extraWarnings), versionCreated: false }
   }
 
   const existing = await getPackage(folderId)
@@ -356,7 +429,11 @@ async function registerOrUpdate(
 
   // 幂等：活动版本 manifest 与文件夹当前一致 → 不建新版本（AI 重复写同内容不产生垃圾版本）
   if (active && active.manifest && sameManifest(active.manifest, manifest)) {
-    return { ok: true, feedback: `✅ 包 packages/${folderId}（${String(manifest.type)}）校验通过，无内容变化（当前 v${active.version}）`, versionCreated: false }
+    return {
+      ok: true,
+      feedback: appendWarnings(`✅ 包 packages/${folderId}（${String(manifest.type)}）校验通过，无内容变化（当前 v${active.version}）`, extraWarnings),
+      versionCreated: false,
+    }
   }
 
   const versionStr = nextPackageVersion(versions.map((v) => v.version), String(manifest.version ?? '1.0.0'))
@@ -389,7 +466,11 @@ async function registerOrUpdate(
   await appendVersionAudit(version.id, { action: 'version_created', at: Date.now(), by: createdBy })
   const verb = existing ? '已发布新版本' : '已注册'
   console.log(`[packages] ${verb}: ${folderId} v${versionStr} (${String(manifest.type)}) owner=${key.slice(0, 12)}`)
-  return { ok: true, feedback: `✅ 包 packages/${folderId}（${String(manifest.type)}）校验通过，${verb} v${versionStr}`, versionCreated: true }
+  return {
+    ok: true,
+    feedback: appendWarnings(`✅ 包 packages/${folderId}（${String(manifest.type)}）校验通过，${verb} v${versionStr}`, extraWarnings),
+    versionCreated: true,
+  }
 }
 
 function sameManifest(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
@@ -416,11 +497,12 @@ export async function syncPackageFromFs(key: string, fullPath: string): Promise<
 
   const folderDir = packageDir(key, folderId)
   if (!fs.existsSync(folderDir) || !fs.statSync(folderDir).isDirectory()) {
-    return `⚠️ packages/${folderId} 目录已不存在；包保持最近有效版本不变`
+    // 正常删除场景静默（P1 分级规范）
+    return undefined
   }
   const manifestFile = path.join(folderDir, PACKAGE_MANIFEST)
   if (!fs.existsSync(manifestFile)) {
-    return `⚠️ packages/${folderId} 下缺少 ${PACKAGE_MANIFEST}（包 manifest）：先写 manifest，再补内容，校验通过后系统自动注册`
+    return `⏳ packages/${folderId}：已检测到 packages/${folderId}/，写好 manifest 后系统自动注册（未建版本）`
   }
   let manifest: unknown
   try {
@@ -433,13 +515,13 @@ export async function syncPackageFromFs(key: string, fullPath: string): Promise<
   }
   const cr = validatePackageManifest(manifest)
   if (!cr.ok) {
-    return formatIssues(`packages/${folderId}/${PACKAGE_MANIFEST}`, cr.issues)
+    return formatIssues(`packages/${folderId}/${PACKAGE_MANIFEST}`, cr.issues, cr.warnings)
   }
-  const m = manifest as Record<string, unknown>
+  const m = (cr.normalized ?? manifest) as Record<string, unknown>
   if (m.type === 'app') {
     return `⚠️ packages/${folderId}：type=app 的包请放进 apps/${folderId}/ 目录（文件夹即 App，由桌面调度）；packages/ 只登记非 app 类型（api/skill/theme 等）`
   }
-  const r = await registerOrUpdate(key, folderId, m, orgFromKey(key))
+  const r = await registerOrUpdate(key, folderId, m, orgFromKey(key), cr.warnings)
   return r.feedback
 }
 
@@ -476,10 +558,10 @@ export async function syncAllPackagesFromWorkspace(key: string): Promise<void> {
     const cr = validatePackageManifest(raw)
     // idMismatch(raw, folderId) === true 表示 manifest.id ≠ 文件夹名 → 跳过
     if (!cr.ok || idMismatch(raw, folderId)) continue
-    const m = raw as Record<string, unknown>
+    const m = (cr.normalized ?? raw) as Record<string, unknown>
     if (m.type === 'app') continue // app 走 apps/（视同已有机制）
     try {
-      await registerOrUpdate(key, folderId, m, orgFromKey(key))
+      await registerOrUpdate(key, folderId, m, orgFromKey(key), cr.warnings)
     } catch (error) {
       console.warn(`[packages] scan register failed for ${folderId}:`, error instanceof Error ? error.message : String(error))
     }
@@ -582,7 +664,7 @@ export async function createFromPaste(
   input: { manifest: unknown; files?: Record<string, string> | Array<{ path: string; content: string }> },
 ): Promise<{ ok: boolean; feedback: string; id?: string }> {
   const cr = validatePackageManifest(input.manifest)
-  if (!cr.ok) return { ok: false, feedback: formatIssues('新包', cr.issues) }
+  if (!cr.ok) return { ok: false, feedback: formatIssues('新包', cr.issues, cr.warnings) }
   const m = (cr.normalized ?? input.manifest) as Record<string, unknown>
   const id = String(m.id)
 
@@ -592,7 +674,7 @@ export async function createFromPaste(
     const appDir = path.join(root, 'apps', id)
     fs.mkdirSync(appDir, { recursive: true })
     writeManifestAndFiles(appDir, m, input.files)
-    return { ok: true, feedback: `✅ 应用 apps/${id} 导入成功，已添加到桌面`, id }
+    return { ok: true, feedback: appendWarnings(`✅ 应用 apps/${id} 导入成功，已添加到桌面`, cr.warnings), id }
   }
 
   if (idMismatch(m, id)) {
@@ -602,7 +684,7 @@ export async function createFromPaste(
   fs.mkdirSync(folderDir, { recursive: true })
   // 写 manifest + 可选文件（路径防穿越）
   writeManifestAndFiles(folderDir, m, input.files)
-  const r = await registerOrUpdate(key, id, m, orgFromKey(key))
+  const r = await registerOrUpdate(key, id, m, orgFromKey(key), cr.warnings)
   return { ok: r.ok, feedback: r.feedback, id: r.ok ? id : undefined }
 }
 
@@ -659,9 +741,10 @@ export async function pushNewVersion(
     return { ok: false, feedback: `manifest JSON 解析失败：${error instanceof Error ? error.message : String(error)}` }
   }
   const cr = validatePackageManifest(raw)
-  if (!cr.ok) return { ok: false, feedback: formatIssues(`packages/${id}/${PACKAGE_MANIFEST}`, cr.issues) }
+  if (!cr.ok) return { ok: false, feedback: formatIssues(`packages/${id}/${PACKAGE_MANIFEST}`, cr.issues, cr.warnings) }
   if (idMismatch(raw, id)) return { ok: false, feedback: `manifest id（${String((raw as Record<string, unknown>).id)}）与包 id「${id}」不一致` }
-  const r = await registerOrUpdate(key, id, raw as Record<string, unknown>, orgFromKey(key))
+  const m = (cr.normalized ?? raw) as Record<string, unknown>
+  const r = await registerOrUpdate(key, id, m, orgFromKey(key), cr.warnings)
   return { ok: r.ok, feedback: r.feedback }
 }
 // ---- 原子切指针 ----

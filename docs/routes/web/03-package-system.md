@@ -97,10 +97,14 @@ DELETE /webos/api/packages/:id                # 回收站
 GET    /webos/api/packages/:id/files/raw/*    # 包文件（免鉴权 + UUID 不可枚举，沿用既有策略）
 ```
 
-## 5. AI 开发包（D17 泛化，校验反馈回路）
+## 5. AI 开发包（D17 泛化，校验反馈回路与反馈分级）
 
 - AI 经 `agent_fs_mkdir` + `agent_fs_write` 写包目录（含 `daily.pkg.json`）→ 系统识别 type → 静态校验 → 注册 + 版本 v1 → 立即可用；**AI 视角建 App 和建 api/theme/subagent 是同一套动作**。
-- **校验反馈回路**：每次 `agent_fs_write` 落包文件后，系统即时校验并把结果随工具结果回流——人话错误（"tools 里没登记 xxx"、"capabilities 词汇表不含 yyy"、"api.json 端点 add_note 缺 handler 文件"）→ AI 修正再写；校验通过才建版本。失败不留半成品版本（包事务）。
+- **校验反馈分级（⏳/⚠️/ℹ️ 三级语义）**：
+  - **⏳ 进行中（Info）**：过程态提示（如仅建了目录或缺入口文件）。写入过程中的正常中间状态，非审核失败，系统不建版本；待补齐后自动校验注册。
+  - **⚠️ 阻断（Blocking）**：硬性错误（如 JSON 语法错、非法 semver、eval/内网 SSRF 等危险模式、驼峰拼写错误）。系统拦截并不建版本，回流精准指引。
+  - **ℹ️ 提示（Warning）**：未知元数据字段（如 `author`、`license`、`tags`）。系统保留元数据并放行注册，不阻断版本创建。
+- **校验反馈回路**：每次 `agent_fs_write` 落包文件后，系统即时校验并把结果随工具结果回流——人话提示（"缺入口文件 SKILL.md"、"capabilities 词汇表不含 yyy"、"api.json 端点 add_note 缺 handler 文件"）→ AI 修正再写；校验通过才建版本。失败不留半成品版本（包事务）。
 - 素材工作流：AI 一条指令 → workflow 包（调研→设计→生图→打包）→ 产出 app/theme/pet-layer 等资产并版本化。
 
 ## 6. 能力词汇表（web 版 v1；与移动端共享，设备专属词标 mobile-only）
