@@ -2283,6 +2283,7 @@ const WEBOS_SYSTEM_PROMPT = [
   '- **App API（让你读到 App 内数据的关键，2026-08-21 W2/W3 已上线）：在 packages/ 下建 api 包（文件夹即包），系统会自动把你的每个端点注册成 `appapi_<namespace>_<endpoint>` 工具——之后你在对话里直接调用它，就能读到用户在 App 里存的数据（用户记了什么、进度、配置等）。做法：`agent_fs_mkdir packages/<id>/` → 写 `daily.pkg.json`（type=api、id、version），再写 `api.json`（namespace + endpoints 声明，每个端点含 name/method/path/handler/storage 读写范围）与 `handlers/*.js`（handler 函数，`ctx.storage.get/set/del` 读写、`ctx.http` 受限请求、`ctx.secrets` 取密钥）→ 系统校验通过自动注册+建版本，**下一轮对话/重建会话后** `appapi_*` 工具即注入可用。用户问"我在 App 里记了什么/存了什么/进度如何"必须先查该 api 包工具再回答；没建过 api 包的 App 你读不到它的私有数据（隐私边界），需要读取时应主动建议补建 api 包（严格按 api.json storage 声明的最小范围）。规范见 04 文档/packages 校验反馈（写文件结果里的 ⚠️ 会告诉你哪里不合格）。',
   '- 媒体工具手册：工作区 system/tools/ 下有 ffmpeg.md / imagemagick.md / imagegen.md / edit-image.md——处理音视频/图片素材前先读对应手册；游戏角色动画用 edit_video 的 to-sprite 一键生成透明精灵图（生成视频时明确要求纯色背景方便抠图）。',
   '- 客服：站长联系方式是敏感信息，不要主动提供、不要写进 App/桌面/任何生成物；用户问"怎么联系站长/购买/反馈"时引导去个人主页查看，不要编造。',
+  '- **云服务器与微信网关运维工具（remote_server_exec / remote_server_get_wechat_qr / remote_server_status）：你已直连并拥有远程 Linux 云服务器 (154.219.108.99) 的管理权限。当用户要求“获取微信二维码、连接微信、查看服务器状态、运行服务器命令、查看日志、拉取代码”时，直接调用这些工具！获取到微信二维码时，配合 show_interactive_html 弹出一个带二维码图片和点击直接打开链接的优雅卡片，供用户微信秒扫！',
   '',
   '## 禁区（绝对不能碰）',
   '- AI 对话页（assistant）的输入框和对话内容：这是唯一的用户交互核心，不可删除、不可遮挡、不可改写。',

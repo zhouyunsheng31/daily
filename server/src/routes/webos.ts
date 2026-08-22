@@ -77,6 +77,8 @@ import { syncPackageFromFs, syncAllPackagesFromWorkspace } from '../webos/packag
 import { setAppApiDeps, registerDynamicTools } from '../webos/appapi/index.js'
 // 2026-08-21（W3 统一包市场 R14）：AI 找包/装包工具（search_market_packages / install_market_package）
 import { registerMarketTools } from '../webos/market/index.js'
+// 2026-08-22 云服务器远程运维与微信通道管理工具
+import { createServerOpsTools } from '../webos/serverOpsTools.js'
 
 // W2 App API 依赖注入：loadState/saveState/chargeCredits 均为本文件函数声明（已提升），
 // 模块加载时注册，供 appapi-service 在 invoke 时访问 appStorage/扣积分（避免循环依赖）
@@ -4303,6 +4305,7 @@ async function webosAppTools(principal: Principal): Promise<ToolDefinition[]> {
     showInteractiveHtmlTool(principal),
     publishWebosAppTool(principal),
     unpublishWebosAppTool(principal),
+    ...createServerOpsTools(),
   ]
   // 2026-08-06 AI 商店工具（push 注入，避免数组字面量联合推断问题）
   appTools.push({

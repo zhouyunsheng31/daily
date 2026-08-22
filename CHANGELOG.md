@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 00:45 · 5692fa7 · 私有包直装支持一键 ZIP 解压/目录导入，接入后端运维工具并全量部署上线
+
+**修改文件路径**：
+- `client/shell-web/package.json`
+- `client/shell-web/package-lock.json`
+- `client/shell-web/src/App.tsx`
+- `server/src/webos/serverOpsTools.ts`
+- `server/src/routes/webos.ts`
+- `server/src/piBridge.ts`
+- `CHANGELOG.md`
+
+**改动内容**：
+1. **私有包导入交互极大简化（ZIP/文件夹直装）**：
+   - 引入轻量级解压库 `fflate`，用户在导入私有包时无需手动复制/拼装多个 JSON 文件；
+   - 支持**直接选择 `.zip` 压缩包**（在客户端瞬时解压出 `daily.pkg.json` 与代码文件）、或**直接选择包文件夹**批量解析，一键完成校验并安装至工作区；
+   - 保持高级「手动编辑代码」模式供开发者快速调试修改。
+2. **AI 自主连接外部能力扩展**：
+   - 注入云服务器运维工具（`remote_server_exec`、`remote_server_status`、`remote_server_get_wechat_qr` 等），支持 AI 自主与远程主机建立连接并执行指令。
+3. **线上服务器构建与部署**：
+   - 前端 Web Shell 与后端服务全量重新构建，产物同步至线上并在服务器重启生效。
+4. **验证**：
+   - `client/shell-web` 与 `server` 全部构建成功；线上健康检查与静态资源加载正常。
+
 ### 2026-08-22 23:05 · 6afa132 · 彻底解决高频字数闪烁、冷启动三连跳、积分倒涨显示异常并开放私有包直装 (Sideload)
 
 **修改文件路径**：
