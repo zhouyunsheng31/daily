@@ -1358,6 +1358,21 @@ function ToolRunningStatus({ done, ok, progress }: { done?: boolean; ok?: boolea
 // 渲染到对话消息气泡（信息流无缝衔接），不再有独立的"上一条消息仍在后台处理"
 // 卡片（用户反馈：一个任务被拆成多个气泡/卡片展示，破坏无缝体验）。
 
+// 2026-08-22 长按消息操作菜单：重新生成此条（内容不变重新流式）/ 复制
+// 固定定位在长按位置附近；点击遮罩/外部关闭。
+function LongPressMenu({ x, y, onClose, onRegenerate, onCopy }: { x: number; y: number; onClose: () => void; onRegenerate: () => void; onCopy: () => void }) {
+  // 菜单尺寸约 150×88，避免超出屏幕右/下边缘
+  const menuX = Math.min(x, window.innerWidth - 160)
+  const menuY = Math.min(y, window.innerHeight - 100)
+  return <>
+    <div className="longpress-menu-backdrop" onClick={onClose} aria-hidden="true" />
+    <div className="longpress-menu" role="menu" style={{ position: 'fixed', left: menuX, top: menuY, zIndex: 300 }}>
+      <button type="button" role="menuitem" onClick={onRegenerate}><RotateCcw size={14} /><span><strong>重新生成此条</strong><small>内容不变，重新流式输出</small></span></button>
+      <button type="button" role="menuitem" onClick={onCopy}><Copy size={14} /><span><strong>复制消息</strong><small>复制本条内容</small></span></button>
+    </div>
+  </>
+}
+
 // 2026-08-08 结构性优化：memo 化消息气泡——流式期间只有最后一条 assistant 消息
 // 的引用变化（前面的 slice 保持引用稳定），配合 memo 避免每次 SSE 事件全量重渲染
 // 所有历史消息（2 万+ 事件 × 全量渲染 = 移动端 WebView 卡退）。
@@ -1368,6 +1383,70 @@ const MessageBubble = memo(function MessageBubble({ message, messageIndex, isLas
   const copyMessageAt = useShellStore((state) => state.copyMessageAt)
   const editMessageAt = useShellStore((state) => state.editMessageAt)
   const regenerateAt = useShellStore((state) => state.regenerateAt)
+  // 2026-08-22 长按操作菜单：长按任意消息 → 弹出「重新生成此条 / 复制」
+  const [longPressMenu, setLongPressMenu] = useState<{ x: number; y: number } | null>(null)
+  const longPressTimerRef = useRef<number | null>(null)
+  const longPressTriggeredRef = useRef(false)
+  const longPressOriginRef = useRef<{ x: number; y: number } | null>(null)
+  // 流式中的消息（最后一条且正在输出）不响应长按（用 ref 保持最新值）
+  const streamingNowRef = useRef(isLast && streaming)
+  streamingNowRef.current = isLast && streaming
+  const clearLongPressTimer = (): void => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current)
+      longPressTimerRef.current = null
+    }
+  }
+  const onLongPressStart = (event: React.MouseEvent | React.TouchEvent): void => {
+    // 已在流式生成中的消息不弹菜单（避免打断生成）；菜单已开则忽略
+    if (streamingNowRef.current) return
+    if (longPressMenu) return
+    longPressTriggeredRef.current = false
+    const startX = 'touches' in event ? event.touches[0].clientX : event.clientX
+    const startY = 'touches' in event ? event.touches[0].clientY : event.clientY
+    longPressOriginRef.current = { x: startX, y: startY }
+    clearLongPressTimer()
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressTriggeredRef.current = true
+      setLongPressMenu({ x: startX, y: startY })
+    }, 500)
+  }
+  const onLongPressEnd = (): void => {
+    clearLongPressTimer()
+    // 触发过长按：清除标记，防止随后的 click 干扰
+    if (longPressTriggeredRef.current) {
+      longPressTriggeredRef.current = false
+    }
+  }
+  const onLongPressMove = (event: React.MouseEvent | React.TouchEvent): void => {
+    // 移动超过阈值视为滚动/取消长按
+    if (longPressTimerRef.current === null) return
+    const x = 'touches' in event ? event.touches[0].clientX : event.clientX
+    const y = 'touches' in event ? event.touches[0].clientY : event.clientY
+    if (longPressMenu) return
+    // 与按下的初始位置偏差超过 12px 则取消（长按期间手指滑动不触发）
+    if (Math.abs(x - (longPressOriginRef.current?.x ?? x)) > 12 || Math.abs(y - (longPressOriginRef.current?.y ?? y)) > 12) {
+      clearLongPressTimer()
+    }
+  }
+  const doRegenerateFromMenu = (): void => {
+    setLongPressMenu(null)
+    if (window.confirm('重新生成此条：内容不变，AI 会重新流式输出这条回复。')) {
+      void regenerateAt(messageIndex)
+    }
+  }
+  const doCopyFromMenu = (): void => {
+    setLongPressMenu(null)
+    void copyMessageAt(messageIndex).then((ok) => { flashCopy(ok ? 'done' : 'failed') })
+  }
+  const longPressHandlers = {
+    onMouseDown: onLongPressStart,
+    onMouseUp: onLongPressEnd,
+    onMouseLeave: onLongPressEnd,
+    onTouchStart: onLongPressStart,
+    onTouchEnd: onLongPressEnd,
+    onTouchMove: onLongPressMove,
+  }
   // 复制按钮内反馈：消息复制 / 错误卡片复制共用（按 segment index 区分）
   const [copyStatus, setCopyStatus] = useState<'idle' | 'done' | 'failed'>('idle')
   const [errorCopyStatus, setErrorCopyStatus] = useState<{ index: number; status: 'done' | 'failed' } | null>(null)
@@ -1429,9 +1508,9 @@ const MessageBubble = memo(function MessageBubble({ message, messageIndex, isLas
 
   // 用户消息：平铺右对齐，名称=称呼，头像可点击更换；支持编辑（textaread）后回退重来
   if (message.role === 'user') {
-    return <div className="chat-row user-row"><div className="chat-body user-body"><div className="chat-name">{userLabel}</div>{editing
+    return <div className="chat-row user-row" {...longPressHandlers}><div className="chat-body user-body"><div className="chat-name">{userLabel}</div>{editing
       ? <div className="chat-edit"><textarea autoFocus value={editValue} onChange={(event) => setEditValue(event.target.value)} rows={3} aria-label="编辑消息内容" /><div className="chat-edit-actions"><button type="button" className="chat-edit-cancel" onClick={cancelEdit}>取消</button><button type="button" className="chat-edit-save" onClick={saveEdit} disabled={!editValue.trim()}>发送修改</button></div></div>
-      : <div className="chat-text"><UserMessageContent text={message.content} /></div>}{actions}</div><button type="button" className="chat-avatar user-avatar user-avatar-btn" onClick={onAvatarClick} aria-label="更换头像">{avatar ? <img src={`data:${avatar.mime};base64,${avatar.base64}`} alt="头像" /> : <span>{userLabel.slice(0, 1).toUpperCase()}</span>}</button></div>
+      : <div className="chat-text"><UserMessageContent text={message.content} /></div>}{actions}</div><button type="button" className="chat-avatar user-avatar user-avatar-btn" onClick={onAvatarClick} aria-label="更换头像">{avatar ? <img src={`data:${avatar.mime};base64,${avatar.base64}`} alt="头像" /> : <span>{userLabel.slice(0, 1).toUpperCase()}</span>}</button>{longPressMenu ? <LongPressMenu x={longPressMenu.x} y={longPressMenu.y} onClose={() => setLongPressMenu(null)} onRegenerate={doRegenerateFromMenu} onCopy={doCopyFromMenu} /> : null}</div>
   }
   // AI 消息：一个回合 = 一条消息，内部按时间顺序分段（文字/工具调用连贯展示，不另起头像）
   const segments = 'segments' in message
@@ -1440,7 +1519,7 @@ const MessageBubble = memo(function MessageBubble({ message, messageIndex, isLas
   const legacyTools = 'toolCalls' in message
     ? (message.toolCalls ?? (message.toolCall ? [message.toolCall] : []))
     : []
-  return <div className="chat-row ai-row">
+  return <div className="chat-row ai-row" {...longPressHandlers}>
     <div className="chat-avatar ai-avatar"><LogoMark className="ai-avatar-mark" /></div>
     <div className="chat-body">
       <div className="chat-name">Daily AI</div>
@@ -1569,6 +1648,7 @@ const MessageBubble = memo(function MessageBubble({ message, messageIndex, isLas
       {lightbox ? <div className="image-lightbox" onClick={() => setLightbox(null)} role="dialog" aria-modal="true"><img src={lightbox} alt="生成图片大图" onClick={(event) => event.stopPropagation()} /><div className="image-lightbox-actions"><a className="os-button os-button-primary" href={lightbox} download target="_blank" rel="noreferrer"><Download size={14} />下载原图</a><button type="button" className="os-button os-button-quiet" onClick={() => setLightbox(null)}>关闭</button></div></div> : null}
       {actions}
     </div>
+    {longPressMenu ? <LongPressMenu x={longPressMenu.x} y={longPressMenu.y} onClose={() => setLongPressMenu(null)} onRegenerate={doRegenerateFromMenu} onCopy={doCopyFromMenu} /> : null}
   </div>
 }, (prev, next) => prev.message === next.message && prev.isLast === next.isLast && prev.messageIndex === next.messageIndex)
 
