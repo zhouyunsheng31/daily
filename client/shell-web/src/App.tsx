@@ -1274,6 +1274,8 @@ function useSwipeNavigation(onSwipeLeft: () => void, onSwipeRight: () => void) {
   // 触摸起点落在这些容器内 → 忽略本次手势。
   const isHorizScrollContainer = (target: EventTarget | null): boolean => {
     if (!(target instanceof Element)) return false
+    // 【2026-08-22 会话侧栏】侧栏内滑动是列表滚动/遮罩点击关闭意图，不触发切页手势
+    if (target.closest?.('.conv-sidebar, .conv-sidebar-backdrop')) return true
     return Boolean(target.closest?.('.md-content pre, .md-table-wrap, .md-latex-block'))
   }
   const onTouchStart = (event: React.TouchEvent): void => {
@@ -1974,10 +1976,10 @@ function AssistantHome({ onOpenLogin }: { onOpenLogin: () => void }) {
     }
   }
 
-  // AI 对话页左滑 → 桌面（右侧边缘右滑回 AI 由 DesktopView 的边缘热区处理）
+  // AI 对话页左滑 → 桌面；右滑 → 打开会话列表（2026-08-22）
   const swipe = useSwipeNavigation(
     () => setView('desktop'),
-    () => { /* assistant 是第一页，无上一页 */ },
+    () => setConvSidebar(true),
   )
   // 只在用户处于底部附近时自动跟随（向上翻阅历史时绝不抢滚动，避免抖动）
   useEffect(() => {
@@ -2045,7 +2047,7 @@ function AssistantHome({ onOpenLogin }: { onOpenLogin: () => void }) {
   const greetingWord = hour < 6 ? '夜深了' : hour < 12 ? '早上好' : hour < 14 ? '中午好' : hour < 18 ? '下午好' : '晚上好'
   const displayName = loggedIn ? (session.user.username?.trim() || accountLabel) : ''
   return <section className="os-screen assistant-screen" {...swipe}>
-    <header className="assistant-header"><div className="daily-wordmark"><LogoMark className="wordmark-mark" /><strong>Daily</strong></div><div className="assistant-header-actions"><button className="balance-chip" onClick={() => setView('profile')} aria-label="AI 用量"><CircleDollarSign size={13} /><span>{formatCredits(totalRemainingCredits(guest))}</span></button><button className="desktop-nav-button" onClick={() => setView('desktop')} aria-label="进入系统桌面"><Grid2X2 size={13} /><span>桌面</span></button>{loggedIn ? <button className={`avatar-button ${session.user.role === 'admin' ? 'avatar-button-admin' : ''}`} onClick={openAccount} aria-label="个人主页"><span className="avatar-mini">{(session.user.username?.trim() || accountLabel).slice(0, 1).toUpperCase()}</span><span className="account-name">{session.user.username?.trim() || accountLabel}</span></button> : <button className="account-button account-button-out" onClick={openAccount}><KeyRound size={13} /><span>登录</span></button>}</div></header>
+    <header className="assistant-header"><div className="daily-wordmark" role="button" tabIndex={0} aria-label="打开会话列表" onClick={() => setConvSidebar(true)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setConvSidebar(true) } }}><LogoMark className="wordmark-mark" /><strong>Daily</strong></div><div className="assistant-header-actions"><button className="balance-chip" onClick={() => setView('profile')} aria-label="AI 用量"><CircleDollarSign size={13} /><span>{formatCredits(totalRemainingCredits(guest))}</span></button><button className="desktop-nav-button" onClick={() => setView('desktop')} aria-label="进入系统桌面"><Grid2X2 size={13} /><span>桌面</span></button>{loggedIn ? <button className={`avatar-button ${session.user.role === 'admin' ? 'avatar-button-admin' : ''}`} onClick={openAccount} aria-label="个人主页"><span className="avatar-mini">{(session.user.username?.trim() || accountLabel).slice(0, 1).toUpperCase()}</span><span className="account-name">{session.user.username?.trim() || accountLabel}</span></button> : <button className="account-button account-button-out" onClick={openAccount}><KeyRound size={13} /><span>登录</span></button>}</div></header>
     {<div className={`conv-title-bar ${messages.length > 0 && currentConv ? '' : 'conv-title-bar-hidden'}`}><span className="conv-title-name"><MessageSquareText size={12} /><span>{currentConv?.title || '新会话'}</span></span>{currentConv && currentConv.usedTokens > 0 ? <span className="conv-title-tokens">{formatTokens(currentConv.usedTokens)}</span> : null}</div>}
     <div className="assistant-scroll" ref={scrollRef} onScroll={onScroll}>
       {messages.length === 0 ? <>

@@ -395,7 +395,8 @@ button:disabled { cursor: not-allowed; }
 /* Assistant home */
 .assistant-screen { background: linear-gradient(180deg, #faf9f5 0%, #f4f2ec 100%); }
 .assistant-header { min-height: 65px; display: flex; align-items: center; justify-content: space-between; padding: calc(var(--safe-top, 36px) + 8px) 18px 6px; }
-.daily-wordmark { display: flex; align-items: flex-end; gap: 7px; }
+.daily-wordmark { display: flex; align-items: flex-end; gap: 7px; cursor: pointer; }
+.daily-wordmark:active { opacity: .72; }
 .wordmark-mark { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 9px; color: #fff; background: var(--ink); font-size: 12px; font-weight: 800; }
 .daily-wordmark strong { margin-bottom: 1px; font-size: 17px; letter-spacing: -.045em; }
 .daily-wordmark small { margin: 0 0 2px -3px; color: var(--muted); font-size: 7px; font-weight: 750; letter-spacing: .08em; }
