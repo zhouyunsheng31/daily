@@ -427,6 +427,9 @@ function thumbUrl(url: string, width: number): string {
 // ---------------------------------------------------------------------------
 const MAX_PASTED_IMAGES = 8
 const MAX_PASTED_IMAGE_EDGE = 2048
+// 2026-08-21 兜底：与服务端 MAX_MESSAGE_LENGTH 对齐（server/src/routes/webos.ts = 12000）。
+// 异常情况下（如 base64 文本被误粘贴）content 超长时阻止发送并提示。
+const MAX_MESSAGE_LENGTH = 12_000
 
 interface PendingImage {
   id: string
@@ -474,9 +477,36 @@ async function compressPastedImage(file: File): Promise<string> {
   canvas.height = height
   const ctx = canvas.getContext('2d')
   if (!ctx) return dataUrl
-  ctx.drawImage(image, 0, 0, width, height)
   const keepAlpha = /^image\/(png|webp)$/i.test(file.type) || /\.(png|webp)$/i.test(file.name)
+  return compressImageDataUrl(dataUrl, keepAlpha)
+}
+/** 压缩 data URL 图片（最长边缩到 MAX_PASTED_IMAGE_EDGE，默认 JPEG 0.82） */
+async function compressImageDataUrl(dataUrl: string, keepAlpha: boolean): Promise<string> {
+  const image = await loadImageElement(dataUrl)
+  const maxEdge = MAX_PASTED_IMAGE_EDGE
+  let width = image.naturalWidth || image.width
+  let height = image.naturalHeight || image.height
+  if (width <= 0 || height <= 0) return dataUrl
+  if (width > maxEdge || height > maxEdge) {
+    const scale = Math.min(maxEdge / width, maxEdge / height)
+    width = Math.max(1, Math.round(width * scale))
+    height = Math.max(1, Math.round(height * scale))
+  }
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return dataUrl
+  ctx.drawImage(image, 0, 0, width, height)
   return canvas.toDataURL(keepAlpha ? 'image/png' : 'image/jpeg', 0.82)
+}
+/** 从剪贴板文本中提取 data:image base64 图片（部分环境图片以 text/plain 形式进入剪贴板） */
+function extractPastedImageDataUrls(text: string): string[] {
+  const re = /data:image\/(png|jpe?g|webp|gif|bmp);base64,[A-Za-z0-9+/=]+/gi
+  const urls: string[] = []
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) urls.push(m[0])
+  return urls
 }
 
 /** 用户消息里的 data URI 图片 Markdown 渲染为缩略图，避免把 base64 明文展示在气泡里 */
@@ -1871,17 +1901,71 @@ function AssistantHome({ onOpenLogin }: { onOpenLogin: () => void }) {
     setPastedImages((prev) => prev.filter((image) => image.id !== id))
   }
   const handleComposerPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
+    // 2026-08-21 修复：部分环境（Android WebView、部分桌面浏览器）clipboardData.files
+    // 为空，但图片以 clipboardData.items + getAsFile() 可读。若只读 files 会漏判，
+    // 导致浏览器默认把 base64 纯文本插入 textarea → 输入框爆掉 → AI 请求失败。
     const files = Array.from(event.clipboardData?.files ?? [])
-    if (files.some(isSupportedImageFile)) {
+    const itemFiles = Array.from(event.clipboardData?.items ?? [])
+      .map((item) => item.getAsFile())
+      .filter((f): f is File => f !== null)
+    const allFiles = [...files, ...itemFiles]
+    let text = ''
+    try { text = event.clipboardData?.getData('text/plain') ?? '' } catch { /* 部分环境禁止读取剪贴板文本 */ }
+    const textImageUrls = extractPastedImageDataUrls(text)
+    if (allFiles.some(isSupportedImageFile) || textImageUrls.length > 0) {
+      // 阻止默认行为：不让图片 base64 文本落进 textarea
       event.preventDefault()
-      void addImageFiles(files)
+      if (allFiles.some(isSupportedImageFile)) {
+        void addImageFiles(allFiles)
+      } else if (textImageUrls.length > 0) {
+        // 图片以 data:image base64 文本进入剪贴板：转成附件（压缩后入队）
+        void (async () => {
+          const room = MAX_PASTED_IMAGES - pastedImages.length
+          if (room <= 0) { setNotice(`最多同时发送 ${MAX_PASTED_IMAGES} 张图片`); return }
+          const items: PendingImage[] = []
+          for (const url of textImageUrls.slice(0, room)) {
+            try {
+              const keepAlpha = /^data:image\/(png|webp);base64,/i.test(url)
+              const compressed = await compressImageDataUrl(url, keepAlpha)
+              items.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, name: 'pasted.png', dataUrl: compressed })
+            } catch { /* 单张失败跳过 */ }
+          }
+          if (items.length > 0) setPastedImages((prev) => [...prev, ...items].slice(0, MAX_PASTED_IMAGES))
+        })()
+      }
     }
   }
   const handleComposerDrop = (event: React.DragEvent<HTMLFormElement>): void => {
+    // 2026-08-21 修复：与 handleComposerPaste 同理，部分环境 dataTransfer.files 为空
+    // 但 items 可读，需从 items + getAsFile() 补捞图片，避免 base64 文本落进输入框。
     const files = Array.from(event.dataTransfer?.files ?? [])
-    if (files.some(isSupportedImageFile)) {
+    const itemFiles = Array.from(event.dataTransfer?.items ?? [])
+      .map((item) => item.getAsFile())
+      .filter((f): f is File => f !== null)
+    const allFiles = [...files, ...itemFiles]
+    let text = ''
+    try { text = event.dataTransfer?.getData('text/plain') ?? '' } catch { /* 部分环境禁止读取拖拽文本 */ }
+    const textImageUrls = extractPastedImageDataUrls(text)
+    if (allFiles.some(isSupportedImageFile) || textImageUrls.length > 0) {
       event.preventDefault()
-      void addImageFiles(files)
+      if (allFiles.some(isSupportedImageFile)) {
+        void addImageFiles(allFiles)
+      } else if (textImageUrls.length > 0) {
+        // 拖拽文本中带 data:image base64 图片：转成附件
+        void (async () => {
+          const room = MAX_PASTED_IMAGES - pastedImages.length
+          if (room <= 0) { setNotice(`最多同时发送 ${MAX_PASTED_IMAGES} 张图片`); return }
+          const items: PendingImage[] = []
+          for (const url of textImageUrls.slice(0, room)) {
+            try {
+              const keepAlpha = /^data:image\/(png|webp);base64,/i.test(url)
+              const compressed = await compressImageDataUrl(url, keepAlpha)
+              items.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, name: 'pasted.png', dataUrl: compressed })
+            } catch { /* 单张失败跳过 */ }
+          }
+          if (items.length > 0) setPastedImages((prev) => [...prev, ...items].slice(0, MAX_PASTED_IMAGES))
+        })()
+      }
     }
   }
   const handleComposerDragOver = (event: React.DragEvent<HTMLFormElement>): void => {
@@ -1934,6 +2018,15 @@ function AssistantHome({ onOpenLogin }: { onOpenLogin: () => void }) {
     const content = pastedImages.length > 0
       ? `${text}${text ? '\n' : ''}${pastedImages.map((image, index) => `\n![图片${index + 1}](${image.dataUrl})`).join('')}`
       : text
+    // 2026-08-21 兜底：若异常情况下（如 base64 文本被误粘贴）content 超长，
+    // 阻止发送并提示，避免 AI 请求因超长/非法内容失败（服务端 MAX_MESSAGE_LENGTH=12000）。
+    // 带 data URI 图片的消息不在此限：服务端识别后走 MAX_MEDIA_MESSAGE_LENGTH(128MB)，
+    // 图片附件是正常发送链路，不能被本地 12k 兜底误拦。
+    const hasMediaDataUri = /data:image\/[a-z0-9.+-]+;base64,/i.test(content)
+    if (!hasMediaDataUri && content.length > MAX_MESSAGE_LENGTH) {
+      useShellStore.getState().setNotice('发送内容过长，请先清空输入框中的异常文本后再发送')
+      return
+    }
     void sendMessage(content)
     setPastedImages([])
     window.setTimeout(resizeComposer, 0)
