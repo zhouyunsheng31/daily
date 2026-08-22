@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
-### 2026-08-23 00:45 · 5692fa7 · 私有包直装支持一键 ZIP 解压/目录导入，接入后端运维工具并全量部署上线
+### 2026-08-23 00:45 · ef5b13d · 私有包直装支持一键 ZIP 解压/目录导入，接入后端运维工具并全量部署上线
 
 **修改文件路径**：
 - `client/shell-web/package.json`
