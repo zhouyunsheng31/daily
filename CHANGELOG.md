@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-22 22:45 · feat(package-market): 建立包体系与市场通用开发指南并开放前端设置入口
+
+**修改文件路径**：
+- `.pi/skills-webos/package-market/SKILL.md`
+- `docs/routes/web/10-package-market-guide.md`
+- `client/shell-web/src/App.tsx`
+- `CHANGELOG.md`
+
+**改动内容**：
+1. **包体系与市场全景通用规范（Universal AI & Developer Spec）**：
+   - 编写 `.pi/skills-webos/package-market/SKILL.md` 与 `docs/routes/web/10-package-market-guide.md`；
+   - 覆盖 13 种包类型结构、`daily.pkg.json v2` Manifest 契约、`api.json` 声明、受限 Node vm handler 沙箱编写规范、权限四交集模型、出站域名白名单、标准 HTTP 上传与市场发布/安装端点（POST `/webos/api/packages`、POST `/webos/api/market/publish` 等）；
+   - 去平台特化：使任何外部 AI（Claude Code / Cursor / Windsurf / GPT）以及人类开发者均可直接阅读并无缝开发与上架 Daily webOS 兼容包。
+2. **前端个人主页/设置开放入口（PackageMarketGuideCenter）**：
+   - 在 `client/shell-web/src/App.tsx` 中的 `ProfileView` 新增「包体系与市场开发」卡片入口；
+   - 实现全屏 `PackageMarketGuideCenter` 文档中心组件，支持按「Manifest 清单 / 13 种包类型 / App API / 市场 HTTP 接口 / 安全自检清单」选项卡浏览，并支持一键复制模版代码。
+3. **验证**：
+   - `client/shell-web` 执行 `npm run build`（`tsc -b && vite build`）通过，产出正常；
+   - `server` 执行 `npm run build`（`tsc`）通过。
+
+---
+
 ### 2026-08-22 11:16 · 7ee65c2 · 移除消息长按操作菜单（回退清除）
 **修改文件路径**：
 - `client/shell-web/src/App.tsx`

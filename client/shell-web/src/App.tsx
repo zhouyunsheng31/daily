@@ -6,6 +6,7 @@ import {
   AlertCircle,
   ArrowLeft,
   ArrowRight,
+  BookOpen,
   Bot,
   Check,
   ChevronDown,
@@ -22,6 +23,7 @@ import {
   FileText,
   Folder,
   Gauge,
+  Globe,
   Grid2X2,
   HardDrive,
   Heart,
@@ -3031,6 +3033,8 @@ function ProfileView({ onOpenLogin }: { onOpenLogin: () => void }) {
   const redeemInputRef = useRef<HTMLInputElement | null>(null)
   // 2026-08-21 W2：我的 API 包 → 文档/在线调试（owner 级全屏页）
   const [apiCenterOpen, setApiCenterOpen] = useState<boolean>(false)
+  // 包体系与统一市场开发者指南全屏页
+  const [guideOpen, setGuideOpen] = useState<boolean>(false)
   useEffect(() => {
     let cancelled = false
     getCreditsHistory(30)
@@ -3159,6 +3163,30 @@ function ProfileView({ onOpenLogin }: { onOpenLogin: () => void }) {
 
     {afdianOpen ? <AfdianView onBack={() => setAfdianOpen(false)} /> : null}
     {apiCenterOpen ? <AppApiCenter onBack={() => setApiCenterOpen(false)} /> : null}
+    {guideOpen ? <PackageMarketGuideCenter onBack={() => setGuideOpen(false)} /> : null}
+
+    <Surface className="settings-card">
+      <div className="card-heading">
+        <div>
+          <Eyebrow>DEVELOPER & PACKAGES</Eyebrow>
+          <h2>包体系与市场开发</h2>
+        </div>
+        <BookOpen size={18} />
+      </div>
+      <p className="muted-copy" style={{ marginTop: 8, marginBottom: 2 }}>
+        面向人类开发者与各类外部 AI（Claude Code / Cursor / Windsurf / GPT）的通用开发规范：13 种包类型、Manifest、App API 与统一市场。
+      </p>
+      <button className="link-row" onClick={() => setGuideOpen(true)}>
+        <span className="setting-icon blue">
+          <BookOpen size={16} />
+        </span>
+        <span className="setting-copy">
+          <strong>包体系与市场开发指南</strong>
+          <small>daily.pkg.json v2 规范 · 13 种包类型 · App API · 统一市场 REST 接口</small>
+        </span>
+        <ChevronRight size={16} />
+      </button>
+    </Surface>
 
     <Surface className="settings-card"><div className="card-heading"><div><Eyebrow>CONTACT</Eyebrow><h2>联系站长 · 分享讨论</h2></div><MessageCircle size={18} /></div><p className="muted-copy">遇到问题、想要更多额度，或想一起交流玩法与想法，欢迎加站长：</p><div className="contact-row"><span className="setting-icon ink"><MessageCircle size={16} /></span><span className="setting-copy"><strong>QQ</strong><small>2893334965 · 加好友时备注「Daily」</small></span></div><div className="contact-row"><span className="setting-icon blue"><MessageCircle size={16} /></span><span className="setting-copy"><strong>微信</strong><small>fangyan876 · 额度 / 购买相关</small></span></div></Surface>
 
@@ -3354,6 +3382,282 @@ function AppApiCenter({ onBack }: { onBack: () => void }) {
           </div>}
     </div>
   </section>
+}
+
+/* ============================================================================ */
+/* 包体系与统一市场开发者指南（通用全景文档）                                    */
+/* ============================================================================ */
+function PackageMarketGuideCenter({ onBack }: { onBack: () => void }) {
+  const [tab, setTab] = useState<'manifest' | 'types' | 'api' | 'http' | 'checklist'>('manifest')
+  const [copiedKey, setCopiedKey] = useState<string | null>(null)
+
+  const copyCode = (key: string, text: string) => {
+    void copyTextToClipboard(text).then((ok) => {
+      if (ok) {
+        setCopiedKey(key)
+        window.setTimeout(() => setCopiedKey(null), 1500)
+      }
+    })
+  }
+
+  const manifestExample = `{
+  "schema_version": 2,
+  "id": "com.example.myapp",
+  "type": "app",
+  "version": "1.0.0",
+  "entry": "index.html",
+  "display_name": { "zh": "我的应用", "en": "My App" },
+  "description": { "zh": "应用描述说明", "en": "App description" },
+  "icon": "icon.svg",
+  "capabilities": ["app.storage.private"],
+  "network": { "domains": ["api.example.com"] },
+  "dependencies": [{ "id": "com.daily.audio-tools", "range": "^1.0.0" }],
+  "contents": {
+    "skills": ["skills/guide/SKILL.md"],
+    "mcp": [],
+    "tools": ["tools/helper.js"],
+    "tokens": {},
+    "assets": ["assets/icon.png"]
+  },
+  "children": [],
+  "minShell": "0.1.0"
+}`
+
+  const apiJsonExample = `{
+  "schema_version": 1,
+  "namespace": "todo",
+  "display_name": { "zh": "待办清单服务" },
+  "network": { "domains": ["api.todo-cloud.com"] },
+  "secrets": ["TODO_AUTH_TOKEN"],
+  "endpoints": [
+    {
+      "name": "list_todos",
+      "method": "GET",
+      "path": "/items",
+      "description": { "zh": "获取待办列表" },
+      "params": {
+        "type": "object",
+        "properties": { "completed": { "type": "boolean" } }
+      },
+      "storage": { "read": ["todos/*"], "write": [] },
+      "handler": "handlers/list_items.js",
+      "returns": { "type": "object" },
+      "visibility": "public"
+    }
+  ]
+}`
+
+  const handlerExample = `// handlers/list_items.js (受限 Node vm 沙箱，无 process/require/fs)
+async function main(ctx) {
+  const { completed } = ctx.params || {};
+  const allTodos = await ctx.storage.get('todos/list') || [];
+  const result = typeof completed === 'boolean'
+    ? allTodos.filter(item => item.completed === completed)
+    : allTodos;
+  return { ok: true, data: result };
+}`
+
+  return (
+    <section className="os-screen system-screen">
+      <ScreenHeader
+        title="包体系与市场开发指南"
+        subtitle="Universal AI & Developer Spec"
+        onBack={onBack}
+        right={<BookOpen size={18} />}
+      />
+      <div className="system-scroll">
+        <div className="system-intro">
+          <Eyebrow>DEVELOPER DOCUMENTATION</Eyebrow>
+          <h1>包体系与市场开发指南</h1>
+          <p>
+            Daily webOS「一切皆包 · 组合式包」统一规范：适用于平台内部 AI、任何外部 AI（Claude Code / Cursor / Windsurf / GPT）以及人类开发者。
+          </p>
+        </div>
+
+        <div className="thinking-options" style={{ marginBottom: 16 }}>
+          <button className={tab === 'manifest' ? 'selected' : ''} onClick={() => setTab('manifest')}>
+            <span>Manifest 清单</span>
+            <small>daily.pkg.json</small>
+          </button>
+          <button className={tab === 'types' ? 'selected' : ''} onClick={() => setTab('types')}>
+            <span>13 种包类型</span>
+            <small>app / api / skill...</small>
+          </button>
+          <button className={tab === 'api' ? 'selected' : ''} onClick={() => setTab('api')}>
+            <span>App API</span>
+            <small>api.json + handler</small>
+          </button>
+          <button className={tab === 'http' ? 'selected' : ''} onClick={() => setTab('http')}>
+            <span>市场 HTTP 接口</span>
+            <small>上传 / 发布 / 安装</small>
+          </button>
+          <button className={tab === 'checklist' ? 'selected' : ''} onClick={() => setTab('checklist')}>
+            <span>安全自检清单</span>
+            <small>沙箱与合规</small>
+          </button>
+        </div>
+
+        {tab === 'manifest' && (
+          <Surface className="settings-card">
+            <div className="card-heading">
+              <div>
+                <Eyebrow>MANIFEST SPEC V2</Eyebrow>
+                <h2>daily.pkg.json 规范</h2>
+              </div>
+              <IconButton label="复制示例" onClick={() => copyCode('manifest', manifestExample)}>
+                {copiedKey === 'manifest' ? <Check size={16} /> : <Copy size={16} />}
+              </IconButton>
+            </div>
+            <p className="muted-copy">每个包根目录下必须包含 daily.pkg.json（组合式包 v2 契约）：</p>
+            <pre className="file-preview-text" style={{ maxHeight: '420px', overflow: 'auto' }}>
+              {manifestExample}
+            </pre>
+          </Surface>
+        )}
+
+        {tab === 'types' && (
+          <Surface className="settings-card">
+            <div className="card-heading">
+              <div>
+                <Eyebrow>PACKAGE TYPES</Eyebrow>
+                <h2>13 种包类型速查</h2>
+              </div>
+              <Grid2X2 size={18} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+              {[
+                { type: 'app', entry: 'index.html', desc: '完整 HTML/CSS/JS 静态交互应用，在沙箱 WebView/iframe 运行' },
+                { type: 'api', entry: 'api.json', desc: '服务端受限 vm 执行的数据/计算服务，自动注册为 AI Tool' },
+                { type: 'skill', entry: 'SKILL.md', desc: '智能体提示词技能与操作规范，直接注入 Agent 上下文' },
+                { type: 'theme', entry: 'tokens 声明', desc: '全局 UI 设计变量、壁纸与色彩覆盖' },
+                { type: 'toolpkg', entry: 'main.js', desc: '自定义 JS 工具代码包，注册到 Agent 工具调用链' },
+                { type: 'bundle', entry: '无（纯组合容器）', desc: '多能力/多子包聚合分发容器，递归安装依赖闭包' },
+                { type: 'mcp', entry: 'contents.mcp', desc: '外部 MCP Server 服务桥接' },
+                { type: 'workflow', entry: 'workflow.json', desc: '多步骤自动化任务调度流程' },
+                { type: 'subagent', entry: 'agent.md', desc: '专职子智能体定义与独立进程池' },
+                { type: 'url-app', entry: 'url.startUrl', desc: '外部受信任网页封装（直连/快照）' },
+                { type: 'pet-layer', entry: 'index.html', desc: '桌面共享动态 Canvas / 互动组件图层' },
+                { type: 'provider', entry: 'provider.json', desc: 'AI 模型与外部服务接入配置' },
+                { type: 'model-pack', entry: '预设清单', desc: '模型预设与系统参数包' },
+              ].map((item) => (
+                <div key={item.type} className="link-row" style={{ alignItems: 'flex-start' }}>
+                  <span className="setting-icon blue" style={{ marginTop: 2 }}>
+                    <Code2 size={14} />
+                  </span>
+                  <span className="setting-copy">
+                    <strong>{item.type}</strong>
+                    <small>入口：{item.entry} · {item.desc}</small>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </Surface>
+        )}
+
+        {tab === 'api' && (
+          <>
+            <Surface className="settings-card">
+              <div className="card-heading">
+                <div>
+                  <Eyebrow>API SPECIFICATION</Eyebrow>
+                  <h2>api.json 声明</h2>
+                </div>
+                <IconButton label="复制示例" onClick={() => copyCode('apiJson', apiJsonExample)}>
+                  {copiedKey === 'apiJson' ? <Check size={16} /> : <Copy size={16} />}
+                </IconButton>
+              </div>
+              <pre className="file-preview-text" style={{ maxHeight: '300px', overflow: 'auto' }}>
+                {apiJsonExample}
+              </pre>
+            </Surface>
+            <Surface className="settings-card">
+              <div className="card-heading">
+                <div>
+                  <Eyebrow>SANDBOX HANDLER</Eyebrow>
+                  <h2>受限 Handler 编写</h2>
+                </div>
+                <IconButton label="复制示例" onClick={() => copyCode('handler', handlerExample)}>
+                  {copiedKey === 'handler' ? <Check size={16} /> : <Copy size={16} />}
+                </IconButton>
+              </div>
+              <pre className="file-preview-text" style={{ maxHeight: '200px', overflow: 'auto' }}>
+                {handlerExample}
+              </pre>
+            </Surface>
+          </>
+        )}
+
+        {tab === 'http' && (
+          <Surface className="settings-card">
+            <div className="card-heading">
+              <div>
+                <Eyebrow>REST API & PUBLISH</Eyebrow>
+                <h2>标准 HTTP 接口速查</h2>
+              </div>
+              <Globe size={18} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
+              <div className="privacy-row">
+                <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>POST /webos/api/packages</span>
+                <span>创建/批量上传包文件</span>
+              </div>
+              <div className="privacy-row">
+                <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>POST /webos/api/market/publish</span>
+                <span>将包发布上架到统一市场</span>
+              </div>
+              <div className="privacy-row">
+                <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>GET /webos/api/market?type=&q=</span>
+                <span>按类型与关键词浏览搜索市场</span>
+              </div>
+              <div className="privacy-row">
+                <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>POST /webos/api/market/:id/install</span>
+                <span>安装包并自动安装依赖闭包</span>
+              </div>
+            </div>
+          </Surface>
+        )}
+
+        {tab === 'checklist' && (
+          <Surface className="settings-card">
+            <div className="card-heading">
+              <div>
+                <Eyebrow>COMPLIANCE</Eyebrow>
+                <h2>AI 开发安全自检清单</h2>
+              </div>
+              <ShieldCheck size={18} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+              <div className="privacy-row">
+                <ShieldCheck size={15} />
+                <span>Manifest 的 id、version (SemVer)、type (13种之一) 必须合法</span>
+                <Check size={14} />
+              </div>
+              <div className="privacy-row">
+                <ShieldCheck size={15} />
+                <span>禁用 eval()、禁访内网 IP / localhost（防 SSRF）</span>
+                <Check size={14} />
+              </div>
+              <div className="privacy-row">
+                <ShieldCheck size={15} />
+                <span>API Handler 禁用 Node 模块，一律使用 ctx.* 沙箱接口</span>
+                <Check size={14} />
+              </div>
+              <div className="privacy-row">
+                <ShieldCheck size={15} />
+                <span>密钥严禁硬编码，走 api.json secrets 并在 handler 中脱敏读取</span>
+                <Check size={14} />
+              </div>
+              <div className="privacy-row">
+                <ShieldCheck size={15} />
+                <span>单包体积上限 10MB，HTML 素材一律使用相对路径</span>
+                <Check size={14} />
+              </div>
+            </div>
+          </Surface>
+        )}
+      </div>
+    </section>
+  )
 }
 
 function AppRuntime({ app }: { app: WebOsApp }) {
