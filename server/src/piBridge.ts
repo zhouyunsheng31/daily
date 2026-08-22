@@ -2373,6 +2373,7 @@ function registerDeepseekModels(
     baseUrl: effectiveBaseUrl,
     apiKey,
     models: [
+      flashModel('gemini-3.7-flash'),
       flashModel('deepseek-v4-flash-0731'),
       flashModel('deepseek-v4-flash'),
       {

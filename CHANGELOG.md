@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 02:45 · feat(model): 切换服务端模型提供商至 ChatST Gemini 3.7 Flash
+
+**修改文件路径**：
+- `server/src/piBridge.ts`
+- `CHANGELOG.md`
+
+**改动内容**：
+1. **模型适配扩展**：在 `server/src/piBridge.ts` 中的 `registerDeepseekModels` 注册列表新增 `gemini-3.7-flash` 模型映射。
+2. **服务端配置切换**：线上服务器 `.env` 配置切换为 ChatST 聚合网关（`https://api.chatst.org/v1`），生效模型 `deepseek/gemini-3.7-flash`。
+3. **验证**：线上 pm2 服务平滑重启，SSE 流式对话与工具调用接口验证通过。
+
 ### 2026-08-23 01:40 · b88843f · 彻底解决包校验严格拒识问题，引入 Manifest 自动容错自愈与精准错误定位
 
 **修改文件路径**：
