@@ -6066,6 +6066,9 @@ webosRouter.post('/chat/stream', async (req, res, next) => {
     }
     let usage: TokenUsage | null = null
     let failed = false
+    // 2026-08-22 部分输出截断标记：agent_end 异常但有可见输出时置真（不判失败），
+    // done 事件携带 truncated:true，前端提示「内容可能不完整」而不显示错误
+    let truncatedOutput = false
     // 2026-08-11 对话落库：保存 agent_end 的 messages，done/failed 时提取 AI 回复文本
     let lastAgentMessages: unknown = null
     const eventStats: Record<string, number> = {}
@@ -6173,19 +6176,38 @@ webosRouter.post('/chat/stream', async (req, res, next) => {
             const zeroUsage = (!lastUsage) || (Number(lastUsage.input ?? 0) === 0 && Number(lastUsage.output ?? 0) === 0)
             const emptyContent = !last.content || (Array.isArray(last.content) ? last.content.length === 0 : String(last.content).trim().length === 0)
             if (lastRole === 'assistant' && (lastStop === 'error' || (zeroUsage && emptyContent))) {
-              failed = true
-              const rawErr = String(last.errorMessage ?? '')
-              // 暂时性错误（DeepSeek 503 繁忙 / 429 限流）：保留会话上下文，
-              // 用户重试时能接着之前的对话继续，不丢记忆；仅标记本次失败。
-              const transient = /503|too busy|overload|capacity|429|rate\s*limit|temporar|繁忙|限流/i.test(rawErr)
-              if (transient) {
-                console.warn(`[webos] agent_end transient error (${rawErr.slice(0, 160)}), KEEPING session for ${principal.key.slice(0, 12)}`)
-                transientError = rawErr
+              // 2026-08-22 修复（部分输出被误判失败）：DeepSeek/pi 在工具执行中途
+              // 中断（agent_fs_write 大量写入/参数过长/上下文溢出）时，agent_end 的
+              // 最后一条 assistant 消息 content 可能为空/usage 为 0，但此前已通过
+              // message_update 输出了大量 thinking/tool 进度/部分 delta。此时若整轮
+              // 判 failed，前端表现为「输出到一半卡住 → 服务端发 error/done → UI
+              // 显示已结束但内容不全」。因此：**只要本轮已产生过任何用户可见事件
+              // （thinking/delta/tool），就不判空失败**——保留已输出内容，正常结束
+              // （不扣费逻辑仍由 usage/正常 done 路径处理），并把「可能被截断」的
+              // 提示附在 done 里，前端据此展示。
+              const hasAnyVisibleOutput = Object.keys(eventStats).some((k) =>
+                k !== 'agent_start' && k !== 'agent_end' && k !== 'turn_start' && k !== 'turn_end' && k !== 'message_start' && k !== 'message_end',
+              )
+              if (!hasAnyVisibleOutput) {
+                failed = true
+                const rawErr = String(last.errorMessage ?? '')
+                // 暂时性错误（DeepSeek 503 繁忙 / 429 限流）：保留会话上下文，
+                // 用户重试时能接着之前的对话继续，不丢记忆；仅标记本次失败。
+                const transient = /503|too busy|overload|capacity|429|rate\s*limit|temporar|繁忙|限流/i.test(rawErr)
+                if (transient) {
+                  console.warn(`[webos] agent_end transient error (${rawErr.slice(0, 160)}), KEEPING session for ${principal.key.slice(0, 12)}`)
+                  transientError = rawErr
+                } else {
+                  console.warn(`[webos] agent_end failed (stop=${lastStop} err=${rawErr.slice(0, 160)}), disposing sessions for ${principal.key.slice(0, 12)}`)
+                  try {
+                    disposeWebosSessions(principal.key, conversationId)
+                  } catch { /* ignore */ }
+                }
               } else {
-                console.warn(`[webos] agent_end failed (stop=${lastStop} err=${rawErr.slice(0, 160)}), disposing sessions for ${principal.key.slice(0, 12)}`)
-                try {
-                  disposeWebosSessions(principal.key, conversationId)
-                } catch { /* ignore */ }
+                // 有可见输出但 agent_end 异常：标记"可能截断"（不判失败），
+                // done 事件携带 truncated 提示，前端渲染时告知用户内容可能不完整
+                console.warn(`[webos] agent_end abnormal but has visible output (stop=${lastStop} err=${String(last.errorMessage ?? '').slice(0, 120)}), keeping output, mark truncated (${principal.key.slice(0, 12)})`)
+                truncatedOutput = true
               }
             }
           }
@@ -6378,6 +6400,7 @@ webosRouter.post('/chat/stream', async (req, res, next) => {
               usedCredits: Math.round(state.credits.used),
               remainingCredits: remainingCredits(state),
             },
+            ...(truncatedOutput ? { truncated: true } : {}),
           })
         } else {
           finishTaskStream(tKey, { type: 'error', code: 'WEBOS_AI_EMPTY_RESPONSE', message: 'AI 响应失败，请重发一次（本会话上下文已保留，不会丢失）。' })
@@ -6514,6 +6537,9 @@ webosRouter.post('/chat/stream', async (req, res, next) => {
           usedCredits: Math.round(state.credits.used),
           remainingCredits: remainingCredits(state),
         },
+        // 2026-08-22 部分输出截断提示：agent_end 异常但保留了可见输出时
+        // 标记 truncated，前端据此展示「内容可能不完整」而非正常完成
+        ...(truncatedOutput ? { truncated: true } : {}),
       })
       if (!res.writableEnded) { try { res.end() } catch { /* ignore */ } }
       return

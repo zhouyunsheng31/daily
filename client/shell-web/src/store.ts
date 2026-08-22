@@ -894,6 +894,26 @@ async function runConversationTurn(
         } else if (event.type === 'app_updated') {
           void useShellStore.getState().refreshBootstrap()
         } else if (event.type === 'done') {
+          // 2026-08-22 部分输出截断提示：服务端 agent_end 异常但保留了可见输出时
+          // done.truncated=true，在消息末尾追加提示段（不弹错误、不打断）
+          const doneEvent = event as { truncated?: boolean; usage?: unknown }
+          if (doneEvent.truncated === true) {
+            useShellStore.setState((state) => {
+              const conv = state.conversations.find((candidate) => candidate.id === convId)
+              if (!conv) return {}
+              const current = conv.messages
+              const last = current[current.length - 1]
+              if (!last || last.role !== 'assistant' || !('segments' in last)) return {}
+              const segments: UiSegment[] = [...last.segments, { type: 'error', content: '内容可能被中断，未完整输出。可点击「重新回答」重试。' }]
+              const nextMessages = [...current.slice(0, -1), { ...last, segments }]
+              return {
+                conversations: state.conversations.map((candidate) => candidate.id === convId
+                  ? { ...candidate, messages: nextMessages, updatedAt: Date.now() }
+                  : candidate),
+                messages: state.activeConversationId === convId ? nextMessages : state.messages,
+              }
+            })
+          }
           // 本会话累计 token += 本次真实消耗；同时更新顶部余额 chip（积分制）
           const usage = event.usage
           if (usage) {
