@@ -2139,12 +2139,13 @@ function AssistantHome({ onOpenLogin }: { onOpenLogin: () => void }) {
       </>}
     </div>
     <div className="composer-zone">
+      {/* 常驻隐藏文件输入：funbar「图片/文件」与 ➕ 菜单共用（2026-08-22 修复：此前挂在 composerMenu 条件块内，菜单未打开时 ref 为 null，导致输入框下方「图片」「文件」按钮点击无响应，只有「新建」可用） */}
+      <input ref={imageInputRef} type="file" accept="image/*" multiple hidden onChange={(event) => { if (event.target.files && event.target.files.length > 0) void addImageFiles(event.target.files); if (imageInputRef.current) imageInputRef.current.value = ''; setComposerMenu(false) }} />
+      <input ref={uploadInputRef} type="file" multiple hidden onChange={(event) => void onUploadFiles(event.target.files)} />
       {composerMenu ? <>
       <div className="composer-menu-backdrop" onClick={() => setComposerMenu(false)} aria-hidden="true" />
       <div className="composer-menu" role="menu" aria-label="更多功能">
-        <input ref={imageInputRef} type="file" accept="image/*" multiple hidden onChange={(event) => { if (event.target.files && event.target.files.length > 0) void addImageFiles(event.target.files); if (imageInputRef.current) imageInputRef.current.value = ''; setComposerMenu(false) }} />
         <button type="button" className="composer-menu-item" role="menuitem" onClick={() => imageInputRef.current?.click()}><ImagePlus size={16} /><span><strong>图片到对话</strong><small>选图发给 AI 看（不落盘，游客可用）</small></span></button>
-        <input ref={uploadInputRef} type="file" multiple hidden onChange={(event) => void onUploadFiles(event.target.files)} />
         <button type="button" className="composer-menu-item" role="menuitem" onClick={() => { setConvSidebar(true); setComposerMenu(false) }}><MessageSquareText size={16} /><span><strong>会话列表</strong><small>切换 · 新建 · 管理历史对话</small></span></button>
         <button type="button" className={`composer-menu-item ${uploadFailed ? 'composer-menu-item-fail' : uploadDone !== null ? 'composer-menu-item-done' : ''}`} role="menuitem" onClick={() => uploadInputRef.current?.click()} disabled={uploading}>{uploading ? <LoaderCircle className="spin" size={16} /> : uploadDone !== null ? <Check size={16} /> : uploadFailed ? <X size={16} /> : <Upload size={16} />}<span><strong>{uploading ? '上传中…' : uploadDone !== null ? `已上传 ${uploadDone} 个` : uploadFailed ? '上传失败' : '上传文件'}</strong><small>{uploadFailed ? '请稍后重试' : '图片 / 文档 / 音频 / 视频，AI 可直接使用'}</small></span></button>
         <button type="button" className="composer-menu-item" role="menuitem" onClick={() => { setShowHtmlImport(true); setComposerMenu(false) }}><Code2 size={16} /><span><strong>粘贴 HTML 创建 App</strong><small>把现成的 HTML 变成系统里的 App</small></span></button>
@@ -2168,7 +2169,7 @@ function AssistantHome({ onOpenLogin }: { onOpenLogin: () => void }) {
         {/* 2026-08-21 方案 A（用户选定）：功能内嵌输入框，图标+文字胶囊一眼看懂——
             图片 = 发到对话（AI 当场看图，游客可用）；文件 = 存入 home/uploads；新建 = 新会话 */}
         <div className="composer-funbar">
-          <button type="button" className="funbar-pill funbar-primary" onClick={() => imageInputRef.current?.click()}><ImagePlus size={13} />图片</button>
+          <button type="button" className="funbar-pill" onClick={() => imageInputRef.current?.click()}><ImagePlus size={13} />图片</button>
           <button type="button" className="funbar-pill" onClick={() => uploadInputRef.current?.click()}><Paperclip size={13} />文件</button>
           <button type="button" className="funbar-pill" onClick={() => { setComposerMenu(false); createConversation() }}><Plus size={13} />新建</button>
           <span className="funbar-spacer" />
