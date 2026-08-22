@@ -583,14 +583,21 @@ export async function createFromPaste(
 ): Promise<{ ok: boolean; feedback: string; id?: string }> {
   const cr = validatePackageManifest(input.manifest)
   if (!cr.ok) return { ok: false, feedback: formatIssues('新包', cr.issues) }
-  const m = input.manifest as Record<string, unknown>
+  const m = (cr.normalized ?? input.manifest) as Record<string, unknown>
+  const id = String(m.id)
+
   if (m.type === 'app') {
-    return { ok: false, feedback: 'type=app 的包请走 /webos/api/apps（文件夹即 App）或粘贴 HTML 生成' }
+    // 兼容统一包接口上传 app 类型：写入 apps/<id>/ 并注册 App
+    const root = getWorkspaceRoot(key)
+    const appDir = path.join(root, 'apps', id)
+    fs.mkdirSync(appDir, { recursive: true })
+    writeManifestAndFiles(appDir, m, input.files)
+    return { ok: true, feedback: `✅ 应用 apps/${id} 导入成功，已添加到桌面`, id }
   }
-  if (idMismatch(m, String(m.id))) {
+
+  if (idMismatch(m, id)) {
     return { ok: false, feedback: `manifest id 缺失或非法（${String(m.id ?? '')}）` }
   }
-  const id = String(m.id)
   const folderDir = packageDir(key, id)
   fs.mkdirSync(folderDir, { recursive: true })
   // 写 manifest + 可选文件（路径防穿越）

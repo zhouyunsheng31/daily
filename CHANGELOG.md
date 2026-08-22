@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 01:40 · fix(contract-validation): 彻底解决包校验严格拒识问题，引入 Manifest 自动容错自愈与精准错误定位
+
+**修改文件路径**：
+- `server/src/webos/contracts/index.ts`
+- `server/src/webos/packages/packages-service.ts`
+- `CHANGELOG.md`
+
+**改动内容**：
+1. **Manifest 宽松自愈与自动容错（normalizePackageManifest）**：
+   - 兼容纯字符串 `display_name` 与 `description`（自动转为多语言对象 `{ zh: ... }`），解决外部 AI 直觉写字符串导致的校验拒绝；
+   - 自动补全缺省的 `schema_version: 2`、`version: '1.0.0'` 以及 API 包缺省的 `api.spec`；
+   - 兼容依赖项字典结构（`{ "com.x": "^1.0" }` 自动转换为对象数组）；
+   - 自动过滤/忽略 `$schema` 等非标字段，避免 strict 校验拦截；
+2. **统一包接口放行 `type: 'app'` 静态应用**：
+   - `createFromPaste` 支持直接上传 `app` 类型包并自动建立应用与工作区镜像，消除突兀的类型拒绝；
+3. **精准人话错误定位**：
+   - 彻底废除“manifest 结构与 schema 不符”等模糊通用报错，利用 TypeBox 错误迭代器精准输出到字段路径与人话原因；
+4. **验证**：
+   - 多种宽松格式 Manifest 测试用例全部秒级通过，服务端构建与部署完成。
+
 ### 2026-08-23 01:25 · 8c0de04 · 增加开发者 API Token 凭证获取端点与前端一键查看/复制弹窗
 
 **修改文件路径**：
