@@ -1388,9 +1388,6 @@ const MessageBubble = memo(function MessageBubble({ message, messageIndex, isLas
   const longPressTimerRef = useRef<number | null>(null)
   const longPressTriggeredRef = useRef(false)
   const longPressOriginRef = useRef<{ x: number; y: number } | null>(null)
-  // 流式中的消息（最后一条且正在输出）不响应长按（用 ref 保持最新值）
-  const streamingNowRef = useRef(isLast && streaming)
-  streamingNowRef.current = isLast && streaming
   const clearLongPressTimer = (): void => {
     if (longPressTimerRef.current !== null) {
       window.clearTimeout(longPressTimerRef.current)
@@ -1398,8 +1395,7 @@ const MessageBubble = memo(function MessageBubble({ message, messageIndex, isLas
     }
   }
   const onLongPressStart = (event: React.MouseEvent | React.TouchEvent): void => {
-    // 已在流式生成中的消息不弹菜单（避免打断生成）；菜单已开则忽略
-    if (streamingNowRef.current) return
+    // 菜单已开则忽略（避免重复计时）
     if (longPressMenu) return
     longPressTriggeredRef.current = false
     const startX = 'touches' in event ? event.touches[0].clientX : event.clientX
@@ -1419,13 +1415,14 @@ const MessageBubble = memo(function MessageBubble({ message, messageIndex, isLas
     }
   }
   const onLongPressMove = (event: React.MouseEvent | React.TouchEvent): void => {
-    // 移动超过阈值视为滚动/取消长按
+    // 移动超过阈值视为滚动/取消长按（2026-08-22：阈值放宽到 24px，
+    // 移动端长按时手指轻微抖动常见，12px 过严导致菜单弹不出）
     if (longPressTimerRef.current === null) return
     const x = 'touches' in event ? event.touches[0].clientX : event.clientX
     const y = 'touches' in event ? event.touches[0].clientY : event.clientY
     if (longPressMenu) return
-    // 与按下的初始位置偏差超过 12px 则取消（长按期间手指滑动不触发）
-    if (Math.abs(x - (longPressOriginRef.current?.x ?? x)) > 12 || Math.abs(y - (longPressOriginRef.current?.y ?? y)) > 12) {
+    // 与按下的初始位置偏差超过 24px 则取消（长按期间手指滑动不触发）
+    if (Math.abs(x - (longPressOriginRef.current?.x ?? x)) > 24 || Math.abs(y - (longPressOriginRef.current?.y ?? y)) > 24) {
       clearLongPressTimer()
     }
   }
