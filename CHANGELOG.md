@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
-### 2026-08-23 03:02 · 1ade364 · 包体系校验体验全面改造（Validation UX Overhaul），实现分级反馈、API 自愈与 Schema 开放化
+### 2026-08-23 03:02 · a15decd · 包体系校验体验全面改造（Validation UX Overhaul），实现分级反馈、API 自愈与 Schema 开放化
 
 **修改文件路径**：
 - `shared/webos-contracts/packages/daily-pkg.schema.ts`
