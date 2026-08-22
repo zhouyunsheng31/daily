@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-22 23:05 · fix(perf-credits-sideload): 彻底解决高频字数闪烁、冷启动三连跳、积分倒涨显示异常并开放私有包直装 (Sideload)
+
+**修改文件路径**：
+- `client/shell-web/src/App.tsx`
+- `client/shell-web/src/api.ts`
+- `CHANGELOG.md`
+
+**改动内容**：
+1. **消除流式高频字数抖动与闪烁**：
+   - 彻底删除流式文本右下角跟随跳动的 `stream-count`（每 token 变动的数字）；
+   - 在 `ToolRunningStatus` 中移除参数生成阶段跳动的字符数字，改为平稳的「执行中…」，消除 DOM 持续重排与视觉晃动。
+2. **根除安卓端冷启动三连跳与假等待**：
+   - 移除 `App.tsx` 中对默认文字动画的 1.2 秒强制阻塞假等待（`durationMs: 1200`）；
+   - 只要服务端 bootstrap 数据就绪，立即进入主页，做到秒开直达。
+3. **修复积分显示倒涨与 0 扣费流水刷屏**：
+   - 进度条改用 `remainingPercent`（基于 `totalRemaining / (totalRemaining + used)`），剩余多时满格，消耗时平稳递减，彻底修复“积分越用进度条越满/倒涨”的视觉错觉；
+   - 过滤收支明细中 `costMinor === 0` 的零扣费记录，只展示产生实际积分变动的消费与充值流水。
+4. **开放前端私有包直装（Sideload）与 API 通道**：
+   - 在前端设置页与开发指南中心新增「导入私有包（Sideload 直装）」入口及 `PackageSideloadModal` 弹窗；
+   - 支持直接粘贴/填写 Manifest 与代码文件一键部署至工作区（`packages/<id>/`），0 审核、绕过公共市场直接激活使用。
+5. **验证**：
+   - `client/shell-web` 与 `server` 全部构建通过。
+
+---
+
 ### 2026-08-22 22:45 · eeba85d · 建立包体系与市场通用开发指南并开放前端设置入口
 
 **修改文件路径**：

@@ -58,7 +58,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import type { WebOsApp, WebOsPayOrder, WebOsThinkingLevel } from '@shared/webos-contracts'
-import { blobToBase64, agentWorkspaceFileRawUrl, changePassword, createApp, createPayOrder, createSystemShare, deleteWorkspaceFile, fetchShareMeta, getAppDetail, getAppStorage, getCreditsHistory, getEmailPuzzle, getPayOrder, listAgentWorkspaceFiles, listWorkspaceFiles, loginWithEmail, readAgentWorkspaceTextFile, redeemAfdianCode, registerWithEmail, resetPassword, sendAuthEmailCodeWithPuzzle, shareAppToFriend, storeExportUrl, storeGet, storeInstall, storeList, storeMy, storePublish, storeSkillInstall, storeSkillPublish, storeSkillsList, storeSkillsMine, storeSkillsMy, storeSkillUnpublish, storeUnpublish, storeVisit, updateDisplayName, uploadAvatar, uploadWorkspaceFile, uploadWorkspaceFileLarge, workspaceFileRawUrl, invokeAppApi, getAppApiSpec, listPackages, marketList, marketDetail, marketInstall, marketMine, marketApps, type CreditsHistoryItem, type RedeemResult, type StoreAppItem, type WebOsPackageListItem, type WebOsWorkspaceEntry } from './api'
+import { blobToBase64, agentWorkspaceFileRawUrl, changePassword, createApp, createPackage, createPayOrder, createSystemShare, deleteWorkspaceFile, fetchShareMeta, getAppDetail, getAppStorage, getCreditsHistory, getEmailPuzzle, getPayOrder, listAgentWorkspaceFiles, listWorkspaceFiles, loginWithEmail, readAgentWorkspaceTextFile, redeemAfdianCode, registerWithEmail, resetPassword, sendAuthEmailCodeWithPuzzle, shareAppToFriend, storeExportUrl, storeGet, storeInstall, storeList, storeMy, storePublish, storeSkillInstall, storeSkillPublish, storeSkillsList, storeSkillsMine, storeSkillsMy, storeSkillUnpublish, storeUnpublish, storeVisit, updateDisplayName, uploadAvatar, uploadWorkspaceFile, uploadWorkspaceFileLarge, workspaceFileRawUrl, invokeAppApi, getAppApiSpec, listPackages, marketList, marketDetail, marketInstall, marketMine, marketApps, type CreditsHistoryItem, type RedeemResult, type StoreAppItem, type WebOsPackageListItem, type WebOsWorkspaceEntry } from './api'
 import type { ChatConversation, UiChatMessage, UiSegment } from './store'
 import { createRuntimeChannel, createDesktopRuntime, createStoreRuntime, setRuntimeOpenApp, type DesktopRuntimeHandle, type StoreRuntimeHandle, type StoreSdkAdapters, type WebOsRuntimeHandle } from './runtime'
 import { copyTextToClipboard, useShellStore } from './store'
@@ -1338,21 +1338,9 @@ function useButtonFeedback(resetMs = 1600): [string | null, (label?: string) => 
   return [feedback, trigger]
 }
 
-/** 2026-08-06 工具执行状态。2026-08-11 融合设计（用户核心诉求：**实时字数**）：
- * - 参数生成阶段（progress 为纯数字）：chip 内显示唯一的跳动数字「↓ N」
- *   （N = AI 已生成参数字符数），平台墨色（--ink-soft，不要蓝色）；
- * - 参数写完进入真实执行：**不再显示任何数字**（只显示执行中…）——避免
- *   「↓N」与「已输出 N字」在同一位置交替闪现形成闪烁（用户反馈）；
- * - AI 输出文字阶段的字数由文字段自身的「N 字」流式计数负责（chat-text
- *   .stream-count），工具段不重复。
- * 数字宽度固定（min-width）防止位数变化引起布局抖动。 */
-function ToolRunningStatus({ done, ok, progress }: { done?: boolean; ok?: boolean; progress?: string }) {
+/** 2026-08-06 工具执行状态：稳定展示执行状态，不进行高频数字闪烁 */
+function ToolRunningStatus({ done, ok }: { done?: boolean; ok?: boolean; progress?: string }) {
   if (done) return <span className="tool-status">{ok ? '完成' : '失败'}</span>
-  const isCharCount = typeof progress === 'string' && /^\d+$/.test(progress)
-  if (isCharCount) {
-    // 参数生成中：唯一的数字（字数），固定宽度槽位防抖动
-    return <span className="tool-status tool-status-chars"><span className="tool-status-arrow">↓</span><b className="tool-status-num">{progress}</b></span>
-  }
   return <span className="tool-status">执行中…</span>
 }
 
@@ -1497,7 +1485,7 @@ const MessageBubble = memo(function MessageBubble({ message, messageIndex, isLas
             }
             if (segment.type === 'text') {
               const generating = isLast && streaming && index === lastTextIndex
-              return <div className="chat-text" key={index}>{generating ? <ThrottledMarkdown text={segment.content} streaming /> : <MarkdownContent text={segment.content} />}{generating && segment.content.length > 0 ? <span className="stream-count">{segment.content.length} 字</span> : null}</div>
+              return <div className="chat-text" key={index}>{generating ? <ThrottledMarkdown text={segment.content} streaming /> : <MarkdownContent text={segment.content} />}</div>
             }
             if (segment.type === 'html') {
               return <div className="chat-html-widget" key={index} style={{ height: segment.heightPx ?? 280 }}>
@@ -3035,6 +3023,8 @@ function ProfileView({ onOpenLogin }: { onOpenLogin: () => void }) {
   const [apiCenterOpen, setApiCenterOpen] = useState<boolean>(false)
   // 包体系与统一市场开发者指南全屏页
   const [guideOpen, setGuideOpen] = useState<boolean>(false)
+  // 私有包直装（Sideload）弹窗
+  const [sideloadOpen, setSideloadOpen] = useState<boolean>(false)
   useEffect(() => {
     let cancelled = false
     getCreditsHistory(30)
@@ -3054,7 +3044,9 @@ function ProfileView({ onOpenLogin }: { onOpenLogin: () => void }) {
   const quota = guest?.credits?.quota ?? 0
   const used = guest?.credits?.used ?? 0
   const remaining = guest?.credits?.remaining ?? 0
-  const usedPercent = quota > 0 ? Math.min(100, Math.round((used / quota) * 100)) : 0
+  const totalRemaining = guest?.credits?.totalRemaining ?? remaining
+  const totalPool = Math.max(quota, totalRemaining + used)
+  const remainingPercent = totalPool > 0 ? Math.max(0, Math.min(100, Math.round((totalRemaining / totalPool) * 100))) : 0
 
   const logout = async (): Promise<void> => {
     if (busy) return
@@ -3126,7 +3118,7 @@ function ProfileView({ onOpenLogin }: { onOpenLogin: () => void }) {
     <div className="name-edit"><span className="setting-copy"><strong>AI 对话中的称呼</strong><small>AI 会这样叫你（1-20 字）</small></span><div className="name-edit-row"><input className="login-input name-edit-input" maxLength={20} placeholder={session.user.username ?? '输入称呼'} value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} disabled={savingName} /><button type="button" className={`os-button os-button-quiet name-edit-save ${nameSaved ? 'os-button-done' : ''}`} disabled={savingName || nameSaved || !nameDraft.trim()} onClick={() => void saveDisplayName()}>{nameSaved ? <Check size={14} /> : savingName ? <LoaderCircle className="spin" size={14} /> : <Check size={14} />}{nameSaved ? '已保存' : savingName ? '保存中…' : '保存'}</button></div>{nameError ? <p className="html-import-error">{nameError}</p> : null}</div>
     <p className="muted-copy">你的 App、积分与设置保存在账号下；换设备用同一邮箱和密码登录即可恢复。</p><Button variant="quiet" onClick={() => void logout()} disabled={busy}><LogOut size={15} /> 退出登录（回到游客身份）</Button></> : <><p className="muted-copy">登录后获得 1000 积分 额度（游客 100 积分），游客资产会自动迁移到账号。</p><Button variant="quiet" onClick={onOpenLogin}><KeyRound size={15} /> 邮箱登录 / 注册</Button></>}</Surface>
 
-    <Surface className="settings-card"><div className="card-heading"><div><Eyebrow>AI USAGE</Eyebrow><h2>AI 使用情况</h2></div><Sparkles size={18} /></div><div className="token-hero"><span>剩余积分</span><strong>{formatCredits(guest?.credits?.totalRemaining ?? remaining)}</strong><small>常规额度 {formatCredits(quota)} · 已用 {formatCredits(used)}{guest?.credits?.permanent && guest.credits.permanent.remaining > 0 ? ` · 永久池 ${formatCredits(guest.credits.permanent.remaining)}` : ''}{guest?.credits?.monthly ? ` · ${guest.credits.monthly.planName} ${new Date(guest.credits.monthly.expiresAt).toLocaleDateString('zh-CN')} 到期` : ''}{billing?.peak ? ' · 高峰时段价格 ×2' : ''}</small></div><div className="token-bar"><span style={{ width: `${usedPercent}%` }} /></div><p className="muted-copy">{guest?.credits?.permanent && guest.credits.permanent.remaining > 0 ? '永久积分（尝鲜用量包）永不过期，优先消耗月卡/常规额度。' : remaining <= 0 ? '积分已用完。可订阅月卡或购买尝鲜用量包，或加站长微信 fangyan876 免费获取。' : `思考档越高消耗越快，用完即止，不会超额扣费。`}</p></Surface>
+    <Surface className="settings-card"><div className="card-heading"><div><Eyebrow>AI USAGE</Eyebrow><h2>AI 使用情况</h2></div><Sparkles size={18} /></div><div className="token-hero"><span>剩余积分</span><strong>{formatCredits(totalRemaining)}</strong><small>常规额度 {formatCredits(quota)} · 已用 {formatCredits(used)}{guest?.credits?.permanent && guest.credits.permanent.remaining > 0 ? ` · 永久池 ${formatCredits(guest.credits.permanent.remaining)}` : ''}{guest?.credits?.monthly ? ` · ${guest.credits.monthly.planName} ${new Date(guest.credits.monthly.expiresAt).toLocaleDateString('zh-CN')} 到期` : ''}{billing?.peak ? ' · 高峰时段价格 ×2' : ''}</small></div><div className="token-bar"><span style={{ width: `${remainingPercent}%` }} /></div><p className="muted-copy">{guest?.credits?.permanent && guest.credits.permanent.remaining > 0 ? '永久积分（尝鲜用量包）永不过期，优先消耗月卡/常规额度。' : remaining <= 0 ? '积分已用完。可订阅月卡或购买尝鲜用量包，或加站长微信 fangyan876 免费获取。' : `思考档越高消耗越快，用完即止，不会超额扣费。`}</p></Surface>
 
     {/* 2026-08-12 订阅与兑换卡：从个人中心底部上移到这里（显眼位置）；
         发货机制改为爱发电兑换码（用户主动输入兑换，不再依赖留言邮箱匹配） */}
@@ -3150,31 +3142,67 @@ function ProfileView({ onOpenLogin }: { onOpenLogin: () => void }) {
     </Surface>
 
     <Surface className="settings-card"><div className="card-heading"><div><Eyebrow>CREDITS</Eyebrow><h2>积分是怎么算的</h2></div><Coins size={18} /></div><p className="muted-copy"><strong>1 积分 = 0.01 元（1 分钱）</strong>，所有 AI 能力按真实成本折算成积分扣减，用完即止、不会超额扣费：</p><div className="credits-rule"><span className="setting-icon blue"><Sparkles size={15} /></span><span className="setting-copy"><strong>AI 对话</strong><small>按 token 计费，思考档越高消耗越快；高峰时段（9-12 / 14-18 点）×2</small></span></div><div className="credits-rule"><span className="setting-icon blue"><ImageIcon size={15} /></span><span className="setting-copy"><strong>AI 生图</strong><small>按生成 token 计费（约 2-4 积分/张）</small></span></div><div className="credits-rule"><span className="setting-icon blue"><Video size={15} /></span><span className="setting-copy"><strong>AI 视频</strong><small>官方价 5 折：768P 25 积分/秒、2K 40 积分/秒（4 秒 ≈ 100 积分）；视频处理免费</small></span></div><div className="credits-rule"><span className="setting-icon blue"><Search size={15} /></span><span className="setting-copy"><strong>AI 搜索</strong><small>5 积分/次（联网搜索 / 读网页 / 搜索问答）</small></span></div><p className="muted-copy">游客 100 积分，邮箱登录 1000 积分；额度用完可联系站长免费获取（测试阶段）。</p>
-      {history ? <div className="credits-history"><div className="credits-history-title"><span>最近收支</span><span>{history.length > 0 ? `${history.length} 条` : '暂无记录'}</span></div>{history.length === 0 ? <p className="muted-copy credits-history-empty">还没有收支记录——去和 AI 聊聊天吧</p> : <div className="credits-history-list">{history.map((item, idx) => (
-        <div className="credits-history-item" key={`${item.kind}-${item.createdAt}-${idx}`}>
-          <span className={`credits-kind credits-kind-${item.kind}`}>{item.kind === 'chat' ? '对话' : item.kind === 'image' ? '生图' : item.kind === 'video_ir' ? '增强' : item.kind === 'video_edit' ? '处理' : item.kind === 'recharge_pack' ? '充值' : item.kind === 'recharge_monthly' ? '月卡' : '视频'}</span>
-          <span className="credits-history-main"><strong>{item.label}</strong><small>{new Date(item.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}{item.detail ? ` · ${item.detail}` : ''}{item.status !== 'ok' ? ` · ${item.errorCode ?? item.status}` : ''}</small></span>
-          {item.costMinor < 0
-            ? <span className="credits-cost credits-cost-income">+{formatCredits(-item.costMinor)}</span>
-            : <span className={`credits-cost ${item.costMinor > 0 ? '' : 'credits-cost-free'}`}>{item.costMinor > 0 ? `-${formatCredits(item.costMinor)}` : '免费'}</span>}
-        </div>
-      ))}</div>}</div> : historyError ? <p className="muted-copy credits-history-empty">收支明细加载失败，请稍后刷新重试</p> : <p className="muted-copy credits-history-empty">正在加载收支明细…</p>}
+{history ? (() => {
+        const validHistory = history.filter((item) => item.costMinor !== 0)
+        return (
+          <div className="credits-history">
+            <div className="credits-history-title">
+              <span>最近收支</span>
+              <span>{validHistory.length > 0 ? `${validHistory.length} 条` : '暂无收支'}</span>
+            </div>
+            {validHistory.length === 0 ? (
+              <p className="muted-copy credits-history-empty">暂无扣费/充值记录</p>
+            ) : (
+              <div className="credits-history-list">
+                {validHistory.map((item, idx) => (
+                  <div className="credits-history-item" key={`${item.kind}-${item.createdAt}-${idx}`}>
+                    <span className={`credits-kind credits-kind-${item.kind}`}>
+                      {item.kind === 'chat' ? '对话' : item.kind === 'image' ? '生图' : item.kind === 'video_ir' ? '增强' : item.kind === 'video_edit' ? '处理' : item.kind === 'recharge_pack' ? '充值' : item.kind === 'recharge_monthly' ? '月卡' : item.kind === 'api' ? 'API' : '视频'}
+                    </span>
+                    <span className="credits-history-main">
+                      <strong>{item.label}</strong>
+                      <small>
+                        {new Date(item.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        {item.detail ? ` · ${item.detail}` : ''}
+                        {item.status !== 'ok' ? ` · ${item.errorCode ?? item.status}` : ''}
+                      </small>
+                    </span>
+                    {item.costMinor < 0 ? (
+                      <span className="credits-cost credits-cost-income">+{formatCredits(-item.costMinor)}</span>
+                    ) : (
+                      <span className="credits-cost">-{formatCredits(item.costMinor)}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })() : historyError ? <p className="muted-copy credits-history-empty">收支明细加载失败，请稍后刷新重试</p> : <p className="muted-copy credits-history-empty">正在加载收支明细…</p>}
     </Surface>
 
     {afdianOpen ? <AfdianView onBack={() => setAfdianOpen(false)} /> : null}
     {apiCenterOpen ? <AppApiCenter onBack={() => setApiCenterOpen(false)} /> : null}
-    {guideOpen ? <PackageMarketGuideCenter onBack={() => setGuideOpen(false)} /> : null}
+    {guideOpen ? <PackageMarketGuideCenter onBack={() => setGuideOpen(false)} onOpenSideload={() => setSideloadOpen(true)} /> : null}
+    {sideloadOpen ? (
+      <PackageSideloadModal
+        onClose={() => setSideloadOpen(false)}
+        onInstalled={() => {
+          void useShellStore.getState().refreshBootstrap()
+        }}
+      />
+    ) : null}
 
     <Surface className="settings-card">
       <div className="card-heading">
         <div>
           <Eyebrow>DEVELOPER & PACKAGES</Eyebrow>
-          <h2>包体系与市场开发</h2>
+          <h2>包体系与私有部署</h2>
         </div>
         <BookOpen size={18} />
       </div>
       <p className="muted-copy" style={{ marginTop: 8, marginBottom: 2 }}>
-        面向人类开发者与各类外部 AI（Claude Code / Cursor / Windsurf / GPT）的通用开发规范：13 种包类型、Manifest、App API 与统一市场。
+        支持 13 种包类型与 App API。既可查看开发文档，也可免进市场直接将私有包（运维、NAS、自定义 API）部署至个人工作区。
       </p>
       <button className="link-row" onClick={() => setGuideOpen(true)}>
         <span className="setting-icon blue">
@@ -3183,6 +3211,16 @@ function ProfileView({ onOpenLogin }: { onOpenLogin: () => void }) {
         <span className="setting-copy">
           <strong>包体系与市场开发指南</strong>
           <small>daily.pkg.json v2 规范 · 13 种包类型 · App API · 统一市场 REST 接口</small>
+        </span>
+        <ChevronRight size={16} />
+      </button>
+      <button className="link-row" onClick={() => setSideloadOpen(true)} style={{ marginTop: 6 }}>
+        <span className="setting-icon blue">
+          <Upload size={16} />
+        </span>
+        <span className="setting-copy">
+          <strong>导入私有包（Sideload 直装）</strong>
+          <small>0 审核 · 绕过市场 · 直接导入部署至私有工作区 packages/&lt;id&gt;/</small>
         </span>
         <ChevronRight size={16} />
       </button>
@@ -3387,7 +3425,7 @@ function AppApiCenter({ onBack }: { onBack: () => void }) {
 /* ============================================================================ */
 /* 包体系与统一市场开发者指南（通用全景文档）                                    */
 /* ============================================================================ */
-function PackageMarketGuideCenter({ onBack }: { onBack: () => void }) {
+function PackageMarketGuideCenter({ onBack, onOpenSideload }: { onBack: () => void; onOpenSideload?: () => void }) {
   const [tab, setTab] = useState<'manifest' | 'types' | 'api' | 'http' | 'checklist'>('manifest')
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
 
@@ -3463,7 +3501,20 @@ async function main(ctx) {
         title="包体系与市场开发指南"
         subtitle="Universal AI & Developer Spec"
         onBack={onBack}
-        right={<BookOpen size={18} />}
+        right={
+          onOpenSideload ? (
+            <button
+              type="button"
+              className="os-button os-button-quiet"
+              style={{ padding: '0 8px', fontSize: '11px', minHeight: '30px' }}
+              onClick={onOpenSideload}
+            >
+              <Upload size={13} style={{ marginRight: 2 }} /> 导入
+            </button>
+          ) : (
+            <BookOpen size={18} />
+          )
+        }
       />
       <div className="system-scroll">
         <div className="system-intro">
@@ -3472,6 +3523,13 @@ async function main(ctx) {
           <p>
             Daily webOS「一切皆包 · 组合式包」统一规范：适用于平台内部 AI、任何外部 AI（Claude Code / Cursor / Windsurf / GPT）以及人类开发者。
           </p>
+          {onOpenSideload ? (
+            <div style={{ marginTop: 10 }}>
+              <button type="button" className="os-button os-button-primary" onClick={onOpenSideload}>
+                <Upload size={14} style={{ marginRight: 4 }} /> 导入私有包（Sideload 0 审核直装）
+              </button>
+            </div>
+          ) : null}
         </div>
 
         <div className="thinking-options" style={{ marginBottom: 16 }}>
@@ -3599,7 +3657,7 @@ async function main(ctx) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
               <div className="privacy-row">
                 <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>POST /webos/api/packages</span>
-                <span>创建/批量上传包文件</span>
+                <span>创建/批量上传私有包（0 审核直装）</span>
               </div>
               <div className="privacy-row">
                 <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>POST /webos/api/market/publish</span>
@@ -3657,6 +3715,107 @@ async function main(ctx) {
         )}
       </div>
     </section>
+  )
+}
+
+/** 私有包直装导入弹窗（Sideload：绕过市场，0 审核直达私有工作区） */
+function PackageSideloadModal({
+  onClose,
+  onInstalled,
+}: {
+  onClose: () => void
+  onInstalled?: (pkgId: string) => void
+}) {
+  const [manifestText, setManifestText] = useState(`{
+  "schema_version": 2,
+  "id": "com.my.server-monitor",
+  "type": "api",
+  "version": "1.0.0",
+  "display_name": { "zh": "私有服务器监控 API" },
+  "network": { "domains": ["api.your-server.com"] },
+  "secrets": ["SERVER_TOKEN"],
+  "api": { "spec": "api.json" }
+}`)
+  const [filesText, setFilesText] = useState(`{
+  "api.json": "{\\n  \\"schema_version\\": 1,\\n  \\"namespace\\": \\"monitor\\",\\n  \\"display_name\\": { \\"zh\\": \\"服务器监控\\" },\\n  \\"endpoints\\": [\\n    {\\n      \\"name\\": \\"status\\",\\n      \\"method\\": \\"GET\\",\\n      \\"path\\": \\"/status\\",\\n      \\"handler\\": \\"handlers/status.js\\",\\n      \\"visibility\\": \\"owner\\"\\n    }\\n  ]\\n}",
+  "handlers/status.js": "async function main(ctx) {\\n  // 调私有服务器 HTTP 接口\\n  // const res = await ctx.http.get('https://api.your-server.com/metrics');\\n  return { ok: true, cpu: 15, memory: 48, status: 'healthy' };\\n}"
+}`)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [successMsg, setSuccessMsg] = useState<string | null>(null)
+
+  const submit = async () => {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    setSuccessMsg(null)
+    try {
+      const manifest = JSON.parse(manifestText.trim()) as unknown
+      let files: Record<string, string> | undefined = undefined
+      if (filesText.trim()) {
+        files = JSON.parse(filesText.trim()) as Record<string, string>
+      }
+      const res = await createPackage({ manifest, files })
+      if (res.ok) {
+        setSuccessMsg(`私有包 ${res.id} 导入成功！已部署至 packages/${res.id}/ 并激活。`)
+        if (onInstalled) onInstalled(res.id)
+        window.setTimeout(() => {
+          onClose()
+        }, 1200)
+      } else {
+        setError(res.feedback || '导入校验失败')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'JSON 格式解析失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="html-import-panel" style={{ maxWidth: '520px' }} onClick={(e) => e.stopPropagation()}>
+        <div className="panel-heading">
+          <strong>导入私有包（Sideload 直装）</strong>
+          <button type="button" aria-label="关闭" onClick={onClose}>
+            <X size={15} />
+          </button>
+        </div>
+        <p className="muted-copy" style={{ margin: '0 0 10px', fontSize: '11px' }}>
+          绕过公共市场与审核，直接将私有包（运维脚本、私有 API、私有 App）部署至你的个人工作区。
+        </p>
+        <label className="login-label" style={{ marginBottom: 4 }}>
+          Manifest (daily.pkg.json)
+        </label>
+        <textarea
+          className="html-import-code"
+          style={{ height: '140px', marginBottom: 10 }}
+          value={manifestText}
+          onChange={(e) => setManifestText(e.target.value)}
+          disabled={busy}
+        />
+        <label className="login-label" style={{ marginBottom: 4 }}>
+          源码文件表 JSON（键为相对路径，值为代码内容）
+        </label>
+        <textarea
+          className="html-import-code"
+          style={{ height: '140px' }}
+          value={filesText}
+          onChange={(e) => setFilesText(e.target.value)}
+          disabled={busy}
+        />
+        {error && <p className="html-import-error">{error}</p>}
+        {successMsg && <p style={{ color: 'var(--green)', fontSize: '11px', margin: '8px 0 0' }}>{successMsg}</p>}
+        <div className="panel-actions">
+          <button type="button" className="panel-cancel" onClick={onClose} disabled={busy}>
+            取消
+          </button>
+          <button type="button" className="panel-submit" onClick={() => void submit()} disabled={busy}>
+            {busy ? '导入校验中…' : '立即导入安装'}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -3862,13 +4021,9 @@ export default function App() {
     } catch { /* ignore */ }
   }, [ready])
 
-  // 定制加载页最短展示时长（2026-08-03）：bootstrap 就绪后，若加载页展示时间
-  // 不足 boot.durationMs（工作区 system/boot.json 可配，AI 可改），先保持加载页
-  // 到时长结束再进入主界面；boot.html 为空时同样生效（默认动画至少展示 1.2s）。
-  // 修复 2026-08-03：原实现用 effect cleanup 清 timer，setBootHeld(true) 触发重渲染后
-  // cleanup 清掉 timer 且新 effect 因 bootHeld=true 不再重设 → 永远卡在加载页。
-  // 现在用 bootScheduledRef 保证整个生命周期只调度一次，timer 存入 ref 不被 cleanup 清除。
-  const bootDurationMs = useShellStore((state) => state.bootConfig.durationMs)
+  // 定制加载页展示时长：仅当工作区存在定制 boot.html 时才执行展示等待；
+  // 默认情况下只要 bootstrap ready 立即进入主界面，秒开直达，拒绝假等待三连跳。
+  const bootConfig = useShellStore((state) => state.bootConfig)
   const [bootHeld, setBootHeld] = useState(false)
   const bootStartRef = useRef(Date.now())
   const bootScheduledRef = useRef(false)
@@ -3876,15 +4031,15 @@ export default function App() {
   useEffect(() => {
     if (!ready || bootScheduledRef.current) return
     bootScheduledRef.current = true
-    const wait = Math.max(0, (bootDurationMs || 0) - (Date.now() - bootStartRef.current))
+    if (!bootConfig?.html) return
+    const wait = Math.max(0, (bootConfig.durationMs || 0) - (Date.now() - bootStartRef.current))
     if (wait <= 60) return
     setBootHeld(true)
     bootTimerRef.current = window.setTimeout(() => {
       setBootHeld(false)
       bootTimerRef.current = null
     }, wait)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, bootDurationMs])
+  }, [ready, bootConfig])
 
   const showBootScreen = (booting && !ready) || bootHeld
 

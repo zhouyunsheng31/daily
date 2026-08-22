@@ -110,7 +110,7 @@ export function getBootstrap(timeoutMs?: number): Promise<WebOsBootstrap> {
 
 /** 2026-08-06 积分收支明细（个人中心）：对话/生图/视频消耗 + 爱发电充值到账（负数=收入） */
 export interface CreditsHistoryItem {
-  kind: 'chat' | 'image' | 'video' | 'video_ir' | 'video_edit' | 'recharge_pack' | 'recharge_monthly'
+  kind: 'chat' | 'image' | 'video' | 'video_ir' | 'video_edit' | 'recharge_pack' | 'recharge_monthly' | 'api'
   label: string
   costMinor: number
   status: string
@@ -870,6 +870,14 @@ export interface WebOsPackageListItem {
   activeVersionId: string | null
   createdAt: number
   updatedAt: number
+}
+
+/** 创建/粘贴直装私有包（无需经市场，0 审核直达用户工作区） */
+export function createPackage(payload: { manifest: unknown; files?: Record<string, string> }): Promise<{ ok: boolean; id: string; feedback?: string }> {
+  return request('/webos/api/packages', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }
 
 /** 包列表（W2）：type='api' 列出本人 api 包——「我的 API 包 → 文档/在线调试」入口 */
