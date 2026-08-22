@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-22：协作同步与部署纪律确立 + 远端主干多项关键健壮性提交合入
+
+**背景**：明确工作区最高执行纪律——开发完成后必须先拉取 GitHub 远端最新版本并合并验证，推送到 GitHub 后再部署至服务器；同时合入远端 4 个关于剪贴板容错、截断标记与智能自动续写的主干提交。
+
+**改动**
+1. **工作区最高纪律定稿（`AGENT.md`）**：
+   - 增加第 6 条「协作同步与部署纪律」：任务完成/上线前必先拉取 GitHub 最新版本完成本地合并与构建验证，再同步推送到 GitHub，最后进入服务器部署运行。
+2. **主干健壮性改动合入（`client/shell-web` + `server/src/routes/webos.ts`）**：
+   - 剪贴板/拖拽容错补捞（`items + getAsFile()` 与 `data:image` 提取）；
+   - 部分输出异常中断时保留可见内容并打上 `truncated: true` 标记；
+   - 智能自动续写（断点续传，5 分钟防刷）；
+   - 会话抽屉点击/手势恢复与抽屉内滑动防误触切页。
+
+**验证**
+- `npx tsc --noEmit` 零错误通过。
+- `client/shell-web` 打包构建成功，双端代码与 GitHub 同步。
+
+---
+
 ### 2026-08-21：结合物理屏幕前摄挖孔（Punch-Hole Cutout）重构桌面大时钟与安全区排布
 
 **背景**：解决物理居中挖孔摄像头遮挡桌面“8月22日”中“日”字的问题。结合 Material 3 与移动端大屏桌面视觉设计规范，拉开状态栏/挖孔与核心内容之间的垂直呼吸空间。
