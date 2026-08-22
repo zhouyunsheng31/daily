@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-22 11:16 · 7ee65c2 · 移除消息长按操作菜单（回退清除）
+**修改文件路径**：
+- `client/shell-web/src/App.tsx`
+- `client/shell-web/src/styles.css`
+**改动内容**：
+1. 移除消息长按操作菜单（长按 AI 消息弹出「重新生成此条 / 复制」的手势与菜单组件）：删除 `LongPressMenu` 组件、`longPressHandlers` 手势（onMouseDown/onTouchStart 500ms 计时、24px 移动阈值取消）、`longpress-menu` 相关 CSS；
+2. 还原为长按功能引入前的形态：消息操作条仅保留原有「复制 / 编辑（仅用户）/ 回退重来」按钮；
+3. 验证：`tsc -b --noEmit` exit 0；vite build 成功（`index-B4SBB76i.js` + `index-UsU55ImL.css`）；无长按残留引用。
+
+---
+
 ### 2026-08-22 18:40 · b977d5b · 确立 Changelog 规范与版本感知纪律
 
 **修改文件路径**：
