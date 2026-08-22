@@ -62,6 +62,7 @@ import { blobToBase64, agentWorkspaceFileRawUrl, changePassword, createApp, crea
 import type { ChatConversation, UiChatMessage, UiSegment } from './store'
 import { createRuntimeChannel, createDesktopRuntime, createStoreRuntime, setRuntimeOpenApp, type DesktopRuntimeHandle, type StoreRuntimeHandle, type StoreSdkAdapters, type WebOsRuntimeHandle } from './runtime'
 import { copyTextToClipboard, useShellStore } from './store'
+import { unzipSync, strFromU8 } from 'fflate'
 import './styles.css'
 
 type IconType = LucideIcon
@@ -3726,6 +3727,13 @@ function PackageSideloadModal({
   onClose: () => void
   onInstalled?: (pkgId: string) => void
 }) {
+  const [manifest, setManifest] = useState<Record<string, unknown> | null>(null)
+  const [files, setFiles] = useState<Record<string, string>>({})
+  const [packageName, setPackageName] = useState<string>('')
+  const [packageId, setPackageId] = useState<string>('')
+  const [fileCount, setFileCount] = useState<number>(0)
+  const [mode, setMode] = useState<'upload' | 'manual'>('upload')
+
   const [manifestText, setManifestText] = useState(`{
   "schema_version": 2,
   "id": "com.my.server-monitor",
@@ -3743,6 +3751,104 @@ function PackageSideloadModal({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
+  const zipInputRef = useRef<HTMLInputElement | null>(null)
+  const folderInputRef = useRef<HTMLInputElement | null>(null)
+
+  // 处理 ZIP 文件解压
+  const handleZipFile = async (file: File) => {
+    setBusy(true)
+    setError(null)
+    setSuccessMsg(null)
+    try {
+      const buffer = await file.arrayBuffer()
+      const unzipped = unzipSync(new Uint8Array(buffer))
+      const fileMap: Record<string, string> = {}
+      let foundManifest: Record<string, unknown> | null = null
+
+      for (const [rawPath, u8] of Object.entries(unzipped)) {
+        if (rawPath.endsWith('/') || rawPath.startsWith('__MACOSX/')) continue
+        const cleanPath = rawPath.replace(/^[^/]+\//, '') // 去除顶层目录包裹
+        const targetPath = unzipped['daily.pkg.json'] ? rawPath : cleanPath
+        const content = strFromU8(u8)
+
+        if (rawPath === 'daily.pkg.json' || rawPath.endsWith('/daily.pkg.json')) {
+          try {
+            foundManifest = JSON.parse(content) as Record<string, unknown>
+          } catch {
+            /* 格式异常 */
+          }
+        }
+        fileMap[targetPath] = content
+      }
+
+      if (!foundManifest && unzipped['daily.pkg.json']) {
+        foundManifest = JSON.parse(strFromU8(unzipped['daily.pkg.json'])) as Record<string, unknown>
+      }
+
+      if (!foundManifest) {
+        throw new Error('未在 ZIP 压缩包根目录找到 daily.pkg.json 清单文件')
+      }
+
+      setManifest(foundManifest)
+      setFiles(fileMap)
+      setManifestText(JSON.stringify(foundManifest, null, 2))
+      setFilesText(JSON.stringify(fileMap, null, 2))
+      const disp = typeof foundManifest.display_name === 'object' ? String((foundManifest.display_name as { zh?: string })?.zh || foundManifest.id) : String(foundManifest.id)
+      setPackageName(disp)
+      setPackageId(String(foundManifest.id || ''))
+      setFileCount(Object.keys(fileMap).length)
+      setSuccessMsg(`已成功解析 ZIP 包「${disp}」(${foundManifest.id})，包含 ${Object.keys(fileMap).length} 个文件，可直接点击安装。`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '解压 ZIP 包失败')
+    } finally {
+      setBusy(false)
+      if (zipInputRef.current) zipInputRef.current.value = ''
+    }
+  }
+
+  // 处理文件夹/多文件选择
+  const handleFileList = async (fileList: FileList) => {
+    setBusy(true)
+    setError(null)
+    setSuccessMsg(null)
+    try {
+      const fileMap: Record<string, string> = {}
+      let foundManifest: Record<string, unknown> | null = null
+
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i]!
+        const relPath = file.webkitRelativePath ? file.webkitRelativePath.replace(/^[^/]+\//, '') : file.name
+        const text = await file.text()
+        fileMap[relPath] = text
+        if (relPath === 'daily.pkg.json' || file.name === 'daily.pkg.json') {
+          try {
+            foundManifest = JSON.parse(text) as Record<string, unknown>
+          } catch {
+            /* 格式异常 */
+          }
+        }
+      }
+
+      if (!foundManifest) {
+        throw new Error('未在选择的文件中找到 daily.pkg.json 清单文件')
+      }
+
+      setManifest(foundManifest)
+      setFiles(fileMap)
+      setManifestText(JSON.stringify(foundManifest, null, 2))
+      setFilesText(JSON.stringify(fileMap, null, 2))
+      const disp = typeof foundManifest.display_name === 'object' ? String((foundManifest.display_name as { zh?: string })?.zh || foundManifest.id) : String(foundManifest.id)
+      setPackageName(disp)
+      setPackageId(String(foundManifest.id || ''))
+      setFileCount(Object.keys(fileMap).length)
+      setSuccessMsg(`已成功解析目录「${disp}」(${foundManifest.id})，包含 ${Object.keys(fileMap).length} 个文件。`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '读取文件列表失败')
+    } finally {
+      setBusy(false)
+      if (folderInputRef.current) folderInputRef.current.value = ''
+    }
+  }
 
   const submit = async () => {
     if (busy) return
@@ -3750,14 +3856,19 @@ function PackageSideloadModal({
     setError(null)
     setSuccessMsg(null)
     try {
-      const manifest = JSON.parse(manifestText.trim()) as unknown
-      let files: Record<string, string> | undefined = undefined
-      if (filesText.trim()) {
-        files = JSON.parse(filesText.trim()) as Record<string, string>
+      let finalManifest: unknown = manifest
+      let finalFiles: Record<string, string> | undefined = files
+
+      if (mode === 'manual' || !finalManifest) {
+        finalManifest = JSON.parse(manifestText.trim()) as unknown
+        if (filesText.trim()) {
+          finalFiles = JSON.parse(filesText.trim()) as Record<string, string>
+        }
       }
-      const res = await createPackage({ manifest, files })
+
+      const res = await createPackage({ manifest: finalManifest, files: finalFiles })
       if (res.ok) {
-        setSuccessMsg(`私有包 ${res.id} 导入成功！已部署至 packages/${res.id}/ 并激活。`)
+        setSuccessMsg(`私有包 ${res.id} 导入安装成功！已部署至 packages/${res.id}/ 并激活使用。`)
         if (onInstalled) onInstalled(res.id)
         window.setTimeout(() => {
           onClose()
@@ -3774,44 +3885,128 @@ function PackageSideloadModal({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="html-import-panel" style={{ maxWidth: '520px' }} onClick={(e) => e.stopPropagation()}>
+      <div className="html-import-panel" style={{ maxWidth: '540px' }} onClick={(e) => e.stopPropagation()}>
         <div className="panel-heading">
           <strong>导入私有包（Sideload 直装）</strong>
           <button type="button" aria-label="关闭" onClick={onClose}>
             <X size={15} />
           </button>
         </div>
-        <p className="muted-copy" style={{ margin: '0 0 10px', fontSize: '11px' }}>
-          绕过公共市场与审核，直接将私有包（运维脚本、私有 API、私有 App）部署至你的个人工作区。
+        <p className="muted-copy" style={{ margin: '0 0 12px', fontSize: '11px' }}>
+          0 审核 · 绕过市场 · 直接将私有包（运维脚本、私有 NAS 接口、个性化 App）部署至个人工作区。
         </p>
-        <label className="login-label" style={{ marginBottom: 4 }}>
-          Manifest (daily.pkg.json)
-        </label>
-        <textarea
-          className="html-import-code"
-          style={{ height: '140px', marginBottom: 10 }}
-          value={manifestText}
-          onChange={(e) => setManifestText(e.target.value)}
-          disabled={busy}
+
+        {/* 隐藏的 File Input */}
+        <input
+          ref={zipInputRef}
+          type="file"
+          accept=".zip"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            if (e.target.files && e.target.files[0]) void handleZipFile(e.target.files[0])
+          }}
         />
-        <label className="login-label" style={{ marginBottom: 4 }}>
-          源码文件表 JSON（键为相对路径，值为代码内容）
-        </label>
-        <textarea
-          className="html-import-code"
-          style={{ height: '140px' }}
-          value={filesText}
-          onChange={(e) => setFilesText(e.target.value)}
-          disabled={busy}
+        <input
+          ref={folderInputRef}
+          type="file"
+          multiple
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            if (e.target.files && e.target.files.length > 0) void handleFileList(e.target.files)
+          }}
         />
+
+        {/* 顶部模式切换 */}
+        <div className="thinking-options" style={{ marginBottom: 12 }}>
+          <button className={mode === 'upload' ? 'selected' : ''} onClick={() => setMode('upload')}>
+            <span>文件 / ZIP 上传</span>
+            <small>推荐 · 一键解包</small>
+          </button>
+          <button className={mode === 'manual' ? 'selected' : ''} onClick={() => setMode('manual')}>
+            <span>手动编辑代码</span>
+            <small>JSON / 源码粘贴</small>
+          </button>
+        </div>
+
+        {mode === 'upload' ? (
+          <div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, margin: '10px 0' }}>
+              <button
+                type="button"
+                className="os-button os-button-quiet"
+                style={{ height: '70px', flexDirection: 'column', gap: 4 }}
+                onClick={() => zipInputRef.current?.click()}
+                disabled={busy}
+              >
+                <Upload size={20} style={{ color: 'var(--blue)' }} />
+                <strong>选择 ZIP 压缩包</strong>
+                <small style={{ color: 'var(--muted)', fontSize: '9px' }}>支持包含 daily.pkg.json 的 zip</small>
+              </button>
+
+              <button
+                type="button"
+                className="os-button os-button-quiet"
+                style={{ height: '70px', flexDirection: 'column', gap: 4 }}
+                onClick={() => folderInputRef.current?.click()}
+                disabled={busy}
+              >
+                <Folder size={20} style={{ color: 'var(--blue)' }} />
+                <strong>选择包目录 / 多个文件</strong>
+                <small style={{ color: 'var(--muted)', fontSize: '9px' }}>多选文件或选择文件夹</small>
+              </button>
+            </div>
+
+            {packageId ? (
+              <div style={{ background: 'rgba(79,110,247,0.06)', border: '1px solid rgba(79,110,247,0.2)', borderRadius: 12, padding: 12, marginTop: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <span className="setting-icon blue"><Code2 size={16} /></span>
+                  <div>
+                    <strong>{packageName}</strong> <span style={{ fontSize: '11px', color: 'var(--muted)' }}>({packageId})</span>
+                  </div>
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: 4 }}>
+                  已就绪 · 共包含 {fileCount} 个文件（含 daily.pkg.json）
+                </div>
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '16px 0', color: 'var(--muted)', fontSize: '11px' }}>
+                请选择本地包工程的 ZIP 压缩包或代码目录
+              </div>
+            )}
+          </div>
+        ) : (
+          <div>
+            <label className="login-label" style={{ marginBottom: 4 }}>
+              Manifest (daily.pkg.json)
+            </label>
+            <textarea
+              className="html-import-code"
+              style={{ height: '110px', marginBottom: 8 }}
+              value={manifestText}
+              onChange={(e) => setManifestText(e.target.value)}
+              disabled={busy}
+            />
+            <label className="login-label" style={{ marginBottom: 4 }}>
+              源码文件表 JSON（键为相对路径，值为代码文本）
+            </label>
+            <textarea
+              className="html-import-code"
+              style={{ height: '110px' }}
+              value={filesText}
+              onChange={(e) => setFilesText(e.target.value)}
+              disabled={busy}
+            />
+          </div>
+        )}
+
         {error && <p className="html-import-error">{error}</p>}
         {successMsg && <p style={{ color: 'var(--green)', fontSize: '11px', margin: '8px 0 0' }}>{successMsg}</p>}
-        <div className="panel-actions">
+        <div className="panel-actions" style={{ marginTop: 14 }}>
           <button type="button" className="panel-cancel" onClick={onClose} disabled={busy}>
             取消
           </button>
-          <button type="button" className="panel-submit" onClick={() => void submit()} disabled={busy}>
-            {busy ? '导入校验中…' : '立即导入安装'}
+          <button type="button" className="panel-submit" onClick={() => void submit()} disabled={busy || (mode === 'upload' && !manifest && !manifestText)}>
+            {busy ? '正在导入部署…' : '立即私有安装'}
           </button>
         </div>
       </div>
