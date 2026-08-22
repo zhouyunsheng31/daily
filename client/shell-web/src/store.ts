@@ -122,6 +122,10 @@ interface ShellStore {
    *  服务端重放任务缓冲 + 实时转发，前端按与在线流相同的路径渲染
    *  （思考/文字/工具/互动 HTML 全覆盖）。返回 'task'|'none'|'error' */
   resumeConversation: (convId?: string) => Promise<'task' | 'none' | 'error'>
+  /** 2026-08-22 自动续写：刷新/访问后检测当前会话最后一条消息是否「不完整」
+   *  （被中断的截断标记 / 无文字收尾），若有则自动重发续写请求（复用 sendMessage）。
+   *  返回 true=已触发续写 ｜ false=无需续写或无法续写 */
+  autoContinueIncomplete: () => boolean
   install: (appId: string) => Promise<void>
   rollback: (appId: string, versionId: string) => Promise<void>
   /** 持久化桌面图标顺序（用户 App 的 id 顺序） */
@@ -1224,13 +1228,19 @@ export const useShellStore = create<ShellStore>((set, get) => ({
         streamingConvs: {},
       })
       if (active?.id && shouldResume) {
-        void get().resumeConversation(active.id)
+        void get().resumeConversation(active.id).then(() => {
+          // 2026-08-22 自动续写：resume 无任务后检查截断标记，有则自动续写
+          get().autoContinueIncomplete()
+        })
       }
       // 2026-08-17 会话持久化：身份变化（换设备/登录/注册/登出）时异步拉取服务端历史，
       // 合并进本地列表（localStorage 仍是缓存，服务端是兜底来源；静默失败不阻塞）
       void get().syncServerConversations()
     } else if (resumeTargetId && nextKey !== null && shouldResume) {
-      void get().resumeConversation(resumeTargetId)
+      void get().resumeConversation(resumeTargetId).then(() => {
+        // 2026-08-22 自动续写：resume 无任务后检查截断标记，有则自动续写
+        get().autoContinueIncomplete()
+      })
     }
   },
 
@@ -1745,6 +1755,63 @@ export const useShellStore = create<ShellStore>((set, get) => ({
       }
     }
     return outcome
+  },
+
+  /** 2026-08-22 自动续写：刷新/访问后检测当前会话最后一条消息是否「不完整」。
+   *  触发条件：最后一条 assistant 消息带「内容可能被中断」截断标记（服务端
+   *  agent_end 异常但有可见输出时标记，见 webos.ts truncated）。命中后自动
+   *  移除提示、发送续写指令让 AI 从断点继续（复用 sendMessage 正常链路）。
+   *  防重复：触发后记录续写时间戳（localStorage），5 分钟内不重复续写。 */
+  autoContinueIncomplete: () => {
+    const id = get().activeConversationId
+    if (!id) return false
+    // 正在流式/有任务在跑：不打断
+    if (get().streamingConvs[id]) return false
+    const conv = get().conversations.find((candidate) => candidate.id === id)
+    if (!conv || conv.messages.length === 0) return false
+    const last = conv.messages[conv.messages.length - 1]
+    if (!last || last.role !== 'assistant' || !('segments' in last)) return false
+    const segments = last.segments
+    if (segments.length === 0) return false
+    // 精确匹配截断标记
+    const truncatedIdx = segments.findIndex((segment) => segment.type === 'error' && segment.content.includes('内容可能被中断'))
+    if (truncatedIdx < 0) return false
+    // 防重复：同会话 5 分钟内只续写一次
+    const scopeKey = chatScopeKey(get().session)
+    const markerKey = `daily-webos-autoregen:${scopeKey ?? 'x'}:${id}`
+    let lastAuto = 0
+    try { lastAuto = Number(localStorage.getItem(markerKey)) || 0 } catch { /* ignore */ }
+    const now = Date.now()
+    if (now - lastAuto < 5 * 60_000) return false
+    try { localStorage.setItem(markerKey, String(now)) } catch { /* ignore */ }
+    // 找到最后一条 user 消息作为续写锚点（提示 AI 别偏题）
+    let lastUserText = ''
+    for (let i = conv.messages.length - 1; i >= 0; i -= 1) {
+      const message = conv.messages[i]
+      if (message.role === 'user') { lastUserText = message.content; break }
+    }
+    // 移除截断提示段（避免残留错误提示），再触发续写
+    const cleanSegments = segments.filter((segment) => !(segment.type === 'error' && segment.content.includes('内容可能被中断')))
+    useShellStore.setState((state) => {
+      const convNow = state.conversations.find((candidate) => candidate.id === id)
+      if (!convNow) return {}
+      const current = convNow.messages
+      const newLast = { ...last, segments: cleanSegments.length > 0 ? cleanSegments : [] }
+      const nextMessages = [...current.slice(0, -1), newLast]
+      return {
+        conversations: state.conversations.map((candidate) => candidate.id === id
+          ? { ...candidate, messages: nextMessages, updatedAt: Date.now() }
+          : candidate),
+        messages: state.activeConversationId === id ? nextMessages : state.messages,
+      }
+    })
+    console.warn(`[chat] ${new Date().toISOString()} auto-continue triggered conv=${id} anchor="${lastUserText.slice(0, 40).replace(/\s+/g, ' ')}"`)
+    // 发送续写指令（AI 基于上下文从断点继续，不重复已输出内容）
+    const instruction = lastUserText
+      ? `（自动续写）你上一次的回答因中断未完整输出。请直接继续完成它（不要重复已输出的内容，从断点接着写）。原始请求：${lastUserText.slice(0, 300)}`
+      : '（自动续写）请继续完成你上一次未完整输出的回答，从断点接着写，不要重复已输出的内容。'
+    void get().sendMessage(instruction)
+    return true
   },
 
   install: async (appId) => {
