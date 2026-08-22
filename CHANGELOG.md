@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 01:10 · fix(billing): 修正首充月卡叠加注册赠送额度逻辑、修复兑换码尝鲜包防重复校验与API开发文档全量同步
+
+**修改文件路径**：
+- `server/src/payment/afdian.ts`
+- `.pi/skills-webos/package-market/SKILL.md`
+- `docs/routes/web/10-package-market-guide.md`
+- `CHANGELOG.md`
+
+**改动内容**：
+1. **账本逻辑与额度叠加修正**：
+   - 修复开通月卡时直接覆写抹平注册赠送 1000 额度的缺陷，改为首次开通时保留注册 1000 积分并累加月卡额度（即 1000 注册 + 1000 月卡 = 2000 常规额度）；
+   - 为兑换码发货增加尝鲜用量包幂等防重校验，避免重复发放；
+   - 矫正数据库中历史错误叠加数据，使账户余额精准对齐真实账本。
+2. **API 文档与 Skill 同步更新**：
+   - 同步更新官方与外部 AI 开发指南，全面覆盖私有包 Sideload（ZIP/目录/REST）直装机制。
+3. **验证**：
+   - 本地与服务器端构建全部通过，用户数据查询验证 1270 准确。
+
 ### 2026-08-23 00:45 · ef5b13d · 私有包直装支持一键 ZIP 解压/目录导入，接入后端运维工具并全量部署上线
 
 **修改文件路径**：

@@ -658,6 +658,7 @@ async function deliverRedeemTier(principal: Principal, tier: AfdianTier, code: s
     const state = (await loadState(principal)) as StoredStateLike
     const now = Date.now()
     if (tier.kind === 'monthly') {
+      const isFirstMonthly = !state.credits.monthly
       state.credits.monthly = {
         planId: tier.planId,
         planName: tier.name,
@@ -665,20 +666,28 @@ async function deliverRedeemTier(principal: Principal, tier: AfdianTier, code: s
         expiresAt: now + 30 * 24 * 3600_000,
         lastGrantAt: now,
       }
-      state.credits.quota = tier.monthlyCredits ?? 1000
+      // 首次开通月卡：保留注册基础额度（1000）并叠加当月月卡额度；月卡续费：重置当月额度
+      const monthlyAmount = tier.monthlyCredits ?? 1000
+      state.credits.quota = isFirstMonthly ? (MEMBER_CREDITS + monthlyAmount) : monthlyAmount
       state.credits.used = 0
       const tierBytes = WORKSPACE_TIER_BYTES[tier.planId]
       if (typeof tierBytes === 'number') state.workspaceBytes = tierBytes
-      await markDelivered(outTradeNo, principal.key, 'redeem', tier.monthlyCredits ?? 1000)
+      await markDelivered(outTradeNo, principal.key, 'redeem', monthlyAmount)
       console.log(`[afdian] 兑换码月卡发货 ✓ ${principal.key} ← ${tier.name} (code=${code.slice(0, 12)}…)`)
     } else {
       state.credits.permanent = state.credits.permanent ?? { quota: 0, used: 0 }
       const history = state.credits.afdianRedeem ?? []
-      history.push({ planId: tier.planId, planName: tier.name, credits: tier.packCredits ?? 500, at: now })
-      state.credits.afdianRedeem = history
-      state.credits.permanent.quota += tier.packCredits ?? 500
-      await markDelivered(outTradeNo, principal.key, 'redeem', tier.packCredits ?? 500)
-      console.log(`[afdian] 兑换码用量包发货 ✓ ${principal.key} ← ${tier.name} (永久池 +${tier.packCredits})`)
+      const already = history.some((h) => String(h.planId ?? '') === tier.planId)
+      if (already) {
+        await markDelivered(outTradeNo, principal.key, 'duplicate', 0, '尝鲜包每人限购一次，已兑换过')
+        console.log(`[afdian] 尝鲜包兑换重复（跳过）${principal.key} ${outTradeNo}`)
+      } else {
+        history.push({ planId: tier.planId, planName: tier.name, credits: tier.packCredits ?? 500, at: now })
+        state.credits.afdianRedeem = history
+        state.credits.permanent.quota += tier.packCredits ?? 500
+        await markDelivered(outTradeNo, principal.key, 'redeem', tier.packCredits ?? 500)
+        console.log(`[afdian] 兑换码用量包发货 ✓ ${principal.key} ← ${tier.name} (永久池 +${tier.packCredits})`)
+      }
     }
     await saveState(principal, state as Parameters<typeof saveState>[1])
     return {
