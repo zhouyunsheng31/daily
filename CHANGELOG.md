@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 13:20 · feat(skills): 将 App 内 SDK 与原生生图/对话铁律写入 app-dev Skill 与 AI 系统提示词
+
+**修改文件路径**：
+- `.pi/skills-webos/app-dev/SKILL.md`
+- `server/src/piBridge.ts`
+- `CHANGELOG.md`
+
+**改动内容**：
+1. **app-dev Skill 强化（App 内 SDK 与生图/AI 模板）**：
+   - 明确立下沙箱铁律：严禁在 HTML App 内使用 `fetch('/webos/api/...')`（沙箱跨域无 Cookie 必报 401）；
+   - 提供 `DailyWebOs.media.generateImage`、`DailyWebOs.ai.chat` 与 `DailyWebOs.user.getCredits` 的完整示例代码与说明；
+2. **AI 系统提示词同步**：
+   - 将生图与 AI 对话的 App 编写规范同步写入 `piBridge.ts` 的系统核心指令，指导 AI 在制作 App 时 100% 消费 SDK 代理通道，保证生成的生图/AI 对话 App 开箱即用且自动扣费。
+
 ### 2026-08-23 13:05 · 67293ee · feat(runtime-sdk): 打通 App 沙箱内的平台原生 AI 生图与对话能力，全面开放用户与媒体 SDK 桥接
 
 **修改文件路径**：
