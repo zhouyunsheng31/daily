@@ -9,6 +9,7 @@
 //   由 webos.ts 在模块加载时 setAppApiDeps 注入（同 packages.setAppViewProvider 模式）。
 // ============================================================================
 
+import fs from 'node:fs'
 import path from 'node:path'
 import { Type } from 'typebox'
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
@@ -115,7 +116,7 @@ function apiSpecRel(manifest: Record<string, unknown> | null): string {
 
 function readJsonFile(file: string): unknown | null {
   try {
-    return JSON.parse(require('node:fs').readFileSync(file, 'utf-8'))
+    return JSON.parse(fs.readFileSync(file, 'utf-8'))
   } catch {
     return null
   }
@@ -517,7 +518,7 @@ function readHandlerSafe(userKey: string, packageId: string, handlerPath: string
   const full = resolvePackageFilePath(userKey, packageId, handlerPath)
   if (!full) return null
   try {
-    return require('node:fs').readFileSync(full, 'utf-8')
+    return fs.readFileSync(full, 'utf-8')
   } catch {
     return null
   }

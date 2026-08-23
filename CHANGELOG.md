@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 18:2x · fix(appapi): ESM 下 `require('node:fs')` 未定义导致 App API 包全部加载失败（API_SPEC_MISSING）
+
+**用户反馈/验证发现**：统一复合包 E2E 中 A 发布 `test.unified`（type=api）恒报 `API_SPEC_MISSING`（包文件齐全、DB 已注册、GET /packages 能看到，但 loadApiSpecs 就是找不到合法 api.json）。
+**根因**：`server/src/webos/appapi/appapi-service.ts` 的 `readJsonFile` / `readHandlerSafe` 使用 **`require('node:fs')`**——服务器 `package.json` 为 `"type": "module"`（ESM），tsx 加载 ESM 模块时 `require` **未定义**，抛 ReferenceError 被 try/catch 静默吞掉 → 恒返回 null → 包 manifest/api.json/handler 全部读不到 → loadApiSpecs 跳过所有 api 包 → 发布报 API_SPEC_MISSING（同时 **appapi_* 动态工具注册、api handler 执行在线上从未真正生效**）。
+**修复**：静态 `import fs from 'node:fs'`，两处 `require('node:fs')` 改为 `fs`。
+**验证**：本地独立进程（initSandbox+initDb）走通链路；线上加分层日志实锤 `manifest=false raw=false fileExists=true`；修复后重试发布见后续 E2E 结果。
+（另注：排查期间发现 pm2 累计重启 448+ 次，疑似部署期间历史遗留；当前进程稳定。）
+
 ### 2026-08-23 17:4x · fix(chat): 「回退重来」真正生效——rebuild=true 时销毁 pi 会话重建 + historyContext 重放
 
 **用户反馈**：点「回退重来」只是删了眼前渲染，AI 并没有真正回退重来（此前该 bug 修过但 8-18 回归）。
