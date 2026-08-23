@@ -353,9 +353,15 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : '操作失败，请稍后重试'
 }
 
-/** 前端时间线消息 → 服务端会话消息（tool 分段不参与上下文，assistant 拼回纯文本） */
+/** 前端时间线消息 → 服务端会话消息（tool 分段不参与上下文，assistant 拼回纯文本）。
+ * 2026-08-23 线上事故修复：发送上下文按条数预算截断（服务端上限 MAX_CHAT_MESSAGES=40，
+ * 见 server/src/routes/webos.ts）——此前长会话全量发送触顶 400 INVALID_MESSAGES，全员无法对话。
+ * 保留最近 SEND_CONTEXT_LIMIT 条，叠加新消息/系统称呼注入后发送序 ≤36，留足余量。 */
+const SEND_CONTEXT_LIMIT = 34
+
 function buildSendMessages(messages: UiChatMessage[]): WebOsChatMessage[] {
-  return messages
+  const source = messages.length > SEND_CONTEXT_LIMIT ? messages.slice(-SEND_CONTEXT_LIMIT) : messages
+  return source
     .map((message): WebOsChatMessage | null => {
       if (message.role === 'user') return message.content.trim() ? message : null
       const content = 'segments' in message

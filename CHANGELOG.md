@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 22:5x · fix(shell-web): 长会话全量发送触顶服务端 40 条上限 → 全员对话报错无法发送（400 INVALID_MESSAGES）
+
+**用户反馈/事故**：Berson 等多账号反馈「连不上 AI / 无法正常对话」。服务端排查（154.64.249.172，pm2 daily-server）：pm2 在线、上游 opencode.ai（zen/go/v1，deepseek-v4-flash）可调用、公网 SSE 实测 200 正常；nginx access log 显示各用户 `POST /webos/api/chat/stream` 反复 `400`（响应 116B = INVALID_MESSAGES），且 200（resume no_task）→400 交替。
+**根因**：`client/shell-web/src/store.ts` 的 `buildSendMessages` **全量发送会话历史（无截断）**，而服务端 `server/src/routes/webos.ts` 上限 `MAX_CHAT_MESSAGES=40`（即 20 轮对话）——会话超过 40 条后，任何发送（含编辑/回退重来）一律 400，前端显示错误、用户无法继续对话；早晨的断流/403 失败占位进一步堆高消息数，导致「所有账号」集中触顶。叠加既有问题：凌晨中转 quota 403（余额 ＄0.019，大请求需 ＄0.045）、客户端 SSE 断流（disconnected=true，后台任务跑完照常扣费）。
+**修改文件**：`client/shell-web/src/store.ts`——`buildSendMessages` 增加 `SEND_CONTEXT_LIMIT=34` 条预算截断（保留最近 34 条 + 新消息 + 系统称呼注入 ≤36 < 40），sendMessage / editMessageAt / regenerateAt 三条路径共用，一次性修复。
+**验证**：服务器 `VITE_BASE_PATH=/daily/ npx vite build` → 新产物 `index-8cGiec3m.js` 部署 `/root/daily/server/public/`（chmod 644，静态文件即时生效，无需重启后端）；公网 `/daily/` 已返回新 hash；服务端 41 条边界仍 400（限制保留），前端截断后不再触顶；长会话用户刷新页面即自愈。
+
 ### 2026-08-23 19:3x · docs(skill): package-market 完整版同步——Operit 本地副本与仓库权威版统一（鉴权校正 + 统一复合包 API）
 
 **背景**：站长确认「有没有给 Operit 自己装一份指导规范」——Operit 本地 skill（`/storage/emulated/0/Download/Operit/skills/daily-package-market/SKILL.md`）确实已装，但为旧版（§6.1 仍写 Bearer 鉴权、市场端点缺 toggle/install-state）。
