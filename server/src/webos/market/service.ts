@@ -670,14 +670,17 @@ export async function toggleMarketInstall(
       notes.push(`app 同步失败：${error instanceof Error ? error.message : String(error)}`)
     }
   }
-  // skill：skills/<id> 增/删
-  if (install.type === 'skill') {
+// skill：内容驱动（type=skill 或 contents.skills 或存在 SKILL.md）→ skills/<id> 增/删
+  const manifest = readInstalledManifest(principal.key, packageId)
+  const { skills, tokens } = readContents(manifest ?? {})
+  const hasSkillContent = (install.type === 'skill' || skills.length > 0 || fs.existsSync(path.join(installedDir(principal.key, packageId), 'SKILL.md')))
+  if (hasSkillContent) {
     try {
       const { skillEngine } = await import('../engines/skill-engine.js')
       if (enabled) {
-        const manifest = readInstalledManifest(principal.key, packageId)
-        if (manifest) {
-          const r = skillEngine.install({ ownerKey: principal.key, callerKey: principal.key, packageId, pkgDir: installedDir(principal.key, packageId), manifest })
+        const m = readInstalledManifest(principal.key, packageId)
+        if (m) {
+          const r = skillEngine.install({ ownerKey: principal.key, callerKey: principal.key, packageId, pkgDir: installedDir(principal.key, packageId), manifest: m })
           notes.push(r.ok ? '技能已恢复' : `⚠️ ${r.note}`)
         }
       } else {
@@ -690,13 +693,14 @@ export async function toggleMarketInstall(
       notes.push(`skill 同步失败：${error instanceof Error ? error.message : String(error)}`)
     }
   }
-  // theme：activeTheme 增/清
-  if (install.type === 'theme') {
+  // theme：内容驱动（type=theme 或 contents.tokens）→ activeTheme 增/清
+  const hasThemeContent = (install.type === 'theme' || tokens !== null)
+  if (hasThemeContent) {
     try {
       if (enabled) {
         const dest = installedDir(principal.key, packageId)
-        const manifest = readInstalledManifest(principal.key, packageId)
-        if (manifest) notes.push(provisionTheme(principal.key, packageId, dest, manifest))
+        const m = readInstalledManifest(principal.key, packageId)
+        if (m) notes.push(provisionTheme(principal.key, packageId, dest, m))
       } else {
         const active = await getActiveTheme(principal.key)
         if (active && active.packageId === packageId) {
