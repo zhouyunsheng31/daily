@@ -17,6 +17,10 @@ import { createTestDb } from '../helpers/db.js'
 import { createTestApp } from '../helpers/server.js'
 import { expectOk, expectJson, expectError } from '../helpers/assert.js'
 
+// 2026-08-16 安全修复：首个注册用户不再自动成为 admin，管理员必须显式列入
+// ADMIN_USERNAMES 名单。本测试依赖 admin 权限的用例在此预先声明。
+process.env.ADMIN_USERNAMES = 'admin'
+
 // Mock callLlm 避免 /api/ai/test-connection 真实调 LLM（spec 8.2 节：mock callLlm）
 vi.mock('../../src/utils/llmCaller.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/utils/llmCaller.js')>()
@@ -63,7 +67,7 @@ beforeEach(async () => {
   const testApp = await createTestApp()
   app = testApp.app
   cleanupApp = testApp.cleanup
-  // 注册第一个用户（自动 admin），获取 JWT token
+  // 注册第一个用户（用户名 admin 在 ADMIN_USERNAMES 名单中 → admin 角色）
   token = await registerAndLogin('admin')
 })
 

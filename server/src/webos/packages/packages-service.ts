@@ -19,6 +19,7 @@ import {
   APP_ID_PATTERN,
 } from '../../utils/webosWorkspace.js'
 import { validatePackageManifest, validateApiSpec, type ContractIssue } from '../contracts/index.js'
+import { onPackageInstalled, onPackageUninstalled } from './lifecycle-hooks.js'
 import {
   getPackage,
   listPackages,
@@ -464,11 +465,24 @@ async function registerOrUpdate(
   })
   await upsertInstall({ packageId: folderId, userKey: key, activeVersionId: version.id, installed: true })
   await appendVersionAudit(version.id, { action: 'version_created', at: Date.now(), by: createdBy })
+  // W4 引擎挂接：install 时按 type 运行 skill/theme/bundle/pet-layer 执行引擎
+  //（产物落到调用者工作区；失败只回流说明，不阻断包注册）
+  const engineNotes: string[] = []
+  try {
+    const results = await onPackageInstalled({ callerKey: key, packageId: folderId, type: String(manifest.type), pkgDir: folderDir, manifest })
+    for (const r of results) {
+      if (r.note && r.ok) engineNotes.push(`${r.note}`)
+      else if (r.note) engineNotes.push(r.note)
+    }
+  } catch (error) {
+    engineNotes.push(`⚠️ W4 引擎执行失败：${error instanceof Error ? error.message : String(error)}`)
+  }
   const verb = existing ? '已发布新版本' : '已注册'
   console.log(`[packages] ${verb}: ${folderId} v${versionStr} (${String(manifest.type)}) owner=${key.slice(0, 12)}`)
+  const enginePart = engineNotes.length > 0 ? `；${engineNotes.join('；')}` : ''
   return {
     ok: true,
-    feedback: appendWarnings(`✅ 包 packages/${folderId}（${String(manifest.type)}）校验通过，${verb} v${versionStr}`, extraWarnings),
+    feedback: appendWarnings(`✅ 包 packages/${folderId}（${String(manifest.type)}）校验通过，${verb} v${versionStr}${enginePart}`, extraWarnings),
     versionCreated: true,
   }
 }
@@ -804,7 +818,18 @@ export async function recyclePackage(key: string, id: string): Promise<{ ok: boo
   }
   await setInstallInstalled(id, key, false)
   await upsertPackage({ ...pkg, installed: false })
-  return { ok: true, feedback: `🗑 包「${id}」已移入回收站（packages/.trash/）；复制回 packages/${id}/ 即自动恢复` }
+  // W4 引擎挂接：卸载时清理调用者侧引擎产物（skill 目录 / system/engines/...）
+  const engineNotes: string[] = []
+  try {
+    const results = await onPackageUninstalled({ callerKey: key, packageId: id, type: String(pkg.type ?? '') })
+    for (const r of results) {
+      if (r.note) engineNotes.push(r.note)
+    }
+  } catch (error) {
+    engineNotes.push(`⚠️ W4 引擎卸载失败：${error instanceof Error ? error.message : String(error)}`)
+  }
+  const enginePart = engineNotes.length > 0 ? `；${engineNotes.join('；')}` : ''
+  return { ok: true, feedback: `🗑 包「${id}」已移入回收站（packages/.trash/）；复制回 packages/${id}/ 即自动恢复${enginePart}` }
 }
 
 /** 恢复回收站包：移回原目录 + 重扫（幂等，版本指针不变） */

@@ -63,6 +63,8 @@ vi.mock('../src/utils/aiTools.js', () => ({
 
 vi.mock('../src/utils/searchTools.js', () => ({
   searchTools: [],
+  withSearchUser: <T>(_scope: string, fn: () => Promise<T>) => fn(),
+  getSearchUserKey: () => null,
 }))
 
 vi.mock('../src/utils/capabilityTools.js', () => ({

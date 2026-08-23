@@ -117,7 +117,7 @@ async function main() {
     if (existsSync(unitDir)) {
       steps.push({
         label: 'Vitest 单元测试 (test/unit)',
-        run: () => run('npx', ['vitest', 'run', '--dir', 'test/unit', '--reporter=verbose']),
+        run: () => run('npx', ['vitest', 'run', 'test/unit', '--reporter=verbose']),
       })
     } else {
       console.log(color(C.yellow, '  ⚠ test/unit 目录不存在，跳过单元测试'))
@@ -130,7 +130,7 @@ async function main() {
     if (existsSync(intDir)) {
       steps.push({
         label: 'Vitest 集成测试 (test/integration)',
-        run: () => run('npx', ['vitest', 'run', '--dir', 'test/integration', '--reporter=verbose']),
+        run: () => run('npx', ['vitest', 'run', 'test/integration', '--reporter=verbose']),
       })
     } else {
       console.log(color(C.yellow, '  ⚠ test/integration 目录不存在，跳过集成测试'))

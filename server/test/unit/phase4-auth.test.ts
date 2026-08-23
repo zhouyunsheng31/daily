@@ -20,6 +20,11 @@ import type { Express } from 'express'
 import { createTestDb } from '../helpers/db.js'
 import { createTestApp } from '../helpers/server.js'
 
+// 2026-08-16 安全修复：首个注册用户不再自动成为 admin，管理员必须显式列入
+// ADMIN_USERNAMES 名单（否则攻击者抢先注册即可夺权）。本测试里的"管理员"
+// 用户名在此预先声明，以对齐新语义并保留原有验证意图。
+process.env.ADMIN_USERNAMES = 'alice,eve,admin1,admin2'
+
 let app: Express
 let cleanupDb: () => Promise<void>
 let cleanupApp: () => Promise<void>

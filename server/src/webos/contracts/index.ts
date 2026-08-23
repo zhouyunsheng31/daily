@@ -526,7 +526,7 @@ export function validateApiSpec(raw: unknown): ContractResult {
   if (!schemaOk && issues.length === 0) {
     if (spec['schema_version'] !== 1) issues.push({ path: 'schema_version', message: 'schema_version 必须为 1', level: 'blocking' })
     if (typeof spec['namespace'] !== 'string' || spec['namespace'].length === 0) issues.push({ path: 'namespace', message: '缺少 namespace（全局唯一，如 notes）', level: 'blocking' })
-    else if (!/^[a-z][a-z0-9.-]*$/.test(spec['namespace'] as string)) issues.push({ path: 'namespace', message: `namespace「${String(spec['namespace'])}」只允许小写字母/数字/点/连字符（以小写字母开头）`, level: 'blocking' })
+    else if (!/^[a-z][a-z0-9_.-]*$/.test(spec['namespace'] as string)) issues.push({ path: 'namespace', message: `namespace「${String(spec['namespace'])}」只允许小写字母/数字/点/连字符/下划线（以小写字母开头）`, level: 'blocking' })
   }
 
   const blockingIssues = issues.filter((i) => (i.level ?? 'blocking') === 'blocking')

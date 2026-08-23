@@ -26,17 +26,17 @@ import {
 // 预期常量（基于源码实际值，非 spec 旧值）
 // ============================================================================
 
-const EXPECTED_TOTAL = 45  // spec 说 30，实际 45（含 7 filesystem + 5 Phase5 + 1 upload_background_image）
+const EXPECTED_TOTAL = 46  // spec 说 30，实际 46（含 7 filesystem + 5 Phase5 + 1 upload_background_image + 2026-08-17 Exa/ArXiv 换供应商新增 academic_search/exa_find_similar）
 const EXPECTED_CATEGORIES: Record<ToolCategory, number> = {
   widget: 10,       // 4 原始 + set_background + upload_background_image + add_effect + place_basic_component
   storage: 2,
   browser: 18,
   interaction: 3,   // ask_user + show_popup + dismiss_popup
-  search: 4,
+  search: 5,        // 2026-08-17 供应商替换：local_search + web_search + read_webpage + academic_search + exa_find_similar
   system: 1,        // query_capabilities
   filesystem: 7,    // Phase 3 新增
 }
-const EXPECTED_DISABLEABLE = EXPECTED_TOTAL - 2  // 除 ask_user / query_capabilities 外都可禁用 → 43
+const EXPECTED_DISABLEABLE = EXPECTED_TOTAL - 2  // 除 ask_user / query_capabilities 外都可禁用 → 44
 
 // ============================================================================
 // 测试套件
@@ -44,7 +44,7 @@ const EXPECTED_DISABLEABLE = EXPECTED_TOTAL - 2  // 除 ask_user / query_capabil
 
 describe('aiTools 元数据一致性', () => {
   describe('AI_TOOL_DEFINITIONS 基础验证', () => {
-    it('1. 定义总数 = 45（实际值，非 spec 旧值 30）', () => {
+    it('1. 定义总数 = 46（实际值，非 spec 旧值 30）', () => {
       expect(AI_TOOL_DEFINITIONS).toHaveLength(EXPECTED_TOTAL)
     })
 
@@ -89,7 +89,7 @@ describe('aiTools 元数据一致性', () => {
   })
 
   describe('DISABLEABLE_TOOL_NAMES 一致性', () => {
-    it('6. DISABLEABLE 集合与 canDisable=true 的工具完全一致（43 个）', () => {
+    it('6. DISABLEABLE 集合与 canDisable=true 的工具完全一致（44 个）', () => {
       expect(DISABLEABLE_TOOL_NAMES.size).toBe(EXPECTED_DISABLEABLE)
       for (const def of AI_TOOL_DEFINITIONS) {
         if (def.canDisable) {

@@ -249,7 +249,7 @@ describe('广播', () => {
     const msg3 = await p3
 
     expect(msg2.changeType).toBe('panel_created')
-    expect((msg2 as { data: { id: string } }).data.id).toBe('panel-bcast')
+    expect((msg2 as unknown as { data: { id: string } }).data.id).toBe('panel-bcast')
     expect(msg3.changeType).toBe('panel_created')
 
     // source (ws1) 不应收到 change 消息
@@ -424,12 +424,12 @@ describe('代理请求 sendProxyRequest', () => {
 
     const proxyMsg = await proxyMsgPromise
     expect(proxyMsg.kind).toBe('proxy_request')
-    expect((proxyMsg as { serviceName: string }).serviceName).toBe('test-svc')
-    expect((proxyMsg as { method: string }).method).toBe('GET')
-    expect((proxyMsg as { path: string }).path).toBe('/api/test')
+    expect((proxyMsg as unknown as { serviceName: string }).serviceName).toBe('test-svc')
+    expect((proxyMsg as unknown as { method: string }).method).toBe('GET')
+    expect((proxyMsg as unknown as { path: string }).path).toBe('/api/test')
 
     // 发送 proxy_response
-    const requestId = (proxyMsg as { requestId: string }).requestId
+    const requestId = (proxyMsg as unknown as { requestId: string }).requestId
     ws.send(JSON.stringify({
       kind: 'proxy_response',
       requestId,

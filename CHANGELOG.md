@@ -26,6 +26,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 3. **更新 `docs/developer-guide.md`**：
    - 全面对齐 webOS 架构体系下的 App 开发、`api.json` 声明、受限 Handler 编写与市场发布流程。
 
+### 2026-08-23 04:10 · W4 · 包执行引擎模块（Package Execution Engines）+ 系统能力包与调用者计费（R15）
+
+**修改文件路径**：
+- `server/src/webos/engines/index.ts`（新增）
+- `server/src/webos/engines/skill-engine.ts`（新增）
+- `server/src/webos/engines/theme-engine.ts`（新增）
+- `server/src/webos/engines/bundle-engine.ts`（新增）
+- `server/src/webos/engines/pet-layer-engine.ts`（新增）
+- `server/src/webos/systemCapabilities.ts`（新增）
+- `server/src/webos/packages/lifecycle-hooks.ts`（新增）
+- `server/src/webos/packages/index.ts`（导出 lifecycleHooks）
+- `server/src/webos/packages/packages-service.ts`（安装/卸载挂接引擎钩子）
+- `server/test/unit/engines.test.ts`（新增）
+- `CHANGELOG.md`
+
+**改动内容**：
+1. **W4 四个包执行引擎（`server/src/webos/engines/`，纯函数、无 DB 依赖）**：
+   - `skill-engine`：安装时把包内 `SKILL.md`（或 `contents.skills` 列表）复制到调用者 `skills/<id>/` 并写 `.engine-meta.json` 标记；卸载/切版本只清理带标记目录（防误删用户自有技能）；导出 `installSkillPackage` / `uninstallSkillPackage` / `resolveSkillFiles`（entry 优先 + 去重 + 防目录穿越）；
+   - `theme-engine`：读取 `contents.tokens` 设计令牌，校验必填 key（`--paper/--ink/--accent`），生成 `:root { ... }` CSS 变量清单；缺 key 自动回退默认（匹配桌面 V1 暖纸色板），非法 key/危险值剔除防 CSS 注入，永不抛阻断；导出 `applyThemeTokens` / `resolveThemeTokens` / `DEFAULT_TOKENS`；
+   - `bundle-engine`：BFS 解析 `children` 闭包（嵌套 ≤3 层，D19 硬约束）+ `contents`（skills/tools/tokens/assets）聚合，visited 去环；导出 `resolveBundleClosure` / `isBundleDepthValid` / `BUNDLE_MAX_DEPTH`；
+   - `pet-layer-engine`：读取 `entry` HTML + `pets` 行为参数（maxInstances 1–32、physics 长度限制）+ `contents.assets` 素材；entry 缺失回退默认漂浮爪印场景；导出 `loadPetLayerScene` / `PET_LAYER_DEFAULT`；
+2. **系统能力包 + 调用者计费（R15）`server/src/webos/systemCapabilities.ts`**：
+   - 把生图（`generateImages` + `IMAGE_PRICING`）、搜索（`searchTools` + `withSearchUser`）、LLM 对话（`callLlm`）封装为三个系统能力包声明（`com.daily.cap.image/search/chat`，id/type/端点/计费 kind），secrets 仅声明字段名、值只存服务端沙箱，绝不下发客户端；
+   - `chargeCaller(callerKey, kind, costMinor, deps)`：计费租户 = 实际调用者，绝不从包属主账号扣；先常规额度后永久池（与 webos.ts 语义一致）；余额不足抛 `INSUFFICIENT_CREDITS` 且账本原封不动；deps 可注入（测试/宿主 mock），默认读写 entities 表 `webos_state`；
+   - 导出 `BILLING_CATALOG`（生图/搜索/对话/视频/App API 统一计费目录）、`runImageGeneration` / `runWebSearch` / `runLlmChat` / `invokeSystemCapability`；
+3. **引擎接入 packages 生命周期**（`lifecycle-hooks.ts` + `packages-service.ts` 安装/回收钩子）：注册 skill 包自动安装技能到调用者 `skills/`；theme 包把 tokens 存到 `system/engines/theme/<id>/`（tokens.json + theme.css）；bundle 包解析闭包存 `closure.json + aggregate.json`；pet-layer 包存 `scene.json`；卸载/回收自动清理调用者侧产物，引擎异常只回流说明不阻断包注册；
+4. **单测 `server/test/unit/engines.test.ts`**（21/21 通过，createTestDb + setSandboxRoot 模式）：skill 安装复制到 `skills/<id>/` 与卸载清理、无标记不误删；theme 合法 tokens 生成 CSS 变量与缺 key 回退默认/防注入；bundle 嵌套 ≤3 闭包聚合与 >3 拒绝/去环；pet-layer 读 entry 返回场景与缺失回退默认；计费 caller 扣减成功、余额不足抛 INSUFFICIENT_CREDITS 账本不变、属主账号分文不动、先常规后永久；端到端四类包注册→引擎产物生成→回收清理。
+
+**验证**：`npx tsc --noEmit` 通过（server）；`npx vitest run test/unit/engines.test.ts` 21/21 全绿；`npx vitest run test/unit/packages.test.ts` 24/24 仍通过（回归无损）；未改动冻结文件 `webosDesktopV1.ts` / `webos.ts`；未 git commit。
+
 ### 2026-08-23 03:02 · a15decd · 包体系校验体验全面改造（Validation UX Overhaul），实现分级反馈、API 自愈与 Schema 开放化
 
 **修改文件路径**：

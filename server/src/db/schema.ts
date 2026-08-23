@@ -177,6 +177,22 @@ CREATE TABLE IF NOT EXISTS ai_settings (
   updated_at BIGINT NOT NULL
 );
 
+-- 模型注册表（Operit 式多模型配置：每套模型独立 API/参数，前端可切换）
+CREATE TABLE IF NOT EXISTS ai_models (
+  id VARCHAR(64) PRIMARY KEY,
+  name VARCHAR(128) NOT NULL,
+  provider VARCHAR(64) NOT NULL DEFAULT 'openai',
+  endpoint TEXT,
+  model VARCHAR(256) NOT NULL,
+  api_key TEXT,
+  params JSONB NOT NULL DEFAULT '{}'::jsonb,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  is_default BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_models_default ON ai_models(is_default) WHERE is_default = TRUE;
+
 -- 用户自定义 skills（架构文档 9.4）
 CREATE TABLE IF NOT EXISTS user_skills (
   id VARCHAR(64) PRIMARY KEY,

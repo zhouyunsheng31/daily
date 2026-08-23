@@ -191,6 +191,22 @@ CREATE TABLE IF NOT EXISTS ai_settings (
   updated_at INTEGER NOT NULL
 );
 
+-- 模型注册表（Operit 式多模型配置：每套模型独立 API/参数，前端可切换）
+CREATE TABLE IF NOT EXISTS ai_models (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  provider TEXT NOT NULL DEFAULT 'openai',
+  endpoint TEXT,
+  model TEXT NOT NULL,
+  api_key TEXT,
+  params TEXT NOT NULL DEFAULT '{}',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  is_default INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_models_default ON ai_models(is_default);
+
 -- 用户自定义 skills
 CREATE TABLE IF NOT EXISTS user_skills (
   id TEXT PRIMARY KEY,

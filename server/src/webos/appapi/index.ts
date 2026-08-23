@@ -24,5 +24,5 @@ import { appapiRouter } from './appapi-router.js'
 export { appapiRouter }
 export { ensureApiUsageSchema, ensureApiPublicSchema }
 export { setAppApiDeps, registerDynamicTools, invokeEndpoint, updateApiSecrets, getApiSecretsStatus, loadApiSpecs, getNamespaceSpec, camelToSnake, publishNamespace, unpublishNamespace, getPublicStatus, resolvePublicEndpoint }
-export type { AppApiDeps, PrincipalLike, InvokeResult, InvokeInput } from './appapi-service.js'
+export type { AppApiDeps, PrincipalLike, AppStateLike, InvokeResult, InvokeInput } from './appapi-service.js'
 export { executeApiHandler, matchStoragePrefix, allowedByPrefix, targetAllowed, redactSecrets } from './api-runtime.js'

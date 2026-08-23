@@ -73,7 +73,7 @@ export const API_SCHEMA = Type.Object(
   {
     schema_version: Type.Literal(API_SCHEMA_VERSION),
     /** 命名空间：全局唯一，建议 = 包 id 末段；→ 端点前缀 /webos/api/appapi/:namespace/:endpoint */
-    namespace: Type.String({ pattern: '^[a-z][a-z0-9.-]*$', minLength: 1, maxLength: 64 }),
+    namespace: Type.String({ pattern: '^[a-z][a-z0-9_.-]*$', minLength: 1, maxLength: 64 }),
     display_name: Type.Optional(
       Type.Object(
         {

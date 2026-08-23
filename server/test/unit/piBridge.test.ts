@@ -87,6 +87,8 @@ vi.mock('../../src/utils/aiTools.js', () => {
 
 vi.mock('../../src/utils/searchTools.js', () => ({
   searchTools: [],
+  withSearchUser: <T>(_scope: string, fn: () => Promise<T>) => fn(),
+  getSearchUserKey: () => null,
 }))
 
 vi.mock('../../src/utils/capabilityTools.js', () => ({
@@ -1610,7 +1612,7 @@ describe('piBridge 工具 execute 函数覆盖测试', () => {
         if (pending) {
           pending.resolve({ success: true, data: {} })
         }
-        const result = await promise
+        const result = await promise as { content?: unknown }
         expect(result).toBeDefined()
         expect(result.content).toBeDefined()
       })
@@ -1632,7 +1634,7 @@ describe('piBridge 工具 execute 函数覆盖测试', () => {
         const lastCall = wsSendToDevice.mock.calls[wsSendToDevice.mock.calls.length - 1]
         const msg = lastCall[1]
         handlePermissionResponse({ requestId: msg.requestId, approved: false })
-        const result = await promise
+        const result = await promise as { content: Array<{ text: string }> }
         const text = JSON.parse(result.content[0].text)
         expect(text.success).toBe(false)
         expect(text.error.code).toBe('PERMISSION_DENIED')
@@ -1658,7 +1660,7 @@ describe('piBridge 工具 execute 函数覆盖测试', () => {
       const lastCall = wsSendToDevice.mock.calls[wsSendToDevice.mock.calls.length - 1]
       const msg = lastCall[1]
       __test.handleAskUserResponse({ requestId: msg.requestId, selectedValues: ['a'] })
-      const result = await promise
+      const result = await promise as { content: Array<{ text: string }> }
       const text = JSON.parse(result.content[0].text)
       expect(text).toEqual(['a'])
     })

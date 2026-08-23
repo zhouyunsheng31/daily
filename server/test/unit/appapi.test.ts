@@ -275,7 +275,7 @@ describe('W2 必测族 6：全链路 —— 计费落库 + 用例 A（AI 知道�
     expect(names).toContain('appapi_notes_list_notes')
     expect(names).toContain('appapi_notes_add_note')
     const listTool = tools.find((t) => t.name === 'appapi_notes_list_notes')!
-    const fn = listTool.execute as (id: string, params: unknown) => Promise<{ content: Array<{ text: string }> }>
+    const fn = listTool.execute as unknown as (id: string, params: unknown) => Promise<{ content: Array<{ text: string }> }>
     const res = await fn('x', {})
     const parsed = JSON.parse(res.content[0].text) as { success: boolean; result?: unknown[] }
     expect(parsed.success).toBe(true)

@@ -183,7 +183,7 @@ describe('broadcastChange', () => {
 
     const msg = await p2
     expect(msg.changeType).toBe('panel_created')
-    expect((msg as { data: { id: string } }).data.id).toBe('panel-xyz')
+    expect((msg as unknown as { data: { id: string } }).data.id).toBe('panel-xyz')
     expect((msg as { sourceDeviceId?: string }).sourceDeviceId).toBe('dev-chg-1')
 
     // ws1 不应收到（被排除）
@@ -225,7 +225,7 @@ describe('sendToolCall', () => {
 
     expect(sent).toBe(true)
     const msg = await p2
-    expect((msg as { requestId: string }).requestId).toBe('req-1')
+    expect((msg as unknown as { requestId: string }).requestId).toBe('req-1')
 
     // ws1 不应收到
     await expect(
@@ -246,7 +246,7 @@ describe('sendToolCall', () => {
 
     expect(sent).toBe(true)
     const msg = await p
-    expect((msg as { tool: string }).tool).toBe('any_tool')
+    expect((msg as unknown as { tool: string }).tool).toBe('any_tool')
   })
 })
 

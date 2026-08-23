@@ -76,6 +76,12 @@ export interface PrincipalLike {
 export interface AppStateLike {
   appStorage: Record<string, Record<string, unknown>>
   createdAt?: number
+  credits?: {
+    used?: number
+    permanent?: { quota: number; used: number }
+    monthly?: { quota: number; used: number; expiresAt: number }
+    [k: string]: unknown
+  }
   [k: string]: unknown
 }
 

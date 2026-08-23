@@ -10,10 +10,11 @@ import { initializeSchema } from '../../src/db/schema.js'
 import { seedBuiltinTemplates } from '../../src/db/seed.js'
 
 let poolCounter = 0
+const baseSqliteDir = process.env.SQLITE_PATH ? process.env.SQLITE_PATH.replace(/\.[0-9]+\.[0-9]+\.db.*$/, '') : '/tmp/test.db'
 
 export async function createTestDb(): Promise<{ pool: Pool; cleanup: () => Promise<void> }> {
   // 每个测试 DB 独立文件，避免污染
-  const dbPath = `${process.env.SQLITE_PATH}.${process.pid}.${++poolCounter}.db`
+  const dbPath = `${baseSqliteDir}.${process.pid}.${++poolCounter}.db`
   process.env.SQLITE_PATH = dbPath
 
   // 清除可能的 pool override，并关闭旧 pool（强制 initDb 创建新连接）

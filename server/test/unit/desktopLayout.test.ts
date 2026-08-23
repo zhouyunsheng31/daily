@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { Check } from 'typebox/value' with { 'resolution-mode': 'import' }
+import { Check } from 'typebox/value'
 import desktopLayoutSchema from '../../../shared/webos-contracts/desktop-layout.schema.json' with { type: 'json' }
 
 const FIXTURES_DIR = join(
