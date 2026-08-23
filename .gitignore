@@ -199,3 +199,14 @@ tmp/
 
 # Operit 运行时自动备份（聊天/对象存储，持续增长，不入库）
 .backup/
+
+# 2026-08-23：临时运维/dsh 调试脚本（含服务器 SSH 密码明文，公开仓库不可入库；如需共享请先脱敏）
+scripts/dsh-relay/
+scripts/deploy-probe.py
+scripts/deploy-v2.py
+scripts/deploy-wx.py
+scripts/probe2.py
+scripts/read_dsh_presets.py
+scripts/read_presets_js.py
+scripts/search_dsh_modes.py
+scripts/test-stream.py
