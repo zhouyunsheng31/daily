@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 11:45 · 1785f9a · docs: 重构系统权威 API 参考手册与 README，全面对齐 webOS 双端同构与包体系架构
+
+**修改文件路径**：
+- `README.md`
+- `docs/api-reference.md`
+- `docs/developer-guide.md`
+- `CHANGELOG.md`
+
+**改动内容**：
+1. **重构 `docs/api-reference.md`（webOS API 权威参考手册）**：
+   - 彻底废弃旧版 Legacy Dashboard 时代过时的 Panels/Widgets/WS 接口描述；
+   - 系统化整理 15 大核心模块全量端点：通用鉴权机制、Bootstrap & 用户凭证、Chat 流式对话（SSE 协议）、Apps 管理与私有存储、13 种组合式包体系（Packages API）、App API 体系（Node vm 受限沙箱、secrets 托管、public 跨应用调用）、统一包市场（Market API）、Net 共享空间与事件总线、文件服务与虚拟工作区、AI 媒体生成与安全 HTTP 出站代理、支付与计费系统（Afdian/兑换码）、桌面布局与系统时间、邮箱与游客认证中心、管理端 Trace 全链路诊断 API；
+   - 补充 App 前端 SDK（`window.daily`）与 Handler 编程规范。
+2. **重写根目录 `README.md`**：
+   - 全面刷新项目定位为「移动端优先 · AI-Native 的网页操作系统 (webOS)」；
+   - 详细呈现产品核心形态、双端同构架构优势（Web PWA + Android 沉浸客户端）、一切皆包规范、App API 管道设计与技术栈全景；
+   - 梳理清晰的快速启动命令与核心文档导航索引。
+3. **更新 `docs/developer-guide.md`**：
+   - 全面对齐 webOS 架构体系下的 App 开发、`api.json` 声明、受限 Handler 编写与市场发布流程。
+
 ### 2026-08-23 03:02 · a15decd · 包体系校验体验全面改造（Validation UX Overhaul），实现分级反馈、API 自愈与 Schema 开放化
 
 **修改文件路径**：
