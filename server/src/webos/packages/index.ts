@@ -11,6 +11,7 @@ import { ensurePackageSchema } from './packages-db.js'
 import {
   syncPackageFromFs,
   syncAllPackagesFromWorkspace,
+  ensureSystemPackages,
   setAppViewProvider,
   matchPackageFolder,
   PACKAGES_DIR,
@@ -21,7 +22,7 @@ import { lifecycleHooks } from './lifecycle-hooks.js'
 
 export { packagesRouter }
 export { ensurePackageSchema }
-export { syncPackageFromFs, syncAllPackagesFromWorkspace, setAppViewProvider, matchPackageFolder, PACKAGES_DIR, PACKAGE_MANIFEST }
+export { syncPackageFromFs, syncAllPackagesFromWorkspace, ensureSystemPackages, setAppViewProvider, matchPackageFolder, PACKAGES_DIR, PACKAGE_MANIFEST }
 export { listForUser, getDetailForUser } from './packages-service.js'
 
 // ---- W4 引擎生命周期挂接（install/uninstall 钩子；见 lifecycle-hooks.ts） ----

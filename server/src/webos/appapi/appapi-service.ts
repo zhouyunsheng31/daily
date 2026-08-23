@@ -14,7 +14,7 @@ import { Type } from 'typebox'
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { validateApiSpec } from '../contracts/index.js'
 import { listPackages } from '../packages/packages-db.js'
-import { resolvePackageFilePath, PACKAGE_MANIFEST, PACKAGES_DIR } from '../packages/packages-service.js'
+import { resolvePackageFilePath, PACKAGE_MANIFEST, PACKAGES_DIR, syncAllPackagesFromWorkspace } from '../packages/packages-service.js'
 import {
   getWorkspaceRoot,
   logAgentAction,
@@ -135,6 +135,7 @@ function readOwnManifest(userKey: string, packageId: string): Record<string, unk
  * 包内容一致；owner 级 W2）。api.json 必须通过契约校验，失败跳过（不阻断其它包）。
  */
 export async function loadApiSpecs(userKey: string): Promise<LoadedApiSpec[]> {
+  await syncAllPackagesFromWorkspace(userKey)
   const rows = await listPackages({ ownerKey: userKey, type: 'api' })
   const out: LoadedApiSpec[] = []
   for (const row of rows) {

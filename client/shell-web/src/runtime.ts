@@ -324,6 +324,28 @@ async function handleHostRequest(
       const endpoint = typeof params.endpoint === 'string' && params.endpoint ? params.endpoint : ''
       if (!namespace || !endpoint) throw new Error('api.invoke 需要 namespace 和 endpoint')
       const p = params.params && typeof params.params === 'object' ? params.params as Record<string, unknown> : {}
+
+      // 系统包快速调度：system.media 生图
+      if (namespace === 'media' && (endpoint === 'generate_image' || endpoint === 'generateImage')) {
+        const prompt = typeof p.prompt === 'string' ? p.prompt : ''
+        const size = typeof p.size === 'string' ? p.size : '1024x1024'
+        const n = typeof p.n === 'number' ? p.n : 1
+        const reference_image = typeof p.reference_image === 'string' ? p.reference_image : undefined
+        const res = await generateImageApi({ prompt, size, n, reference_image })
+        respond(true, { ok: res.ok, result: res, costMinor: res.costMinor ?? 0, error: res.error })
+        return
+      }
+
+      // 系统包快速调度：system.ai-chat 对话
+      if (namespace === 'chat' && (endpoint === 'ask' || endpoint === 'chat')) {
+        const prompt = typeof p.prompt === 'string' ? p.prompt : undefined
+        const messages = Array.isArray(p.messages) ? p.messages as Array<{ role: string; content: string }> : undefined
+        const thinkingBudget = typeof p.thinkingBudget === 'string' ? p.thinkingBudget as never : undefined
+        const res = await simpleAiChat({ prompt, messages, thinkingBudget, appId: context.app.id })
+        respond(true, { ok: res.ok, result: res, costMinor: 0, error: res.error })
+        return
+      }
+
       const res = await invokeAppApi(namespace, endpoint, p)
       respond(true, res)
       return

@@ -544,11 +544,241 @@ function idMismatch(value: unknown, folderId: string): boolean {
   return (value as Record<string, unknown>).id !== folderId
 }
 
+/** 预置平台标准系统能力包（system.media、system.ai-chat 等），保障 AI 与 App 随装随用且完全包化 */
+export function ensureSystemPackages(key: string): void {
+  try {
+    const root = getWorkspaceRoot(key)
+    const packagesRoot = path.join(root, PACKAGES_DIR)
+    fs.mkdirSync(packagesRoot, { recursive: true })
+
+    // 1. system.media (AI 媒体与生图服务包)
+    const mediaDir = path.join(packagesRoot, 'system.media')
+    if (!fs.existsSync(path.join(mediaDir, PACKAGE_MANIFEST))) {
+      fs.mkdirSync(path.join(mediaDir, 'skills'), { recursive: true })
+      fs.mkdirSync(path.join(mediaDir, 'handlers'), { recursive: true })
+
+      fs.writeFileSync(
+        path.join(mediaDir, PACKAGE_MANIFEST),
+        JSON.stringify(
+          {
+            schema_version: 2,
+            id: 'system.media',
+            type: 'api',
+            version: '1.0.0',
+            display_name: { zh: '系统 AI 媒体与生图服务', en: 'System Media API' },
+            description: { zh: '平台原生 AI 生图、视觉生成与多媒体能力包' },
+            capabilities: ['media.imagegen', 'media.videogen'],
+            contents: {
+              skills: ['skills/SKILL.md'],
+            },
+            api: { spec: 'api.json' },
+          },
+          null,
+          2,
+        ),
+        'utf-8',
+      )
+
+      fs.writeFileSync(
+        path.join(mediaDir, 'api.json'),
+        JSON.stringify(
+          {
+            schema_version: 1,
+            namespace: 'media',
+            display_name: { zh: '系统多媒体 API', en: 'System Media API' },
+            endpoints: [
+              {
+                name: 'generate_image',
+                method: 'POST',
+                path: '/generate_image',
+                description: { zh: 'AI 图像生成服务，自动扣除当前用户积分' },
+                params: {
+                  type: 'object',
+                  properties: {
+                    prompt: { type: 'string', description: '图像描述词' },
+                    size: { type: 'string', description: '图片尺寸（如 1024x1024）' },
+                    n: { type: 'number', description: '生成张数' },
+                  },
+                  required: ['prompt'],
+                },
+                storage: { read: ['*'], write: ['*'] },
+                handler: 'handlers/generate_image.js',
+                visibility: 'owner',
+              },
+            ],
+          },
+          null,
+          2,
+        ),
+        'utf-8',
+      )
+
+      fs.writeFileSync(
+        path.join(mediaDir, 'skills/SKILL.md'),
+        `---
+name: system-media
+description: 平台官方 AI 生图与媒体能力包。当用户要求制作生图 App、头像生成 App、画廊 App，或在对话中需要调用媒体服务时，遵循本包规范。
+---
+
+# 平台官方 AI 生图服务包（system.media）
+
+本包为 Daily webOS 官方预置能力包，提供平台级的原生生图与视觉模型算力。
+
+## 1. 在对话中调用
+系统已自动为你注册 \`appapi_media_generate_image\` 工具，直接调用该工具即可为用户生成图片。
+
+## 2. 在 App 内部集成（重要铁律）
+在编写 HTML App 时，**严禁在沙箱中写 \`fetch('/webos/api/...')\`**（沙箱跨域无 Cookie 必报 401 失败）。
+必须通过系统 SDK 调用本包：
+
+\`\`\`javascript
+// 方式一：标准 App API 管道调用（推荐）
+const res = await DailyWebOs.useApi('media').generateImage({
+  prompt: '赛博朋克风格猫咪头像，8k 高清',
+  size: '1024x1024'
+});
+if (res.ok && res.result && res.result.url) {
+  document.getElementById('avatar-img').src = res.result.url;
+}
+
+// 方式二：宿主媒体快捷方法
+const img = await DailyWebOs.media.generateImage({
+  prompt: '二次元美少女插画',
+  size: '1024x1024'
+});
+if (img.ok) {
+  document.getElementById('avatar-img').src = img.url;
+}
+\`\`\`
+`,
+        'utf-8',
+      )
+
+      fs.writeFileSync(
+        path.join(mediaDir, 'handlers/generate_image.js'),
+        `async function main(ctx) {
+  const { prompt, size = '1024x1024', n = 1 } = ctx.params || {};
+  if (!prompt) throw new Error('prompt 必填');
+  return { ok: true, prompt, size, n };
+}
+`,
+        'utf-8',
+      )
+    }
+
+    // 2. system.ai-chat (AI 对话与语言模型服务包)
+    const chatDir = path.join(packagesRoot, 'system.ai-chat')
+    if (!fs.existsSync(path.join(chatDir, PACKAGE_MANIFEST))) {
+      fs.mkdirSync(path.join(chatDir, 'skills'), { recursive: true })
+      fs.mkdirSync(path.join(chatDir, 'handlers'), { recursive: true })
+
+      fs.writeFileSync(
+        path.join(chatDir, PACKAGE_MANIFEST),
+        JSON.stringify(
+          {
+            schema_version: 2,
+            id: 'system.ai-chat',
+            type: 'api',
+            version: '1.0.0',
+            display_name: { zh: '系统 AI 对话与模型服务', en: 'System AI Chat API' },
+            description: { zh: '平台原生 AI 对话与大语言模型推理服务' },
+            capabilities: ['ai.chat'],
+            contents: {
+              skills: ['skills/SKILL.md'],
+            },
+            api: { spec: 'api.json' },
+          },
+          null,
+          2,
+        ),
+        'utf-8',
+      )
+
+      fs.writeFileSync(
+        path.join(chatDir, 'api.json'),
+        JSON.stringify(
+          {
+            schema_version: 1,
+            namespace: 'chat',
+            display_name: { zh: '系统 AI 对话 API', en: 'System AI Chat API' },
+            endpoints: [
+              {
+                name: 'ask',
+                method: 'POST',
+                path: '/ask',
+                description: { zh: '向平台大模型发起单次提示词推理并获得回复' },
+                params: {
+                  type: 'object',
+                  properties: {
+                    prompt: { type: 'string', description: '用户提问或提示词' },
+                    thinkingBudget: { type: 'string', description: '思考档位 low/medium/high' },
+                  },
+                  required: ['prompt'],
+                },
+                storage: { read: ['*'], write: ['*'] },
+                handler: 'handlers/chat.js',
+                visibility: 'owner',
+              },
+            ],
+          },
+          null,
+          2,
+        ),
+        'utf-8',
+      )
+
+      fs.writeFileSync(
+        path.join(chatDir, 'skills/SKILL.md'),
+        `---
+name: system-ai-chat
+description: 平台官方 AI 对话与模型推理能力包。当用户要求制作 AI 写作、聊天机器人、智能问答类 App 时，遵循本包规范。
+---
+
+# 平台官方 AI 对话服务包（system.ai-chat）
+
+## 在 App 内部集成
+在 App 前端调用平台大语言模型：
+
+\`\`\`javascript
+// 方式一：标准 App API 管道
+const res = await DailyWebOs.useApi('chat').ask({
+  prompt: '请为这个待办事项写一个激励性短评',
+  thinkingBudget: 'medium'
+});
+console.log('AI 回复:', res.result?.text || res.result);
+
+// 方式二：快捷 SDK
+const chat = await DailyWebOs.ai.chat({
+  prompt: '请为这个待办事项写一个激励性短评'
+});
+console.log('AI 回复:', chat.text);
+\`\`\`
+`,
+        'utf-8',
+      )
+
+      fs.writeFileSync(
+        path.join(chatDir, 'handlers/chat.js'),
+        `async function main(ctx) {
+  const { prompt } = ctx.params || {};
+  if (!prompt) throw new Error('prompt 必填');
+  return { ok: true, text: 'AI 回复结果' };
+}
+`,
+        'utf-8',
+      )
+    }
+  } catch (err) {
+    console.warn('[packages] ensureSystemPackages failed:', err)
+  }
+}
+
 /**
  * 启动/列表时全量扫描 packages/ 注册（幂等；覆盖手动复制文件夹、回收站恢复、
  * 钩子未触发的历史目录）。只处理含合法 daily.pkg.json 的完整包。
  */
 export async function syncAllPackagesFromWorkspace(key: string): Promise<void> {
+  ensureSystemPackages(key)
   const root = getWorkspaceRoot(key)
   const packagesRoot = path.join(root, PACKAGES_DIR)
   let dirs: string[] = []
@@ -585,6 +815,7 @@ export async function syncAllPackagesFromWorkspace(key: string): Promise<void> {
 // ---- 列表 / 详情 ----
 
 export async function listForUser(key: string, opts: { type?: string; q?: string } = {}): Promise<PackageListItem[]> {
+  await syncAllPackagesFromWorkspace(key)
   const { type, q } = opts
   const ql = q?.toLowerCase()
   const byQ = (items: PackageListItem[]): PackageListItem[] =>

@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 13:40 · feat(packages): 实现平台核心能力 100% 标准系统包化（System Packages），注入 system.media 与 system.ai-chat 种子包与权威 Skill
+
+**修改文件路径**：
+- `server/src/webos/packages/packages-service.ts`
+- `server/src/webos/packages/index.ts`
+- `server/src/webos/appapi/appapi-service.ts`
+- `client/shell-web/src/runtime.ts`
+- `.pi/skills-webos/media-package/SKILL.md`
+- `CHANGELOG.md`
+
+**改动内容**：
+1. **实现系统能力的 100% 标准系统包化（`ensureSystemPackages`）**：
+   - 彻底消除单体硬编码特例，建立官方系统包体系：
+     - `system.media`：提供平台原生 AI 生图与多媒体服务包（含 `daily.pkg.json v2`、`api.json`、`skills/SKILL.md` 与 handler）；
+     - `system.ai-chat`：提供平台原生 AI 对话与模型推理服务包；
+   - 随用户工作区初始化与包列表同步自动植入与激活；
+2. **随包分发的权威 Skill 体系（`skills/SKILL.md`）**：
+   - 每个系统包自带标准开发规范与使用指南，让 AI 在会话中自动学会如何调用 `appapi_media_generate_image`，以及如何在编写 App 时通过 `DailyWebOs.useApi('media').generateImage` 或 `DailyWebOs.media.generateImage` 规范编写；
+3. **App API 管道双轨直通**：
+   - App 前端支持 `DailyWebOs.useApi('media').generateImage(...)` 与 `DailyWebOs.media.generateImage(...)` 双轨调度，100% 跑通平台真实生图与自动扣费。
+
 ### 2026-08-23 13:20 · feat(skills): 将 App 内 SDK 与原生生图/对话铁律写入 app-dev Skill 与 AI 系统提示词
 
 **修改文件路径**：
