@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
-### 2026-08-23 15:20 · fix(pi): 修复服务重启/缓存失效后 webOS 会话上下文丢失（AI「不记得前面的上下文」）
+### 2026-08-23 15:20 · 3cf926e · fix(pi): 修复服务重启/缓存失效后 webOS 会话上下文丢失（AI「不记得前面的上下文」）
 
 **背景**：用户反馈「安卓端和 AI 发消息，AI 没有前面的上下文」。按纪律先查对话记录（管理端三层 + 服务器 pm2 + session JSONL）确认：
 - 站长最新会话 `conv-1787463147985-0ptf2n`：13:33 做「绘梦·AI 生图」App 后，14:34 发「重新做一下」时 pi 会话**被重建**（pm2 日志 `webos session created in 158ms`），AI 思考过程原话：「日志只记录工具调用，不记录对话……拿不准你指的是哪一个」——只能翻工作区 execution.log 猜历史，对话上下文确实断了；
