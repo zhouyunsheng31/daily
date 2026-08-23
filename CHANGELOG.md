@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 17:2x · fix(imagegen): 修复生图 API 失败（上游域名失效 + 路径拼接缺失）
+
+**用户反馈**：检查生图 API。线上实测：`GET /imagegen/config` available=true 但 `POST /imagegen` 报 `UPSTREAM_ERROR: fetch failed`。
+**根因（两个叠加）**：
+1. 代码默认网关域名 **api.chatst.cn 已失效**（DNS NXDOMAIN，本地/服务器/公共 DNS 全部解析失败；8-20 仍可用）；文档与 .env.example / gen-image.sh 均为 **api.chatst.org**（解析正常、401 正常响应）——代码 fallback 与文档不一致；
+2. `CHATST_IMAGE_BASE_URL`（含 /v1）被直接当作 endpoint fetch，缺少 `/images/generations` 路径拼接 → 上游 `HTTP_404: Invalid URL (POST /v1)`。
+
+**修改文件**：
+- `server/src/imagegen/chatstImage.ts`（fallback 域名 .cn → .org；BASE_URL 与 `/images/generations` 拼接并去尾部斜杠）
+- 服务器 `.env` 追加 `CHATST_IMAGE_BASE_URL=https://api.chatst.org/v1`（备份 .env.bak-20260823）
+
+**验证**：见下方部署验证。
+
 ### 2026-08-23 16:5x · fix(chat): 修复「停止按钮无效 + 停止后再发消息瞬间重放旧任务内容」
 
 **用户反馈**：点停止只停渲染、AI 继续跑；停止后发新消息"瞬间出现一堆消息"。
