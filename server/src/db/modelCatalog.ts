@@ -243,7 +243,8 @@ export async function seedModelsIfEmpty(): Promise<void> {
 
   const now = Date.now()
   const zenKey = process.env.DEEPSEEK_API_KEY?.trim() ?? ''
-  const chatstGatewayKey = 'sk-Fxvm0LjrVwpUOqyXwCkfbQn62rotB0Xj8b1Srf4J3rziOOHA'
+  // 2026-08-23 安全整改：网关 key 从代码明文移入服务器 .env（git 公开仓库不存密钥）
+  const chatstGatewayKey = process.env.CHATST_API_KEY?.trim() ?? ''
   const visionKey = process.env.DEEPSEEK_VISION_API_KEY?.trim() ?? ''
 
   const models: Array<[string, string, string, string, string, ModelParams, boolean]> = [

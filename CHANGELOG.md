@@ -27,13 +27,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **验证**（prod 本机）：admin API cookie 鉴权（`access_token` JWT）列模型 3 个、CRUD 增删临时模型通过；用户端 `/webos/api/bootstrap`（游客）返回 3 个可选模型，`ai.model=deepseek/deepseek-v4-flash`，gemini `multimodal=True`、全部 `supportsThinking=True`；`https://admin.shadowshub.xyz/` 已服务新 hash，守卫不再误还原；用户端 `shadowshub.xyz/daily/` 服务 `index-8cGiec3m.js`（含模型切换 UI，28bea05 重建版）。git 推送 `b5b028b`，prod 已 `git pull` + `pm2 restart daily-server`。
 
-### 2026-08-23 23:1x · fix(webos)+fix(shell-web) 方案 A：删除条数限制（MAX_CHAT_MESSAGES=40）→ 90 万 token 字符预算闸门；前端恢复全量发送
+### 2026-08-23 23:1x · fix(webos)+fix(shell-web) 方案 A [ac0fd38]：删除条数限制（MAX_CHAT_MESSAGES=40）→ 90 万 token 字符预算闸门；前端恢复全量发送
 
 **背景（站长拍板）**：模型 deepseek-v4-flash（zen 网关）真实支持 1M 上下文；40 条限制为早期无状态直连时代的遗留护栏（git 基线前已有，与模型能力无关），造成 400 INVALID_MESSAGES 全员无法对话事故后，站长确认删除条数维度、改 token 预算维度。
 **修改文件**：
 - `server/src/routes/webos.ts`：`MAX_CHAT_MESSAGES=40` → `MAX_CHAT_INPUT_CHARS=1_350_000`（≈90 万 token 输入预算，日常远达不到，仅挡失控/恶意超大请求，与 nginx/express body limit 纵深防御）；`validateMessages` 删条数上限、改总量字符预算闸门（超限才拒绝，错误提示含实际字符数）；`MAX_REBUILD_HISTORY_CHARS` 24_000 → 900_000（编辑/回退重来历史重放放开到预算内，1M 窗口内）。
 - `client/shell-web/src/store.ts`：撤销 28bea05 的 34 条截断（当时为应急修复 400），恢复全量发送——服务端预算内、pi session 1M 承载，前端内存历史远小于预算无需截断。
 **验证**：`npx tsc --noEmit` EXIT=0；后端 pm2 restart（新 webos.ts 生效）；公网 60 条消息请求 → SSE start/delta 正常（旧代码必 400）；前端全量发送版 index-Rn_b6p6B.js 已上线（与服务端 22:15 基线产物 md5 一致 d313f6c7，无需重传 JS，仅替换 index.html）；`/daily/` 公网引用确认。
+
+### 2026-08-23 23:15 · fix(security) [a914caf~6378468 后本地提交]: chatst 网关 API Key 移出公开仓库（硬编码 → 服务器 .env 注入）
+
+**安全整改**：`server/src/db/modelCatalog.ts` 种子数据中 chatst 网关 key（`sk-Fxvm0...`）此前明文硬编码于公开仓库（zhouyunsheng31/daily 为 public）。已改为 `process.env.CHATST_API_KEY?.trim() ?? ''` 读取（缺失时为空，不影响其它模型）。服务器 `.env` 追加 `CHATST_API_KEY`（600 权限、不入库）+ `pm2 restart daily-server` 生效。
+**验证**：本地 `tsc --noEmit` 通过；生产 bootstrap 模型列表仍含 chatst/gemini-3.7-flash（env 注入）；`grep -r 'sk-Fxvm0' .` 仓库内已无明文。
+**建议（待用户）**：在 chatst 后台轮换原 key（已被公开推送到 GitHub 历史，虽有 reflog 但视为泄露）。
 
 ### 2026-08-23 22:56 · fix(shell-web) [28bea05]: 长会话全量发送触顶服务端 40 条上限 → 全员对话报错无法发送（400 INVALID_MESSAGES）
 
