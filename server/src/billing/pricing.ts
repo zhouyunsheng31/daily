@@ -46,7 +46,7 @@ export const BILLING_TABLE: BillingItem[] = [
   {
     kind: 'chat',
     label: 'AI 对话',
-    model: 'deepseek-v4-flash-0731',
+    model: 'deepseek-v4-flash',
     unitLabel: '元 / 百万 token',
     // 官方成本：输入(缓存未命中)¥1、输出¥2、缓存命中 ¥0.02（2026-08-02 查证）
     inputPerMillion: 1,

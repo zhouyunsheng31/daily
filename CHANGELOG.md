@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 04:40 · feat(model) · 主模型切至 zen 网关 DeepSeek V4 Flash + 识图功能模型全面生效
+
+**修改文件路径**：
+- `server/src/piBridge.ts`
+- `server/src/routes/webos.ts`
+- `server/src/billing/pricing.ts`
+- `server/.env`（不入库；本地与线上同步）
+- `CHANGELOG.md`
+
+**改动内容**：
+1. **主模型切换至 zen 网关**：`DEEPSEEK_BASE_URL=https://opencode.ai/zen/go/v1`、`DEEPSEEK_API_KEY=sk-5pyB…`（zen）、`DEEPSEEK_MODEL=deepseek/deepseek-v4-flash`；模型注册表移除 ChatST 聚合网关专属的 `gemini-3.7-flash` 与 `deepseek-v4-flash-0731`（zen 上不存在，不再可选），保留 `deepseek-v4-flash` / `deepseek-v4-pro`。
+2. **识图功能模型**：DeepSeek V4 Flash 等纯文本模型不支持识图 → 图片/视频统一走视觉功能模型（DeepSeek 官方 `deepseek-v4-flash-vision-exp`，`DEEPSEEK_VISION_API_KEY=sk-665f1…`；失败降级 MiniMax-M3）。`bridgeVisionIntoText` → `describeMedia` 对全部模型自动生效，用量落 `webos_vision_usage`（model 字段区分 provider），不扣用户积分。
+3. **计费对齐**：`BILLING_TABLE` chat 项 model 标签 `deepseek-v4-flash-0731` → `deepseek-v4-flash`（对话计费仍按成本 ×2 售价 × 高峰倍率）。
+
+**验证**：`npx tsc --noEmit` 通过；`npx vitest run test/unit/piBridge.test.ts` 104/104 全绿；本地端到端实测（PORT=3457）——guest 会话对话流 SSE 正常（模型 `deepseek/deepseek-v4-flash`，448 tokens 结算正常）；识图链路实测（纯色图）返回正确描述并落 `webos_vision_usage`（model=deepseek-v4-flash-vision-exp、status=ok、trigger=chat_bridge）。
+
 ### 2026-08-23 11:45 · a17a8e9 · docs: 重构系统权威 API 参考手册与 README，全面对齐 webOS 双端同构与包体系架构
 
 **修改文件路径**：

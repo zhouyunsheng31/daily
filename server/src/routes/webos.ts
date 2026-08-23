@@ -1744,7 +1744,7 @@ function markChatRecentDone(key: string, content: string): void {
 // ---------------------------------------------------------------------------
 // AI 链路：pi agent session（pi-coding-agent）+ DeepSeek 内置 provider
 // 2026-07-31 架构修正：不再自研 DeepSeek HTTP 直连，复用 piBridge 的
-// createWebosSession（pi 内置 deepseek/deepseek-v4-flash-0731，DEEPSEEK_API_KEY 认证）。
+// createWebosSession（pi 内置 deepseek/deepseek-v4-flash，zen 网关 + DEEPSEEK_API_KEY 认证）。
 // ---------------------------------------------------------------------------
 
 // piBridge 懒加载：与 index.ts 一致，避免模块加载阶段 import pi-coding-agent 挂起

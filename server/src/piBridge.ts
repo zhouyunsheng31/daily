@@ -2252,8 +2252,9 @@ export const __test = {
 // 背景：webOS 早期端点自研了 DeepSeek HTTP 直连（模型名 deepseek-chat /
 // deepseek-reasoner、自造 fast/balanced/deep/high 档位），偏离了“AI 能力由
 // pi agent 提供”的项目架构。现改为复用 pi-coding-agent 会话链路：
-// - 模型：pi 内置 deepseek provider 的 `deepseek/deepseek-v4-flash-0731`（ChatST
-//   聚合网关，baseUrl https://api.chatst.org/v1，可用 DEEPSEEK_MODEL / DEEPSEEK_BASE_URL 覆盖）
+// - 模型：pi 内置 deepseek provider 的 `deepseek/deepseek-v4-flash`（zen 聚合
+//   网关，baseUrl https://opencode.ai/zen/go/v1，可用 DEEPSEEK_MODEL /
+//   DEEPSEEK_BASE_URL 覆盖）
 // - 思考档：DeepSeek 官方四档 low/medium/high/max（pi 原生 xhigh 对应 max）
 // - API Key：服务端 DEEPSEEK_API_KEY（pi AuthStorage 显式注入）
 // - webOS 纯文字会话不注册画布工具（noTools + 空 customTools）
@@ -2345,7 +2346,7 @@ function registerDeepseekModels(
   baseUrl?: string,
 ): void {
   // 2026-08-17 用户决定：web 端 AI 改用**对话模型**（不输出推理流）。
-  // 背景：ChatST/推理网关（deepseek-v4-flash-0731 reasoning:true）下出现
+  // 背景：推理网关（deepseek-v4-flash-0731 reasoning:true，ChatST）下出现
   // 「思考与回答杂糅」「标题生成失败」——推理流 reasoning_effort 在网关侧
   // 返回结构不稳，前端 thinking/delta 混排、completeSimple 标题拿不到 content。
   // 对策：模型注册改 reasoning:false + thinkingLevelMap 置空，pi 不再请求
@@ -2373,8 +2374,11 @@ function registerDeepseekModels(
     baseUrl: effectiveBaseUrl,
     apiKey,
     models: [
-      flashModel('gemini-3.7-flash'),
-      flashModel('deepseek-v4-flash-0731'),
+      // 2026-08-23 模型切换：主模型走 zen 网关（opencode.ai/zen/go/v1）的
+      // deepseek-v4-flash；ChatST 聚合网关专属的 gemini-3.7-flash 与
+      // deepseek-v4-flash-0731 已从注册表移除（zen 上不存在，不再可选）。
+      // 识图功能模型（deepseek-v4-flash-vision-exp，DeepSeek 官方）不走本
+      // 注册表——由 vision/deepseekVision.ts 直连，见 m3Vision.describeMedia。
       flashModel('deepseek-v4-flash'),
       {
         id: 'deepseek-v4-pro',
