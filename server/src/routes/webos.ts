@@ -192,7 +192,14 @@ const HTTP_PROXY_RATE_PER_MINUTE = 30
 /** 分享链接基础地址（前端部署路径） */
 const APP_BASE_URL = process.env.WEBOS_BASE_URL ?? 'https://shadowshub.xyz/daily'
 
-const MAX_CHAT_MESSAGES = 40
+/**
+ * 2026-08-23 方案 A（站长拍板）：删除历史遗留的「条数」限制（早期无状态直连时代的
+ * 防滥用护栏；模型 deepseek-v4-flash 支持 1M 上下文，条数限制与能力无关且造成
+ * 400 INVALID_MESSAGES 全员无法对话事故），改为「字符预算」闸门：
+ * 90 万 token（≈135 万字符）输入预算，日常使用远达不到，仅挡失控/恶意超大请求
+ * （与 nginx/express body limit 构成纵深防御）。
+ */
+const MAX_CHAT_INPUT_CHARS = 1_350_000
 const MAX_MESSAGE_LENGTH = 12_000
 // 2026-08-16 识图链路：消息里带 data URI 图片时允许更大的体积（前端压缩后仍可能
 // 远超纯文本 12k 上限；M3 拿到 data URI 后会把原始 base64 替换为占位符再交给 DeepSeek）。
@@ -1654,10 +1661,11 @@ async function recordChatSessionLog(
 }
 
 function validateMessages(raw: unknown): ChatMessage[] {
-  if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_CHAT_MESSAGES) {
-    throw createError(400, 'INVALID_MESSAGES', `messages 必须是 1-${MAX_CHAT_MESSAGES} 条消息`)
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw createError(400, 'INVALID_MESSAGES', 'messages 必须是非空消息数组')
   }
-  return raw.map((item) => {
+  let totalChars = 0
+  const parsed = raw.map((item) => {
     if (!item || typeof item !== 'object') {
       throw createError(400, 'INVALID_MESSAGE', '消息格式不正确')
     }
@@ -1670,8 +1678,14 @@ function validateMessages(raw: unknown): ChatMessage[] {
     if (content.trim().length === 0 || content.length > contentLimit) {
       throw createError(400, 'INVALID_MESSAGE_CONTENT', `消息内容不能为空且不得超过 ${contentLimit} 字符`)
     }
-    return { role: row.role, content }
+    totalChars += content.length
+    return { role: row.role as 'user' | 'assistant', content }
   })
+  // 预算闸门：按字符估算 token（1 token ≈ 1.5 字符），超限拒绝（防失控/恶意）
+  if (totalChars > MAX_CHAT_INPUT_CHARS) {
+    throw createError(400, 'INVALID_MESSAGES', `消息内容合计 ${totalChars.toLocaleString()} 字符，超过 ${(MAX_CHAT_INPUT_CHARS / 10000).toFixed(0)} 万字预算（90 万 token），请精简历史或新建会话`)
+  }
+  return parsed
 }
 
 function resolveThinking(state: StoredState, value: unknown): WebOsThinkingLevel {
@@ -1906,7 +1920,8 @@ async function runPiPrompt(session: unknown, text: string, timeoutMs: number, ac
 // 重建 pi 会话后，把修改后的完整消息历史（不含最后一条 user 消息）格式化为
 // 一段背景文本拼进 userText，让 AI 基于修改后的历史重新推理，语义等价于
 // DeepSeek 的「编辑消息后重新生成」。历史过长时截断（保留开头与结尾）。
-const MAX_REBUILD_HISTORY_CHARS = 24_000
+// 2026-08-23 方案 A：24k 字符 → 90 万字符（与 MAX_CHAT_INPUT_CHARS 对齐，1M 窗口内）
+const MAX_REBUILD_HISTORY_CHARS = 900_000
 function formatHistoryContext(messages: ChatMessage[]): string {
   const parts: string[] = []
   for (const message of messages) {

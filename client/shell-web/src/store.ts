@@ -354,14 +354,12 @@ function errorMessage(error: unknown): string {
 }
 
 /** 前端时间线消息 → 服务端会话消息（tool 分段不参与上下文，assistant 拼回纯文本）。
- * 2026-08-23 线上事故修复：发送上下文按条数预算截断（服务端上限 MAX_CHAT_MESSAGES=40，
- * 见 server/src/routes/webos.ts）——此前长会话全量发送触顶 400 INVALID_MESSAGES，全员无法对话。
- * 保留最近 SEND_CONTEXT_LIMIT 条，叠加新消息/系统称呼注入后发送序 ≤36，留足余量。 */
-const SEND_CONTEXT_LIMIT = 34
-
+ * 2026-08-23 方案 A（站长拍板）：服务端已删除「条数」限制（MAX_CHAT_MESSAGES=40 →
+ * 字符预算 MAX_CHAT_INPUT_CHARS=135 万字符 ≈ 90 万 token，见 server/src/routes/webos.ts），
+ * 前端恢复全量发送——模型 deepseek-v4-flash 支持 1M 上下文，历史由 pi session 承载；
+ * 前端内存历史远小于预算（localStorage 缓存本身有上限），无需截断。 */
 function buildSendMessages(messages: UiChatMessage[]): WebOsChatMessage[] {
-  const source = messages.length > SEND_CONTEXT_LIMIT ? messages.slice(-SEND_CONTEXT_LIMIT) : messages
-  return source
+  return messages
     .map((message): WebOsChatMessage | null => {
       if (message.role === 'user') return message.content.trim() ? message : null
       const content = 'segments' in message
