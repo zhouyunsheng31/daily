@@ -5860,18 +5860,26 @@ webosRouter.post('/chat/stream', async (req, res, next) => {
     const sourceVersionId = typeof body.sourceVersionId === 'string' ? body.sourceVersionId : null
     const lastUser = [...messages].reverse().find((message) => message.role === 'user')
     if (!lastUser) throw createError(400, 'INVALID_MESSAGES', '缺少 user 消息')
-    // 2026-08-18 rebuild 优化（用户反馈：刷新/重发消息会像第一条消息一样重跑
-    // 整个上下文 + 重新执行开场 skill（读记忆/存快照等），一次多花上万 tokens）：
-    // 旧实现：disposeWebosSessions 删除会话与 JSONL 文件 → 全新 session 重新加载
-    //   skills 并重新执行开场流程，且 historyContext 把整段历史文本重放一遍 =
-    //   「上下文没有损失但事实上跑了两遍」。
-    // 新实现（会话存活时）：**不销毁会话、不重放历史**——复用当前内存会话上下文，
-    //   AI 能看到之前已经执行过开场（读记忆/快照等记录都在上下文里），不会重复
-    //   执行；token 消耗回到普通消息水平（几百 tokens 而非上万）。
-    // 兜底（会话丢失，如服务重启/超时清理）：仍回退 historyContext 重放，避免
-    //   AI 完全失忆；但同样不再 dispose（本来就没有会话可清）。
-    const { hasWebosSession } = await loadPiBridge()
-    const sessionAlive = rebuild && hasWebosSession(principal.key, conversationId)
+    // 2026-08-23 回退重来语义修复（用户反馈：点「回退重来」只是删了眼前渲染，
+    // AI 并没有真正回退重来）：
+    // 8-18 起 rebuild 且会话存活时**不再 dispose**，只在 userText 里加一句
+    // "请忽略旧回复"——但 pi 会话内存中**被删掉的用户消息/旧 AI 回复/工具调用
+    // 仍然全部留在上下文里**，AI 依然带着旧记忆作答（"回退重来"失效）。
+    // 正确语义：rebuild=true 必须**销毁当前 pi 会话（内存 + JSONL 文件）并重建**，
+    // 同时把前端传来的「截断后的保留历史」（messages.slice(0,-1)）经
+    // formatHistoryContext 重放为背景——AI 只知道重来之后的历史，等价于
+    // DeepSeek 的「编辑消息后重新生成」。
+    // 注：8-18 改动的动机（重发消息重复执行开场 skill 多花 token）不适用于 rebuild
+    // 场景（用户主动重来的低频操作，语义正确性优先）；普通消息（非 rebuild）不受影响。
+    const { hasWebosSession, disposeWebosSessions: rebuildDispose } = await loadPiBridge()
+    let sessionAlive = rebuild && hasWebosSession(principal.key, conversationId)
+    if (rebuild && sessionAlive) {
+      rebuildDispose(principal.key, conversationId)
+      sessionAlive = false
+      tlog(`chat rebuild conv=${conversationId} scope=${principal.key} sessionAlive=yes -> dispose + historyContext replay`)
+    } else if (rebuild) {
+      tlog(`chat rebuild conv=${conversationId} scope=${principal.key} sessionAlive=no (historyContext replay)`)
+    }
     const timePrefix = beijingTimePrefix()
     const rebuildNotice = rebuild && sessionAlive
       ? '（系统提醒：用户修改了此前的消息或要求重新生成。请忽略你之前对应的旧回复，直接针对下面这条最新消息重新作答。本会话开场的初始化（读记忆/存快照等一次性动作）已完成，无需重复执行。）\n\n'
@@ -5896,12 +5904,11 @@ webosRouter.post('/chat/stream', async (req, res, next) => {
     // 上下文与记忆；不同会话独立上下文，可并行工作），并注入 App 工具集 + 工作区
     // 文件系统工具，让 pi agent 在对话中直接创建/修改 App（文件夹即 App 路径）。
     const { createWebosSession, disposeWebosSessions, abortWebosSessions } = await loadPiBridge()
+    // 2026-08-23 rebuild 的 dispose 已在上方（userText 构造前）执行——
+    // 此处不再处理；下方 createWebosSession 将创建全新会话并自动
+    // 恢复 JSONL（重建后空白）或新建，historyContext 已拼入 userText。
     if (rebuild) {
-      // 2026-08-18 不再 dispose：保留会话上下文，避免刷新/重发消息重复执行
-      // 开场 skill 与重放完整历史（用户实测：刷新一次多花上万 tokens）。
-      // 会话存活→直接复用；会话丢失→historyContext 重放兜底（见上方 userText 构造）。
-      // 旧逻辑 `disposeWebosSessions` 已挪到真正需要清空会话的错误恢复路径。
-      tlog(`chat rebuild conv=${conversationId} scope=${principal.key} sessionAlive=${sessionAlive} (keep/history fallback)`)
+      tlog(`chat rebuild continue conv=${conversationId} scope=${principal.key} sessionAlive=${sessionAlive} (dispose done, recreate)`)
     }
     // 2026-08-11 架构统一：任务缓冲 key（scope:convId:thinking）——活跃连接登记/
     // 事件转发/结束信号统一用它（声明提前，供 setupSse 后登记活跃连接使用）
