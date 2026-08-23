@@ -2322,6 +2322,12 @@ interface SharedWebosServices {
 }
 const sharedWebosServices = new Map<string, SharedWebosServices>()
 
+/** 2026-08-23 失效共享 pi 服务缓存（技能安装/启停后调用）：
+ *  新会话创建时将重新扫描 skills，新技能立即被 AI 加载。 */
+export function invalidateWebosServices(): void {
+  sharedWebosServices.clear()
+}
+
 /** 预热 pi 模块（2026-08-10）：server 启动后后台 import pi-coding-agent，
  *  首次对话不再承担模块加载开销（tsx 环境加载约 8-26s）。幂等，失败自动重试。 */
 let piPreheatScheduled = false

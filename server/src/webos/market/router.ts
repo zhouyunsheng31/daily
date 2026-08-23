@@ -20,6 +20,8 @@ import {
   unpublishPackage,
   installMarketPackage,
   listMyMarketInstalls,
+  myInstallDetail,
+  toggleMarketInstall,
   type MarketResult,
 } from './service.js'
 
@@ -114,6 +116,27 @@ marketRouter.get('/market/:id', (req, res) => {
   const p = readPrincipal(res, req, false)
   if (!p) return
   void marketDetail(p, str(req.params.id))
+    .then((r) => send(res, r))
+    .catch((error) => { if (!res.headersSent) res.status(500).json({ ok: false, error: 'INTERNAL', message: error instanceof Error ? error.message : String(error) }) })
+})
+
+// ---- 启停开关（2026-08-23）：POST {enabled} —— 暂停/恢复已安装包的运行时产物 ----
+marketRouter.post('/market/:id/toggle', (req, res) => {
+  const p = readPrincipal(res, req, false)
+  if (!p) return
+  const enabled = req.body && typeof req.body === 'object' && typeof (req.body as { enabled?: unknown }).enabled === 'boolean'
+    ? (req.body as { enabled: boolean }).enabled
+    : null
+  if (enabled === null) { res.status(400).json({ ok: false, error: 'MISSING_ENABLED', message: '需要 body { enabled: boolean }' }); return }
+  void toggleMarketInstall(p, str(req.params.id), enabled)
+    .then((r) => send(res, r))
+    .catch((error) => { if (!res.headersSent) res.status(500).json({ ok: false, error: 'INTERNAL', message: error instanceof Error ? error.message : String(error) }) })
+})
+
+marketRouter.get('/market/:id/install-state', (req, res) => {
+  const p = readPrincipal(res, req, false)
+  if (!p) return
+  void myInstallDetail(p, str(req.params.id))
     .then((r) => send(res, r))
     .catch((error) => { if (!res.headersSent) res.status(500).json({ ok: false, error: 'INTERNAL', message: error instanceof Error ? error.message : String(error) }) })
 })

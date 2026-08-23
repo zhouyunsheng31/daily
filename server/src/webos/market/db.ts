@@ -33,6 +33,8 @@ export interface MarketInstallRow {
   callerKey: string
   type: string
   installedAt: number
+  /** 启停开关（2026-08-23）：false = 暂时停用（消费端过滤 + 移除运行时产物，可恢复） */
+  enabled: boolean
 }
 
 export async function ensureMarketSchema(): Promise<void> {
@@ -62,9 +64,14 @@ export async function ensureMarketSchema(): Promise<void> {
       caller_key TEXT NOT NULL,
       type TEXT NOT NULL DEFAULT 'api',
       installed_at BIGINT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
       PRIMARY KEY (package_id, caller_key)
     )
   `)
+  // 2026-08-23 幂等补列（旧库无 enabled）
+  try {
+    await pool.query(`ALTER TABLE market_installs ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1`)
+  } catch { /* 已存在 */ }
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_market_installs_caller ON market_installs(caller_key, installed_at)`)
   console.log('[market] market schema ensured')
 }
@@ -104,7 +111,13 @@ function mapEntryRow(raw: unknown): MarketEntryRow | null {
 const mapInstallRow = (raw: unknown): MarketInstallRow | null => {
   if (!raw || typeof raw !== 'object') return null
   const r = raw as Record<string, unknown>
-  return { packageId: String(r.package_id), callerKey: String(r.caller_key), type: String(r.type), installedAt: Number(r.installed_at ?? 0) }
+  return {
+    packageId: String(r.package_id),
+    callerKey: String(r.caller_key),
+    type: String(r.type),
+    installedAt: Number(r.installed_at ?? 0),
+    enabled: r.enabled === 0 || r.enabled === false ? false : true,
+  }
 }
 
 export async function upsertMarketEntry(input: Omit<MarketEntryRow, 'id' | 'createdAt' | 'updatedAt'>): Promise<MarketEntryRow> {
@@ -171,14 +184,45 @@ export async function setMarketEntryStatus(packageId: string, status: 'live' | '
   await pool.query(`UPDATE market_entries SET status=$1, updated_at=$2 WHERE package_id=$3`, [status, Date.now(), packageId])
 }
 
-export async function upsertMarketInstall(packageId: string, callerKey: string, type: string): Promise<void> {
+export async function upsertMarketInstall(packageId: string, callerKey: string, type: string, enabled = true): Promise<void> {
   const pool = getPool()
   await pool.query(
-    `INSERT INTO market_installs (package_id, caller_key, type, installed_at)
-     VALUES ($1,$2,$3,$4)
-     ON CONFLICT (package_id, caller_key) DO UPDATE SET type=EXCLUDED.type, installed_at=EXCLUDED.installed_at`,
-    [packageId, callerKey, type, Date.now()],
+    `INSERT INTO market_installs (package_id, caller_key, type, installed_at, enabled)
+     VALUES ($1,$2,$3,$4,$5)
+     ON CONFLICT (package_id, caller_key) DO UPDATE SET type=EXCLUDED.type, installed_at=EXCLUDED.installed_at, enabled=EXCLUDED.enabled`,
+    [packageId, callerKey, type, Date.now(), enabled ? 1 : 0],
   )
+}
+
+/** 2026-08-23 启停开关：切 enabled（消费端各自按它过滤/恢复运行时产物） */
+export async function setMarketInstallEnabled(packageId: string, callerKey: string, enabled: boolean): Promise<MarketInstallRow | null> {
+  const pool = getPool()
+  const r = await pool.query(
+    `UPDATE market_installs SET enabled=$3, installed_at=installed_at
+     WHERE package_id=$1 AND caller_key=$2 RETURNING *`,
+    [packageId, callerKey, enabled ? 1 : 0],
+  )
+  return r.rows?.[0] ? mapInstallRow(r.rows[0]) : null
+}
+
+/** 调用者全部安装的 enabled 映射（消费端启用过滤用） */
+export async function listInstallEnabledMap(callerKey: string): Promise<Map<string, boolean>> {
+  const pool = getPool()
+  const map = new Map<string, boolean>()
+  try {
+    const r = await pool.query(`SELECT package_id, enabled FROM market_installs WHERE caller_key=$1`, [callerKey])
+    for (const row of r.rows ?? []) {
+      if (!row || typeof row !== 'object') continue
+      map.set(String((row as Record<string, unknown>).package_id), (row as Record<string, unknown>).enabled === 0 ? false : true)
+    }
+  } catch { /* 表不存在/查询失败时返回空（保守：视为全部启用） */ }
+  return map
+}
+
+/** 单包是否启用（未登记 = 启用） */
+export async function isMarketInstallEnabled(packageId: string, callerKey: string): Promise<boolean> {
+  const row = await getMarketInstall(packageId, callerKey)
+  return row ? row.enabled : true
 }
 
 export async function getMarketInstall(packageId: string, callerKey: string): Promise<MarketInstallRow | null> {

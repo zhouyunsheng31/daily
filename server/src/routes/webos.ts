@@ -77,9 +77,15 @@ import { syncPackageFromFs, syncAllPackagesFromWorkspace } from '../webos/packag
 // 2026-08-21（W2 App API）：handler 受限 vm + 动态工具 + owner 级端点（deps 由本文件注入防循环）
 import { setAppApiDeps, registerDynamicTools } from '../webos/appapi/index.js'
 // 2026-08-21（W3 统一包市场 R14）：AI 找包/装包工具（search_market_packages / install_market_package）
-import { registerMarketTools } from '../webos/market/index.js'
+import { registerMarketTools, setMarketDeps, getActiveTheme } from '../webos/market/index.js'
 // 2026-08-22 云服务器远程运维与微信通道管理工具
 import { createServerOpsTools } from '../webos/serverOpsTools.js'
+
+// 2026-08-23 统一安装引擎 deps 注入：market 安装 app 包需读写调用者 state（写桌面）
+setMarketDeps({
+  loadState: (p) => loadState(p as never),
+  saveState: (p, s) => saveState(p as never, s as never),
+})
 
 // W2 App API 依赖注入：loadState/saveState/chargeCredits 均为本文件函数声明（已提升），
 // 模块加载时注册，供 appapi-service 在 invoke 时访问 appStorage/扣积分（避免循环依赖）
@@ -1348,6 +1354,11 @@ function buildBootstrap(principal: Principal, state: StoredState) {
       models: [modelConfig()],
     },
     apps: [...builtinApps, ...userApps],
+    // 2026-08-23 市场主题包（installed/）当前应用的设计 tokens：
+    // 前端把它注入桌面/App iframe 的 :root，实现「安装主题即换肤」
+    theme: (() => {
+      try { return getActiveTheme(principal.key) } catch { return null }
+    })(),
     payment: paymentState(),
     email: cloneJson(state.email),
     billing: {

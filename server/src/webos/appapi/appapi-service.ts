@@ -131,8 +131,9 @@ function readOwnManifest(userKey: string, packageId: string): Record<string, unk
 }
 
 /**
- * 聚合某用户本人所有 type=api 的包 specs（每条按 active 版本从文件夹现读，保证与
- * 包内容一致；owner 级 W2）。api.json 必须通过契约校验，失败跳过（不阻断其它包）。
+ * 聚合某用户本人 + 市场安装（installed/）所有 api/toolpkg 包 specs（每条按 active
+ * 版本从文件夹现读，保证与包内容一致；owner 级 W2 + 2026-08-23 安装即用）。
+ * api.json 必须通过契约校验，失败跳过（不阻断其它包）。
  */
 export async function loadApiSpecs(userKey: string): Promise<LoadedApiSpec[]> {
   await syncAllPackagesFromWorkspace(userKey)
@@ -152,6 +153,31 @@ export async function loadApiSpecs(userKey: string): Promise<LoadedApiSpec[]> {
       spec: (cr.normalized ?? raw) as WebOsApiSpecLike,
       manifestActive: manifest,
     })
+  }
+  // 2026-08-23 市场安装的 api/toolpkg/mcp 包（installed/ 目录，enabled 过滤在扫描内）：
+  // 整包已落地，api.json 直接在此发现 → appapi_* 工具自动注册（无需单独开通）
+  try {
+    const { listInstalledPackages, readInstalledManifest } = await import('../market/installed.js')
+    const installed = await listInstalledPackages(userKey, { type: undefined })
+    for (const pkg of installed) {
+      const type = pkg.type
+      if (!['api', 'toolpkg', 'mcp'].includes(type)) continue
+      if (out.some((s) => s.packageId === pkg.packageId)) continue // 与本人包重名时以本人为准
+      const manifest = pkg.manifest
+      const specRel = apiSpecRel(manifest)
+      const raw = readJsonFile(path.join(pkg.dir, specRel))
+      const cr = raw !== null ? validateApiSpec(raw) : null
+      if (!cr || !cr.ok) continue
+      out.push({
+        packageId: pkg.packageId,
+        ownerKey: userKey, // 市场安装后视同本人拥有的调用者（R15 计费按调用者）
+        activeVersionId: null,
+        spec: (cr.normalized ?? raw) as WebOsApiSpecLike,
+        manifestActive: readInstalledManifest(userKey, pkg.packageId),
+      })
+    }
+  } catch (error) {
+    console.warn('[appapi] installed specs scan failed:', error instanceof Error ? error.message : String(error))
   }
   return out
 }

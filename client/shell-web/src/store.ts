@@ -91,6 +91,8 @@ interface ShellStore {
   logo: { mime: string; base64: string } | null
   /** 用户头像（可替换）：工作区 system/avatar.svg|png；null = 首字母 */
   avatar: { mime: string; base64: string } | null
+  /** 2026-08-23 市场主题包 tokens（bootstrap.theme.tokens）：注入桌面/App iframe :root */
+  themeTokens: Record<string, string> | null
   /** 定制加载页：工作区 system/boot.html + boot.json（AI 可替换） */
   bootConfig: { html: string | null; durationMs: number }
   activeView: 'assistant' | 'desktop' | 'files' | 'profile' | 'app' | 'store' | 'experience'
@@ -1142,6 +1144,7 @@ export const useShellStore = create<ShellStore>((set, get) => ({
   // 启动首帧先恢复缓存 logo（bootstrap 返回前 BootScreen 显示真实 Logo 而非默认「D」）
   logo: readCachedLogo(),
   avatar: null,
+  themeTokens: null,
   bootConfig: readCachedBoot() ?? { html: null, durationMs: 1200 },
   activeView: 'assistant',
   activeAppId: null,
@@ -1185,6 +1188,8 @@ export const useShellStore = create<ShellStore>((set, get) => ({
       logo: bootstrap.logo ?? null,
       avatar: bootstrap.avatar ?? null,
       bootConfig: nextBoot,
+      // 2026-08-23 市场主题包：bootstrap.theme.tokens 存入全局（注入桌面/App iframe :root）
+      themeTokens: (bootstrap as { theme?: { tokens?: Record<string, string> } | null }).theme?.tokens ?? null,
       ready: true,
       booting: false,
       error: null,
