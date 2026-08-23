@@ -11,15 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **用户反馈/验证发现**：统一复合包 E2E 中 A 发布 `test.unified`（type=api）恒报 `API_SPEC_MISSING`（包文件齐全、DB 已注册、GET /packages 能看到，但 loadApiSpecs 就是找不到合法 api.json）。
 **根因**：`server/src/webos/appapi/appapi-service.ts` 的 `readJsonFile` / `readHandlerSafe` 使用 **`require('node:fs')`**——服务器 `package.json` 为 `"type": "module"`（ESM），tsx 加载 ESM 模块时 `require` **未定义**，抛 ReferenceError 被 try/catch 静默吞掉 → 恒返回 null → 包 manifest/api.json/handler 全部读不到 → loadApiSpecs 跳过所有 api 包 → 发布报 API_SPEC_MISSING（同时 **appapi_* 动态工具注册、api handler 执行在线上从未真正生效**）。
 **修复**：静态 `import fs from 'node:fs'`，两处 `require('node:fs')` 改为 `fs`。
-**验证**：本地独立进程（initSandbox+initDb）走通链路；线上加分层日志实锤 `manifest=false raw=false fileExists=true`；修复后重试发布见后续 E2E 结果。
-（另注：排查期间发现 pm2 累计重启 448+ 次，疑似部署期间历史遗留；当前进程稳定。）
+**验证**：本地独立进程（initSandbox+initDb）走通链路；线上加分层日志实锤 `manifest=false raw=false fileExists=true`；修复后 A 发布 `test.unified` 成功（`{"ok":true,"publicEndpoints":["ping"]}`）。
+（另注：排查期间发现 pm2 累计重启 448+ 次，疑为部署期历史遗留/守护脚本无关；当前进程稳定、restarts 不再增长。）
 
 ### 2026-08-23 18:4x · fix(appapi): 市场安装的 api 包不得作 owner 路径执行/发布（fromInstalled 语义修正）
 
 **验证发现**：E2E 中 B 安装 `test.unified` 后调用 `POST /webos/api/appapi/test_unified/ping` 报 `HANDLER_MISSING: handler 文件不存在：handlers/ping.js`。
 **根因**：`loadApiSpecs` 的 installed 分支把市场安装包标记为 `ownerKey=调用者本人` → `resolveEndpoint(B)` 将安装包误判为本人包 → invokeEndpoint 走 owner 分支，用调用者 `packages/<id>/` 路径读 handler（实际整包在 `installed/<id>/`）→ 解析失败。同时 `publishNamespace/unpublishNamespace/publishPackage` 存在**越权发布安装包**隐患（可把他人 namespace 重新发布到自己名下）。
 **修复**（`server/src/webos/appapi/appapi-service.ts` + `server/src/webos/market/service.ts`）：LoadedApiSpec 增加 `fromInstalled` 标志（installed 分支=true，本人 packages 分支=false）；`invokeEndpoint` 的 owner 分支条件改为 `hit && !hit.fromInstalled`（安装包一律走 public 管道：属主执行 + 调用者计费）；`publishNamespace/unpublishNamespace/publishPackage` 的查找排除 `fromInstalled`（市场安装的包不可重复发布/撤回）。
-**验证**：见后续 E2E。
+**验证**：B 调 ping → `{"ok":true,"result":{"ok":true,"data":"pong"},"costMinor":1}`（属主 A 执行、调用者 B 计费）✅；A 调 ping → pong ✅；B 越权发布 → `FORBIDDEN 仅包所有者可发布` ✅。
+
+### 2026-08-23 18:5x · fix(market): 启停开关按内容驱动分派（复合包 skill/theme 真正可停用/恢复）
+
+**验证发现**：E2E 中 `POST /market/:id/toggle {"enabled":false}` 返回成功但主题未还原、skill 未移除。
+**根因**：`toggleMarketInstall` 按**包 type** 分派（skill/theme 分支仅处理 type=='skill'/'theme'），而统一复合包 type='api' 同时含 content skills/tokens → 走不进任何分支，只改了 enabled 记录。
+**修复**（`server/src/webos/market/service.ts`）：与 `provisionInstalled` 对齐，改为**内容驱动**判定——skill：`type=='skill' || contents.skills 非空 || 存在 SKILL.md`；theme：`type=='theme' || contents.tokens 非空`；app 分支保持原逻辑。
+**验证**：off → note「技能已停用；主题已恢复默认」+ bootstrap theme=null + skills/test.unified 移除 ✅；on → note「技能已恢复；✅ 主题已应用：7 个 CSS 变量」+ theme 恢复 + skills 恢复 ✅；前端构建产物已含 `data-daily-webos-theme` 注入逻辑（`/daily/assets/index-CSCguKSl.js`），bootstrap.theme.tokens → iframe :root 换肤链路全通 ✅。
 
 ### 2026-08-23 17:4x · fix(chat): 「回退重来」真正生效——rebuild=true 时销毁 pi 会话重建 + historyContext 重放
 
