@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 19:3x · docs(skill): package-market 完整版同步——Operit 本地副本与仓库权威版统一（鉴权校正 + 统一复合包 API）
+
+**背景**：站长确认「有没有给 Operit 自己装一份指导规范」——Operit 本地 skill（`/storage/emulated/0/Download/Operit/skills/daily-package-market/SKILL.md`）确实已装，但为旧版（§6.1 仍写 Bearer 鉴权、市场端点缺 toggle/install-state）。
+**修改**：
+- Operit 本地副本：§6.1 鉴权实测校正（JWT 走 `Cookie: access_token`，Bearer 是 SERVER_TOKEN 通道→401）；§6.3 补 install 安装即用语义（installed/ + app/skill/appapi/theme）、启停开关 toggle、安装态 install-state、public 调用语义（属主执行+调用者计费）；
+- 仓库权威版 `.pi/skills-webos/package-market/SKILL.md`：以 Operit 完整版（385 行，含 Sideload 直装/自愈清单/报错对照）替换，两处一致。
+**验证**：grep 校验两文件均含 `Cookie: access_token`、`install-state`、`Sideload`；git 推送 + 服务器同步后 AI 新会话读取最新版。
+
 ### 2026-08-23 19:1x · docs(api): API 文档与系统指导 skill 同步统一复合包改造（toggle/install-state/鉴权校正）
 
 **背景**：站长核查「API 文档是否同步更新」——系统预置包（system.media / system.ai-chat，api 型自带指导 SKILL.md）与全局指导 skill（`.pi/skills-webos/` 的 package-market / media-package / app-dev / design 等）均已存在并有线上；但三份 API 文档停留在 W3 原始 6 端点，未同步本次统一复合包改造，且鉴权写法（Bearer 传 JWT）与实际不符（实测 401）。
