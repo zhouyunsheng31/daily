@@ -57,7 +57,10 @@ interface ModelRow {
 function toCatalogModel(row: ModelRow): CatalogModel {
   let params: ModelParams = {}
   try {
-    const parsed = JSON.parse(row.params || '{}')
+    // sqlite 包装层已把 JSON TEXT 自动解析为对象（模拟 PG JSONB），
+    // 这里兼容「已是对象 / 仍是字符串」两种情况，避免二次 JSON.parse 抛错吞掉参数。
+    const raw = row.params
+    const parsed = typeof raw === 'string' ? JSON.parse(raw || '{}') : (raw ?? {})
     if (parsed && typeof parsed === 'object') params = parsed
   } catch { /* 参数损坏时回退空对象 */ }
   const key = row.api_key || ''
@@ -113,7 +116,8 @@ export async function listEnabledModelsForRegistry(): Promise<Array<{
     const r = row as ModelRow
     let params: ModelParams = {}
     try {
-      const parsed = JSON.parse(r.params || '{}')
+      const raw = r.params
+      const parsed = typeof raw === 'string' ? JSON.parse(raw || '{}') : (raw ?? {})
       if (parsed && typeof parsed === 'object') params = parsed
     } catch { /* ignore */ }
     return {

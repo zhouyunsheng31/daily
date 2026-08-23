@@ -236,6 +236,13 @@ export interface SearchStats {
     mauChangePct: number
   }
   bySource: Record<string, { activeUsersWindow: number; activeUsersMonth: number }>
+  // 2026-08-23：补齐 search-stats 返回结构（此前缺失导致 admin-web tsc 构建失败）
+  total: { calls: number; ok: number; failed: number; successRate: number; creditsConsumed: number; avgLatencyMs: number; avgOkLatencyMs: number }
+  byDay: Array<{ day: string; calls: number; ok: number; failed: number }>
+  byEngine: Array<{ provider: string; displayName?: string; calls: number; ok: number; failed: number; successRate: number; avgLatencyMs: number; avgOkLatencyMs: number; creditsConsumed: number; lastCallAt: number | null }>
+  byTool: Array<{ tool: string; calls: number; ok: number; failed: number; successRate: number }>
+  byUser: Array<{ userKey: string; calls: number; ok: number; failed: number }>
+  failures: Array<{ id: unknown; createdAt: number; provider: string; tool: string | null; userKey: string | null; query: string | null; endpoint: string; latencyMs: number | null; errorMsg: string | null }>
 }
 
 // ============================================================================
