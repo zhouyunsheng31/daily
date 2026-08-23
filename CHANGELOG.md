@@ -20,7 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `client/android/core/.../WebosApi.kt` + `WebosRepository.kt`（新增 cancelChat）
 - `client/android/app/.../ChatViewModel.kt`（stop() 通知服务端 abort）
 
-**验证**：见下方部署验证。另排查教训：线上 pm2 实际以 `src/index.ts`（tsx）运行——**部署必须同步 src（git pull），仅更新 dist 不生效**（本轮已改走 git 通道）。
+**验证（线上部署走 git pull + pm2 restart 后实测）**：
+- `/chat/cancel` 返回 `{"ok":true,"aborted":1}`（此前恒 0 → AI 没停）✅
+- 长任务启动 7s → cancel → 立即发新消息：事件流仅 `start / thinking×2 / delta("OK") / done`——**0 条 background_progress、0 条 busy_waiting**（此前 405+ 条旧任务重放）✅
+- 旧任务后台 curl 随 cancel 立即结束（abort 生效，不再后台跑完）✅
+- 另排查教训：线上 pm2 实际以 `src/index.ts`（tsx）运行——**部署必须同步 src（git pull），仅更新 dist 不生效**（本轮已改走 git 通道）。
 
 ### 2026-08-23 15:20 · 3cf926e · fix(pi): 修复服务重启/缓存失效后 webOS 会话上下文丢失（AI「不记得前面的上下文」）
 
