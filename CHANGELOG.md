@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 15:20 · fix(pi): 修复服务重启/缓存失效后 webOS 会话上下文丢失（AI「不记得前面的上下文」）
+
+**背景**：用户反馈「安卓端和 AI 发消息，AI 没有前面的上下文」。按纪律先查对话记录（管理端三层 + 服务器 pm2 + session JSONL）确认：
+- 站长最新会话 `conv-1787463147985-0ptf2n`：13:33 做「绘梦·AI 生图」App 后，14:34 发「重新做一下」时 pi 会话**被重建**（pm2 日志 `webos session created in 158ms`），AI 思考过程原话：「日志只记录工具调用，不记录对话……拿不准你指的是哪一个」——只能翻工作区 execution.log 猜历史，对话上下文确实断了；
+- **根因**：pi-coding-agent 0.79.10 的 `SessionManager.create()` 总是「全新空会话」，**不会读取 sessionDir 已有 JSONL**（只有 `SessionManager.open(path)` 才加载既有会话）；上下文连续完全依赖进程内存缓存 `webosSessions`，缓存 miss（服务重启 / 错误恢复 dispose / 256 防泄漏淘汰）即失忆。8-17 的「文件持久化修复」实际未生效（create 不恢复既有文件；注释假设不成立）；
+- 会话 log 本身一直有保留（webos_chat_logs / webos_chat_sessions 含 reasoning，管理后台可查），但只作审计，不参与上下文恢复。
+
+**修改文件**：
+- `server/src/piBridge.ts`（`createWebosSession`）：恢复优先——sessionDir 已有 `.jsonl` 时取最新一个 `SessionManager.open(latest, sessionDir)` 恢复完整上下文（含工具调用/记忆，与安卓 harness `core.js` 的 existing→open 逻辑一致），无历史文件才 `SessionManager.create(cwd, sessionDir)` 新建；新增 `[PiBridge] webos session restored` 恢复日志；
+- `server/src/piBridge.ts`（`getWebosSessionForDebug`）：key 前缀修正——8-17 会话缓存 key 已从 `webos:scope:convId:thinking` 改为 `webos:scope:convId`，旧前缀带尾冒号导致 `hasWebosSession` 恒 false、rebuild 兜底（编辑/回退重来判会话存活）一直失效、重复重放历史。
+
+**验证（线上 154.64.249.172，已部署生效）**：
+- 新游客「请记住测试暗号：紫罗兰365」（明示不用工具，暗号只存在于 pi 会话上下文）→ `pm2 restart daily-server` 模拟服务重启 → 再问「刚才的暗号是什么」→ AI 直接答出「紫罗兰365」（input 仅 329 tokens，无历史重放）✅
+- 服务端日志确认 `[PiBridge] webos session restored conv=default file=2026-08-23T07-18-20-676Z_...jsonl (1 jsonl)` ✅
+- `npx tsc` 构建零错误、线上 health 正常、pm2 稳定（restart 后无崩溃）✅
+- 站长现有会话（conv-1787463147985-0ptf2n 等）历史 JSONL 完好，下次请求将自动恢复
+
 ### 2026-08-23 14:25 · ee907fc · feat(desktop): 交付桌面模板 V2，实现原生多页面体系、手势全面解绑与长按拖拽边缘自动创建新页面
 
 **修改文件路径**：

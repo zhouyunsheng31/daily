@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { join, extname } from 'path'
+import { join, extname, basename } from 'path'
 import { writeFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'fs'
 import { AsyncLocalStorage } from 'async_hooks'
 // Phase 14 C5 修复：pi-coding-agent 改为懒加载，避免 server 启动时 import 超时
@@ -2449,7 +2449,25 @@ export async function createWebosSession(
     encodeURIComponent(scope),
     encodeURIComponent(conversationId),
   )
-  const sessionManager = SessionManager.create(cwd, sessionDir)
+  // 2026-08-23 会话恢复修复（用户反馈：重启/缓存失效后 AI 不记得前面的上下文）：
+  // pi 0.79.10 的 SessionManager.create() 总是"全新空会话"，不会读取 sessionDir 里
+  // 已有的 JSONL 历史文件——只有 SessionManager.open(path) 才加载既有会话并恢复
+  // 完整上下文（含工具调用/记忆）。此前依赖进程内存缓存 webosSessions 命中才能
+  // 连续；缓存一旦 miss（进程重启 / 错误恢复 dispose / 256 防泄漏淘汰），重建的
+  // 会话即从零开始，AI 失忆。
+  // 修复：恢复优先——sessionDir 已有历史文件时取最新一个 open（时间戳文件名排序，
+  // 与安卓 harness core.js 的 existing→SessionManager.open 逻辑一致），
+  // 无历史文件才 create 新建。
+  const sessionFiles = existsSync(sessionDir)
+    ? readdirSync(sessionDir).filter((f) => f.endsWith('.jsonl')).sort()
+    : []
+  const latestSessionFile = sessionFiles.length ? join(sessionDir, sessionFiles[sessionFiles.length - 1]) : null
+  const sessionManager = latestSessionFile
+    ? SessionManager.open(latestSessionFile, sessionDir)
+    : SessionManager.create(cwd, sessionDir)
+  if (latestSessionFile) {
+    console.log(`[PiBridge] webos session restored conv=${conversationId} file=${basename(latestSessionFile)} (${sessionFiles.length} jsonl)`)
+  }
 
   // webOS 专用 skills 目录（2026-08-11 起分两层）：
   // 1) 用户级 skills：<workspace>/skills/（myself 记忆等用户专属 skill，每个用户独立）
@@ -2586,9 +2604,12 @@ export function disposeWebosSessions(scope: string, conversationId?: string): vo
   }
 }
 
-/** 2026-08-08 临时调试：获取指定会话的 pi 实例（不创建；用于 dump 上下文排查消息重复） */
+/** 2026-08-08 临时调试：获取指定会话的 pi 实例（不创建；用于 dump 上下文排查消息重复）
+ *  2026-08-23 key 前缀修正：8-17 会话缓存 key 已从 `webos:scope:convId:thinking`
+ *  改为 `webos:scope:convId`（不含 thinking），此处前缀带尾冒号导致
+ *  hasWebosSession 恒 false（rebuild 兜底总是失效、重复重放历史）。 */
 export function getWebosSessionForDebug(scope: string, conversationId?: string): unknown {
-  const prefix = conversationId ? `webos:${scope}:${conversationId}:` : `webos:${scope}:`
+  const prefix = conversationId ? `webos:${scope}:${conversationId}` : `webos:${scope}:`
   for (const [key, s] of webosSessions) {
     if (key.startsWith(prefix)) return s
   }
