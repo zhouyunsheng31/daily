@@ -61,6 +61,8 @@ export type LoadedApiSpec = {
   activeVersionId: string | null
   spec: WebOsApiSpecLike
   manifestActive: Record<string, unknown> | null
+  /** true = 来自市场安装（installed/），非本人 packages/ 包（不可作 owner 路径执行/发布） */
+  fromInstalled?: boolean
 }
 
 // ---- 依赖注入（webos.ts 注册） ----
@@ -153,6 +155,7 @@ export async function loadApiSpecs(userKey: string): Promise<LoadedApiSpec[]> {
       activeVersionId: row.activeVersionId,
       spec: (cr.normalized ?? raw) as WebOsApiSpecLike,
       manifestActive: manifest,
+      fromInstalled: false,
     })
   }
   // 2026-08-23 市场安装的 api/toolpkg/mcp 包（installed/ 目录，enabled 过滤在扫描内）：
@@ -175,6 +178,7 @@ export async function loadApiSpecs(userKey: string): Promise<LoadedApiSpec[]> {
         activeVersionId: null,
         spec: (cr.normalized ?? raw) as WebOsApiSpecLike,
         manifestActive: readInstalledManifest(userKey, pkg.packageId),
+        fromInstalled: true,
       })
     }
   } catch (error) {
@@ -193,14 +197,14 @@ export async function resolveEndpoint(
   userKey: string,
   namespace: string,
   endpointName: string,
-): Promise<{ packageId: string; ownerKey: string; spec: WebOsApiSpecLike; endpoint: ApiEndpointLike } | null> {
+): Promise<{ packageId: string; ownerKey: string; spec: WebOsApiSpecLike; endpoint: ApiEndpointLike; fromInstalled?: boolean } | null> {
   const specs = await loadApiSpecs(userKey)
   for (const item of specs) {
     if (item.spec.namespace !== namespace) continue
     const endpoint = item.spec.endpoints.find((e) => e.name === endpointName)
       ?? item.spec.endpoints.find((e) => e.name === camelToSnake(endpointName))
     if (!endpoint) return null
-    return { packageId: item.packageId, ownerKey: item.ownerKey, spec: item.spec, endpoint }
+    return { packageId: item.packageId, ownerKey: item.ownerKey, spec: item.spec, endpoint, fromInstalled: item.fromInstalled }
   }
   return null
 }
@@ -243,8 +247,8 @@ export async function publishNamespace(
 ): Promise<{ ok: boolean; namespace?: string; publicEndpoints?: string[]; error?: string; errorCode?: string }> {
   if (principal.guest) return { ok: false, errorCode: 'GUEST_NOT_ALLOWED', error: '互通体系仅面向注册用户（R13）' }
   const specs = await loadApiSpecs(principal.key)
-  const hit = specs.find((s) => s.spec.namespace === namespace)
-  if (!hit) return { ok: false, errorCode: 'NAMESPACE_NOT_FOUND', error: `未见本人 api 包（namespace=${namespace}）` }
+  const hit = specs.find((s) => s.spec.namespace === namespace && !s.fromInstalled)
+  if (!hit) return { ok: false, errorCode: 'NAMESPACE_NOT_FOUND', error: `未见本人 api 包（namespace=${namespace}；市场安装的包不可重复发布）` }
   const publicEndpoints = hit.spec.endpoints.filter((e) => e.visibility === 'public').map((e) => e.name)
   if (publicEndpoints.length === 0) return { ok: false, errorCode: 'NO_PUBLIC_ENDPOINTS', error: '该 api 包没有 visibility=public 的端点，无法公开' }
   await upsertApiPublic({ namespace, ownerKey: principal.key, packageId: hit.packageId })
@@ -258,8 +262,8 @@ export async function unpublishNamespace(
 ): Promise<{ ok: boolean; error?: string; errorCode?: string }> {
   if (principal.guest) return { ok: false, errorCode: 'GUEST_NOT_ALLOWED', error: '互通体系仅面向注册用户（R13）' }
   const specs = await loadApiSpecs(principal.key)
-  const hit = specs.find((s) => s.spec.namespace === namespace)
-  if (!hit) return { ok: false, errorCode: 'NAMESPACE_NOT_FOUND', error: `未见本人 api 包（namespace=${namespace}）` }
+  const hit = specs.find((s) => s.spec.namespace === namespace && !s.fromInstalled)
+  if (!hit) return { ok: false, errorCode: 'NAMESPACE_NOT_FOUND', error: `未见本人 api 包（namespace=${namespace}；市场安装的包不可撤回发布）` }
   await deleteApiPublic(namespace)
   return { ok: true }
 }
@@ -397,6 +401,8 @@ export async function invokeEndpoint(principal: PrincipalLike, input: InvokeInpu
   const { namespace, endpoint: endpointName, params, ip } = input
 
   // ---- 解析目标：① 本人 api 包（owner 路径）→ ② 全局发布索引（public 路径，R13） ----
+  // 2026-08-23：市场安装的包（fromInstalled）不算本人包——其执行/数据/计费语义
+  // 一律走 public 管道（属主执行 + 调用者计费），避免用本人 packages/ 路径读 handler 失败。
   const hit = await resolveEndpoint(principal.key, namespace, endpointName)
   let packageId: string
   let ownerKey: string
@@ -405,7 +411,7 @@ export async function invokeEndpoint(principal: PrincipalLike, input: InvokeInpu
   let execPrincipal: PrincipalLike = principal // 执行（数据）侧 principal；public 时为属主
   let isRemote = false // 跨用户（属主执行 + 调用者计费）
 
-  if (hit) {
+  if (hit && !hit.fromInstalled) {
     packageId = hit.packageId
     ownerKey = hit.ownerKey
     spec = hit.spec

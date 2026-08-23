@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **验证**：本地独立进程（initSandbox+initDb）走通链路；线上加分层日志实锤 `manifest=false raw=false fileExists=true`；修复后重试发布见后续 E2E 结果。
 （另注：排查期间发现 pm2 累计重启 448+ 次，疑似部署期间历史遗留；当前进程稳定。）
 
+### 2026-08-23 18:4x · fix(appapi): 市场安装的 api 包不得作 owner 路径执行/发布（fromInstalled 语义修正）
+
+**验证发现**：E2E 中 B 安装 `test.unified` 后调用 `POST /webos/api/appapi/test_unified/ping` 报 `HANDLER_MISSING: handler 文件不存在：handlers/ping.js`。
+**根因**：`loadApiSpecs` 的 installed 分支把市场安装包标记为 `ownerKey=调用者本人` → `resolveEndpoint(B)` 将安装包误判为本人包 → invokeEndpoint 走 owner 分支，用调用者 `packages/<id>/` 路径读 handler（实际整包在 `installed/<id>/`）→ 解析失败。同时 `publishNamespace/unpublishNamespace/publishPackage` 存在**越权发布安装包**隐患（可把他人 namespace 重新发布到自己名下）。
+**修复**（`server/src/webos/appapi/appapi-service.ts` + `server/src/webos/market/service.ts`）：LoadedApiSpec 增加 `fromInstalled` 标志（installed 分支=true，本人 packages 分支=false）；`invokeEndpoint` 的 owner 分支条件改为 `hit && !hit.fromInstalled`（安装包一律走 public 管道：属主执行 + 调用者计费）；`publishNamespace/unpublishNamespace/publishPackage` 的查找排除 `fromInstalled`（市场安装的包不可重复发布/撤回）。
+**验证**：见后续 E2E。
+
 ### 2026-08-23 17:4x · fix(chat): 「回退重来」真正生效——rebuild=true 时销毁 pi 会话重建 + historyContext 重放
 
 **用户反馈**：点「回退重来」只是删了眼前渲染，AI 并没有真正回退重来（此前该 bug 修过但 8-18 回归）。

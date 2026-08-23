@@ -115,8 +115,8 @@ export async function publishPackage(
   let dataScope: { storage?: { read: string[]; write: string[] }; endpoints?: string[]; publishes?: string[] } | null = null
   if (type === 'api') {
     const specs = await loadApiSpecs(principal.key)
-    const spec = specs.find((s) => s.packageId === packageId)
-    if (!spec) return fail('API_SPEC_MISSING', `包「${packageId}」找不到合法 api.json`)
+    const spec = specs.find((s) => s.packageId === packageId && !s.fromInstalled)
+    if (!spec) return fail('API_SPEC_MISSING', `包「${packageId}」找不到合法 api.json（市场安装的包不可重复发布）`)
     publicEndpoints = spec.spec.endpoints.filter((e) => e.visibility === 'public').map((e) => e.name)
     if (publicEndpoints.length === 0) return fail('NO_PUBLIC_ENDPOINTS', 'api 包至少需 1 个 visibility=public 端点才能上架')
     const pub = await publishNamespace(principal, spec.spec.namespace)
