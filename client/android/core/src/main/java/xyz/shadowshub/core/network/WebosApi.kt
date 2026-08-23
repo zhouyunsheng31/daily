@@ -69,6 +69,21 @@ class WebosApi(
         return sse.events(req)
     }
 
+    /** 终止生成（2026-08-23）：abort 指定会话正在运行的 pi prompt 并清理任务缓冲
+     *  （会话上下文保留，AI 立即停下）。用户按「停止」按钮时调用；取消失败不阻断
+     *  （服务端后台跑完兜底）。此前安卓端停止只取消本地 SSE 流、不通知服务端 →
+     *  AI 继续后台跑，下一条消息会触发 busy 重放旧任务内容（"瞬间一堆消息"）。 */
+    suspend fun cancelChat(conversationId: String = "default"): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val body = buildJsonObject { put("conversationId", conversationId) }.toString().toRequestBody(JSON)
+            val req = Request.Builder()
+                .url("$baseUrl/webos/api/chat/cancel")
+                .post(body)
+                .build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) { false }
+    }
+
     /** App 列表：GET /webos/api/apps → {apps:[...]} */
     suspend fun listApps(): List<AppSummary> = withContext(Dispatchers.IO) {
         try {

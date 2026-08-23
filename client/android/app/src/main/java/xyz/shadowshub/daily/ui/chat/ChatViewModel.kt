@@ -89,7 +89,8 @@ class ChatViewModel(
         if (agentSource != null) startLocalTurn() else startStream(resume = false)
     }
 
-    /** 停止当前流（取消 SSE；服务端任务继续后台运行，可 resume 恢复） */
+    /** 停止当前流（取消 SSE；通知服务端 abort 该会话的 pi 任务，上下文保留——
+ *  否则 AI 继续在后台跑，下一条消息会撞 busy 重放旧任务内容） */
     fun stop() {
         streamJob?.cancel()
         streamJob = null
@@ -99,6 +100,11 @@ class ChatViewModel(
             busyWaiting = false,
         )
         markLastAssistantStreaming(false)
+        // 2026-08-23：通知服务端终止该会话正在运行的 prompt（best-effort，失败
+        // 不阻断——服务端任务跑完后仍保留上下文，用户可继续对话）
+        viewModelScope.launch {
+            repository.cancelChat(conversationId)
+        }
     }
 
     /** 重连（断网/失败后手动触发）：resume 模式恢复后台任务事件流 */

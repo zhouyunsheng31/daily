@@ -94,5 +94,8 @@ class WebosRepository(
 
     fun stream(req: ChatStreamRequest) = api.chatStream(req)
 
+    /** 终止生成：通知服务端 abort 当前会话（保留上下文）。停止按钮调用；失败静默。 */
+    suspend fun cancelChat(conversationId: String = "default"): Boolean = api.cancelChat(conversationId)
+
     val sessionState: StateFlow<Boolean> = _sessionReady
 }

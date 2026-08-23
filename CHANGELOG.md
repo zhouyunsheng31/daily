@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 16:5x · fix(chat): 修复「停止按钮无效 + 停止后再发消息瞬间重放旧任务内容」
+
+**用户反馈**：点停止只停渲染、AI 继续跑；停止后发新消息"瞬间出现一堆消息"。
+**排查（线上实证）**：
+- `/chat/cancel` 返回 `aborted:0`——`abortWebosSessions` 的缓存 key 前缀多带尾冒号（8-17 缓存 key 从 `webos:scope:convId:thinking` 改为 `webos:scope:convId` 后未同步），**匹配不到会话 → AI 根本没停**（客服端两个端都受影响）；
+- 停止后新消息 busy 等待时，服务端把旧任务缓冲（被 cancel 清空后由 subscribe 惰性重建）从游标 0 全量转发为 background_progress → 前端渲染进对话流 = "瞬间一堆消息"（实测 405+ 条重放）；
+- **安卓端 stop() 只取消本地 SSE、从未调用 /chat/cancel**（WebosApi/Repository 无此方法）→ AI 后台跑完、下一条消息撞 busy 重放。
+
+**修改文件**：
+- `server/src/piBridge.ts`（abortWebosSessions：prefix 去尾冒号，修复 abort 恒 0）
+- `server/src/routes/webos.ts`（新增 cancelledTaskKeys：主动停止后在途任务事件不再写入/重放缓冲，log 保留；cancel 路由先 markTaskCancelled 再 clearTaskBuffer；agent_end 清标记）
+- `client/android/core/.../WebosApi.kt` + `WebosRepository.kt`（新增 cancelChat）
+- `client/android/app/.../ChatViewModel.kt`（stop() 通知服务端 abort）
+
+**验证**：见下方部署验证。另排查教训：线上 pm2 实际以 `src/index.ts`（tsx）运行——**部署必须同步 src（git pull），仅更新 dist 不生效**（本轮已改走 git 通道）。
+
 ### 2026-08-23 15:20 · 3cf926e · fix(pi): 修复服务重启/缓存失效后 webOS 会话上下文丢失（AI「不记得前面的上下文」）
 
 **背景**：用户反馈「安卓端和 AI 发消息，AI 没有前面的上下文」。按纪律先查对话记录（管理端三层 + 服务器 pm2 + session JSONL）确认：

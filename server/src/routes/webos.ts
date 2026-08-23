@@ -5479,12 +5479,30 @@ webosRouter.get('/usage/credits-history', async (req, res, next) => {
 interface TaskBufferRec { events: BgTaskEvent[]; startedAt: number; endedAt: number | null; lastUserContent?: string }
 const activeTaskEvents = new Map<string, TaskBufferRec>()
 
+/** 2026-08-23 主动停止标记：用户按「停止」（/chat/cancel）后，同会话仍在后台
+ *  收尾的任务（abort 对工具执行阶段无效）其事件**不再写入任务缓冲也不会被新请求
+ *  busy 等待时重放**——否则前端「停止后再发消息」会瞬间收到旧任务全量内容
+ *  （缓冲被 cancel 清空后，subscribe 回调又会惰性重建，新请求从游标 0 全量转发，
+ *  表现为"瞬间出现一堆消息"）。任务真正结束时（agent_end）删除标记。 */
+const cancelledTaskKeys = new Set<string>()
+
 /** 清空某会话的后台任务缓冲（2026-08-08：用户按「停止」时调用——已取消的任务
  *  不再被前端恢复/展示，避免「按了停止还提示任务在后台」） */
 function clearTaskBuffer(scope: string, conversationId: string): void {
   const prefix = `webos:${scope}:${conversationId}:`
   for (const key of activeTaskEvents.keys()) {
     if (key.startsWith(prefix)) activeTaskEvents.delete(key)
+  }
+}
+
+/** 2026-08-23 标记某会话的全部在途任务为「已取消」：此后其事件不再进入缓冲
+ *  （appendTaskEvent 跳过），杜绝停止后新消息重放旧任务内容；任务结束时清除。
+ *  只标记仍在运行（endedAt===null）的任务——已结束任务不标记（其 agent_end
+ *  已清除标记，误标会导致后续同 key 新任务缓冲被永久跳过）。 */
+function markTaskCancelled(scope: string, conversationId: string): void {
+  const prefix = `webos:${scope}:${conversationId}:`
+  for (const [key, rec] of activeTaskEvents) {
+    if (key.startsWith(prefix) && rec.endedAt === null) cancelledTaskKeys.add(key)
   }
 }
 
@@ -5555,8 +5573,25 @@ function findTaskRecByPrefix(prefix: string): { key: string; rec: TaskBufferRec 
 /** 2026-08-11 任务缓冲写入统一入口：缓冲惰性创建（首个事件时），
  *  记录任务对应的最后一条 user 消息（前端恢复时校验归属）。
  *  2026-08-13 同时累积到 chatSessionEvents（统一对话 log 的 events 数据源），
- *  一次请求的完整事件序列（含 reasoning/工具调用）在结束分支统一落库。 */
+ *  一次请求的完整事件序列（含 reasoning/工具调用）在结束分支统一落库。
+ *  2026-08-23 主动停止（cancelledTaskKeys 命中）时**跳过缓冲写入**（事件不再被
+ *  新请求 busy 重放，杜绝「停止后再发消息瞬间出现旧任务全量内容」），
+ *  但统一对话 log 仍正常累积（审计不缺事件）。 */
 function appendTaskEvent(key: string, ue: BgTaskEvent, lastUserContent?: string): void {
+  // 统一对话 log 收集先行（无论是否被取消都记）
+  try {
+    let ev: ChatSessionEvent | null = null
+    if (ue.kind === 'thinking' || ue.kind === 'delta') ev = { kind: ue.kind, content: ue.content ?? '' }
+    else if (ue.kind === 'tool_start') ev = { kind: 'tool_start', tool: ue.tool ?? '' }
+    else if (ue.kind === 'tool_update') ev = { kind: 'tool_update', tool: ue.tool ?? '', content: ue.content ?? '' }
+    else if (ue.kind === 'tool_end') ev = { kind: 'tool_end', tool: ue.tool ?? '', ok: ue.ok }
+    else if (ue.kind === 'html') ev = { kind: 'html', content: ue.content ?? '', heightPx: ue.heightPx }
+    else if (ue.kind === 'app_created') ev = { kind: 'app_created', appId: ue.content ?? '' }
+    else if (ue.kind === 'app_updated') ev = { kind: 'app_updated', appId: ue.content ?? '' }
+    if (ev) collectChatSessionEvent(key, ev, lastUserContent)
+  } catch { /* 收集失败不阻断 */ }
+  // 2026-08-23 主动停止的任务：事件不进缓冲（不重放），任务结束时由 agent_end 清理标记
+  if (cancelledTaskKeys.has(key)) return
   let taskRec = activeTaskEvents.get(key)
   if (!taskRec || taskRec.endedAt !== null) {
     // 2026-08-08 修复：新任务必须重建缓冲——旧任务结束后 endedAt 已标记，
@@ -5569,18 +5604,6 @@ function appendTaskEvent(key: string, ue: BgTaskEvent, lastUserContent?: string)
     chatSessionEvents.delete(key)
   }
   taskRec.events.push(ue)
-  // 2026-08-13 统一对话 log 收集：BgTaskEvent → ChatSessionEvent（结构同构）
-  try {
-    let ev: ChatSessionEvent | null = null
-    if (ue.kind === 'thinking' || ue.kind === 'delta') ev = { kind: ue.kind, content: ue.content ?? '' }
-    else if (ue.kind === 'tool_start') ev = { kind: 'tool_start', tool: ue.tool ?? '' }
-    else if (ue.kind === 'tool_update') ev = { kind: 'tool_update', tool: ue.tool ?? '', content: ue.content ?? '' }
-    else if (ue.kind === 'tool_end') ev = { kind: 'tool_end', tool: ue.tool ?? '', ok: ue.ok }
-    else if (ue.kind === 'html') ev = { kind: 'html', content: ue.content ?? '', heightPx: ue.heightPx }
-    else if (ue.kind === 'app_created') ev = { kind: 'app_created', appId: ue.content ?? '' }
-    else if (ue.kind === 'app_updated') ev = { kind: 'app_updated', appId: ue.content ?? '' }
-    if (ev) collectChatSessionEvent(key, ev, lastUserContent)
-  } catch { /* 收集失败不阻断 */ }
 }
 
 /** 2026-08-11 从 assistantMessageEvent.partial（AssistantMessage）提取正在生成的
@@ -6249,6 +6272,8 @@ webosRouter.post('/chat/stream', async (req, res, next) => {
         // 2026-08-11 粒度修正：结束前冲刷合并增量（否则缓冲缺尾段，恢复丢内容）
         flushDeltaNow()
         flushToolcallNow()
+        // 2026-08-23 主动停止标记随任务结束清除（该会话可恢复正常缓冲/重放）
+        cancelledTaskKeys.delete(tKey)
         const endedRec = activeTaskEvents.get(tKey)
         if (endedRec) endedRec.endedAt = Date.now()
 } else if (event.type === 'tool_execution_end') {
@@ -6703,6 +6728,15 @@ webosRouter.post('/chat/cancel', async (req, res, next) => {
     // 上下文始终保留——任务跑完后用户继续对话，AI 记得前面。
     let aborted = 0
     try { aborted = await abortWebosSessions(principal.key, conversationId) } catch { /* ignore */ }
+    // 2026-08-23 主动停止后该会话在途任务事件不再写入/重放缓冲（abort 对工具
+    // 执行阶段无效、任务仍在后台收尾；若不标记，subscribe 回调会惰性重建缓冲，
+    // 用户「停止后再发消息」时新请求 busy 等待会从游标 0 把旧任务全量内容重放，
+    // 表现为"瞬间出现一堆消息"）。旧任务真正结束（agent_end）时自动清除标记。
+    // 注意顺序：必须**先** markTaskCancelled（此时 activeTaskEvents 里还有在途
+    // 任务的 tKey，标记才有对象）**再** clearTaskBuffer 清缓冲（顺序反了会导致
+    // cancelledTaskKeys 永远为空、取消不生效，线上实证 405 条 background_progress
+    // 重放）。
+    markTaskCancelled(principal.key, conversationId)
     clearTaskBuffer(principal.key, conversationId)
     // 2026-08-10：用户取消 = 任务真正终止 → 清理该会话全部在途标记
     const inflightPrefix = `webos:${principal.key}:${conversationId}:`

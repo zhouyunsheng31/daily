@@ -2630,7 +2630,10 @@ export function hasWebosSession(scope: string, conversationId?: string): boolean
  * 中断前已消耗的 usage 仍会随 agent_end 正常结算（照常扣积分）。
  */
 export async function abortWebosSessions(scope: string, conversationId?: string): Promise<number> {
-  const prefix = conversationId ? `webos:${scope}:${conversationId}:` : `webos:${scope}:`
+  // 2026-08-23 prefix 尾冒号修正：8-17 缓存 key 已改为 `webos:scope:convId`（不含
+  // thinking 与尾冒号），旧 prefix 匹配不到任何会话 → abort 恒 0
+  // （「停止」按钮无效、AI 继续后台跑完，线上实证 aborted=0）。
+  const prefix = conversationId ? `webos:${scope}:${conversationId}` : `webos:${scope}:`
   let aborted = 0
   for (const [key, s] of webosSessions) {
     if (key.startsWith(prefix)) {
