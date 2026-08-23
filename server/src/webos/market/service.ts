@@ -462,8 +462,8 @@ function copyPackageToCaller(ownerKey: string, packageId: string, callerKey: str
   }
 }
 
-/** 组合式内容声明（contents.*）读取：skills / tokens / app */
-function readContents(manifest: Record<string, unknown>): { skills: string[]; tokens: Record<string, string> | null; entryHtml: string | null } {
+/** 组合式内容声明（contents.*，schema 只允许 skills/mcp/tools/tokens/assets） */
+function readContents(manifest: Record<string, unknown>): { skills: string[]; tokens: Record<string, string> | null } {
   const contents = manifest.contents && typeof manifest.contents === 'object' && !Array.isArray(manifest.contents)
     ? manifest.contents as Record<string, unknown>
     : {}
@@ -471,8 +471,19 @@ function readContents(manifest: Record<string, unknown>): { skills: string[]; to
   const tokens = contents.tokens && typeof contents.tokens === 'object' && !Array.isArray(contents.tokens)
     ? contents.tokens as Record<string, string>
     : null
-  const entryHtml = typeof contents.entry === 'string' && contents.entry ? String(contents.entry) : null
-  return { skills, tokens, entryHtml }
+  return { skills, tokens }
+}
+
+/** 包显示名（schema 字段 display_name；兼容历史 displayName） */
+function displayNameOf(manifest: Record<string, unknown>, fallback: string): string {
+  const dn = manifest.display_name
+  if (dn && typeof dn === 'object' && !Array.isArray(dn)) {
+    const zh = (dn as Record<string, unknown>).zh
+    if (typeof zh === 'string' && zh) return zh
+    const en = (dn as Record<string, unknown>).en
+    if (typeof en === 'string' && en) return en
+  }
+  return typeof manifest.displayName === 'string' && manifest.displayName ? manifest.displayName : fallback
 }
 
 /** 把调用者已安装包的状态文件写到 system/config（当前主题等） */
@@ -526,7 +537,7 @@ async function provisionApp(callerKey: string, packageId: string, destDir: strin
     const state = await marketDeps.loadState(principal as never)
     const apps = Array.isArray(state.apps) ? state.apps as unknown[] : []
     const idx = apps.findIndex((a) => (a as { id?: string }).id === packageId || (a as { id?: string }).id === `pkg.${packageId}`)
-    const displayName = typeof manifest.displayName === 'string' && manifest.displayName ? manifest.displayName : packageId
+    const displayName = displayNameOf(manifest, packageId)
     const now = Date.now()
     const versionId = `version-${randomUUID()}`
     const appRecord = {
@@ -578,12 +589,9 @@ async function provisionSkill(callerKey: string, packageId: string, destDir: str
 async function provisionInstalled(callerKey: string, packageId: string, destDir: string, manifest: Record<string, unknown>): Promise<string[]> {
   const notes: string[] = []
   const type = String(manifest.type ?? '')
-  const { skills, tokens, entryHtml: contentsEntry } = readContents(manifest)
-  if (type === 'app' || (type !== 'app' && contentsEntry)) {
-    // 组合包内嵌 app 入口（contents.entry）也上桌面
-    if (type === 'app' || (contentsEntry && fs.existsSync(path.join(destDir, contentsEntry)))) {
-      notes.push(await provisionApp(callerKey, packageId, destDir, { ...manifest, entry: contentsEntry ?? manifest.entry }))
-    }
+  const { skills, tokens } = readContents(manifest)
+  if (type === 'app') {
+    notes.push(await provisionApp(callerKey, packageId, destDir, manifest))
   }
   if (type === 'skill' || skills.length > 0 || fs.existsSync(path.join(destDir, 'SKILL.md'))) {
     notes.push(await provisionSkill(callerKey, packageId, destDir, manifest))
