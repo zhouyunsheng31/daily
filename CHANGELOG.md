@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 17:4x · fix(chat): 「回退重来」真正生效——rebuild=true 时销毁 pi 会话重建 + historyContext 重放
+
+**用户反馈**：点「回退重来」只是删了眼前渲染，AI 并没有真正回退重来（此前该 bug 修过但 8-18 回归）。
+**根因**：8-18「优化」起 rebuild=true 且 pi 会话存活（内存缓存命中，最常见场景）时**不再 dispose**，只在 userText 里加一句"请忽略旧回复"——但 **pi 会话内存中被删掉的用户消息/旧 AI 回复/工具调用仍然全部留在上下文里**，AI 依旧带着旧记忆作答（前端截断了消息 = 只删渲染；服务端上下文没变 = 没真正重来）。
+**修复**（`server/src/routes/webos.ts`）：rebuild=true 时无论会话是否存活，**一律 `disposeWebosSessions`（内存会话 + JSONL 文件）**再重建，并把前端传来的「截断后的保留历史」经 `formatHistoryContext` 重放为背景——AI 只知道重来之后的历史（等价 DeepSeek「编辑后重新生成」）。8-18 的 token 优化动机仅适用于普通消息重发场景（非 rebuild 不受影响），重建放回 rebuild 路径。
+**验证**（线上 154.64.249.172，git pull + pm2 restart）：
+- 游客会话：记住「木星321」→「XZZ9」→ rebuild=true 重发 → 再问记住的内容 → AI 只答重放历史中的「木星321 / XZZ9」✅
+- pm2 日志：`chat rebuild ... sessionAlive=yes -> dispose + historyContext replay` + 新会话 `created in 7ms`（无旧 JSONL 恢复）✅
+- 提交 `7f62f9f` 已推送 GitHub
+
 ### 2026-08-23 17:2x · fix(imagegen): 修复生图 API 失败（上游域名失效 + 路径拼接缺失）
 
 **用户反馈**：检查生图 API。线上实测：`GET /imagegen/config` available=true 但 `POST /imagegen` 报 `UPSTREAM_ERROR: fetch failed`。
