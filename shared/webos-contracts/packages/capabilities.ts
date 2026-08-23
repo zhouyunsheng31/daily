@@ -30,6 +30,12 @@ export const WEBOS_CAPABILITIES: readonly WebOsCapabilityDef[] = [
   { id: 'system.apps.create', web: 'available', desc: '在 App 内创建新 App', phase: 'P0' },
   // ---- App API（W2/W3）----
   { id: 'app.api.invoke', web: 'available', desc: '调用其他 App 的 API', phase: 'W2' },
+  // ---- 平台 AI 与媒体能力（P0/W2）----
+  { id: 'media.imagegen', web: 'available', desc: '平台 AI 生图能力（受限扣积分）', phase: 'P0' },
+  { id: 'media.videogen', web: 'available', desc: '平台 AI 生视频能力（受限扣积分）', phase: 'P0' },
+  { id: 'ai.chat', web: 'available', desc: '平台 AI 对话与模型推理能力（受限扣积分）', phase: 'P0' },
+  { id: 'user.info', web: 'available', desc: '读取当前用户基本信息与积分余额', phase: 'P0' },
+  { id: 'net.spaces', web: 'available', desc: '多人与跨设备共享协作空间', phase: 'W3' },
   // ---- 文件工作区（W-F）----
   { id: 'files.workspace.read', web: 'available', desc: '文件工作区读（粒度到目录）', phase: 'W-F' },
   { id: 'files.workspace.write', web: 'available', desc: '文件工作区写（粒度到目录）', phase: 'W-F' },

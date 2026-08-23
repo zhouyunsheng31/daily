@@ -297,7 +297,20 @@ const APP_RUNTIME_BOOTSTRAP = String.raw`(() => {
       },
       call: (targetAppId, name, params) => request('api.call', { targetAppId: String(targetAppId), name: String(name), params: params !== undefined ? params : null }),
     })
-    return Object.freeze({ version: nextContext.sdkVersion || '0.1.0', channel: 'p0', app, permissions, storage, http, api })
+    // 平台原生 AI 媒体能力（生图/素材，自动扣除当前用户积分）
+    const media = Object.freeze({
+      generateImage: (opts) => request('media.generateImage', { prompt: opts && opts.prompt, size: (opts && opts.size) || '1024x1024', n: (opts && opts.n) || 1, reference_image: opts && opts.reference_image }),
+    })
+    // 平台原生 AI 对话能力（自动扣除当前用户算力/Token）
+    const ai = Object.freeze({
+      chat: (opts) => request('ai.chat', { prompt: opts && opts.prompt, messages: opts && opts.messages, thinkingBudget: opts && opts.thinkingBudget }),
+    })
+    // 用户身份与积分感知
+    const user = Object.freeze({
+      getProfile: () => request('user.getProfile', {}),
+      getCredits: () => request('user.getCredits', {}),
+    })
+    return Object.freeze({ version: nextContext.sdkVersion || '0.2.0', channel: 'p0', app, permissions, storage, http, api, media, ai, user })
   }
 
   window.addEventListener('message', (event) => {

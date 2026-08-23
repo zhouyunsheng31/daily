@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 13:05 · feat(runtime-sdk): 打通 App 沙箱内的平台原生 AI 生图与对话能力，全面开放用户与媒体 SDK 桥接
+
+**修改文件路径**：
+- `client/shell-web/src/runtime.ts`
+- `client/shell-web/src/App.tsx`
+- `client/shell-web/src/api.ts`
+- `shared/webos-contracts/packages/capabilities.ts`
+- `shared/webos-contracts/packages/capabilities.json`
+- `docs/api-reference.md`
+- `CHANGELOG.md`
+
+**改动内容**：
+1. **打通 App 容器原生生图与 AI 对话桥接通道**：
+   - 彻底解决 HTML App 处于沙箱（Opaque Origin）无法直接携带凭据调用服务端的问题；
+   - 在 `runtime.ts` 与 `App.tsx`（`makeSdk`）中增加 `DailyWebOs.media.generateImage` 与 `DailyWebOs.ai.chat` 宿主代理；
+   - 宿主直接携带当前登录 JWT 状态代理请求服务端的 `/webos/api/imagegen` 与 `/webos/api/chat/stream`，自动完成用户积分预检、按量扣费与媒体公网落盘；
+2. **开放用户状态与余额感知能力（`DailyWebOs.user`）**：
+   - 增加 `DailyWebOs.user.getProfile()` 与 `DailyWebOs.user.getCredits()`，允许 App 实时感知当前用户名、头像与积分余额；
+3. **能力词汇表同步（Capabilities Spec v2）**：
+   - 在 `capabilities.ts` 与 `capabilities.json` 中正式将 `media.imagegen`、`media.videogen`、`ai.chat`、`user.info`、`net.spaces` 登记为 `available`；
+4. **验证与文档同步**：
+   - `client/shell-web` 与 `server` 全部构建成功；
+   - 契约单测（52/52）全部通过；
+   - 同步更新 `docs/api-reference.md` SDK 开发章节。
+
 ### 2026-08-23 04:40 · feat(model) · 主模型切至 zen 网关 DeepSeek V4 Flash + 识图功能模型全面生效
 
 **修改文件路径**：

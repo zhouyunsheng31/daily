@@ -19,9 +19,12 @@ import {
   storeUnpublish,
   storeVisit,
   writeAppFile,
+  generateImageApi,
+  simpleAiChat,
+  getBootstrap,
 } from './api'
 
-export const WEBOS_SDK_VERSION = '0.1.0'
+export const WEBOS_SDK_VERSION = '0.2.0'
 export const WEBOS_SDK_CHANNEL = 'p0'
 export const WEBOS_PRIVATE_STORAGE_CAPABILITY = 'app.storage.private'
 export const WEBOS_APPS_CREATE_CAPABILITY = 'system.apps.create'
@@ -29,6 +32,12 @@ export const WEBOS_APPS_CREATE_CAPABILITY = 'system.apps.create'
 export const WEBOS_APP_FS_CAPABILITY = 'app.fs'
 /** 跨 App 共享文件（读写 shared/ 共享区） */
 export const WEBOS_APP_FS_SHARED_CAPABILITY = 'app.fs.shared'
+/** 平台原生 AI 与媒体能力 */
+export const WEBOS_MEDIA_IMAGEGEN_CAPABILITY = 'media.imagegen'
+export const WEBOS_MEDIA_VIDEOGEN_CAPABILITY = 'media.videogen'
+export const WEBOS_AI_CHAT_CAPABILITY = 'ai.chat'
+export const WEBOS_USER_INFO_CAPABILITY = 'user.info'
+export const WEBOS_NET_SPACES_CAPABILITY = 'net.spaces'
 
 export type WebOsRuntimeApp = Pick<WebOsApp, 'id' | 'name' | 'activeVersionId'>
 
@@ -67,6 +76,11 @@ const ALLOWED_CAPABILITIES = new Set([
   WEBOS_APPS_CREATE_CAPABILITY,
   WEBOS_APP_FS_CAPABILITY,
   WEBOS_APP_FS_SHARED_CAPABILITY,
+  WEBOS_MEDIA_IMAGEGEN_CAPABILITY,
+  WEBOS_MEDIA_VIDEOGEN_CAPABILITY,
+  WEBOS_AI_CHAT_CAPABILITY,
+  WEBOS_USER_INFO_CAPABILITY,
+  WEBOS_NET_SPACES_CAPABILITY,
 ])
 const REQUEST_TIMEOUT_MS = 8_000
 
@@ -315,6 +329,39 @@ async function handleHostRequest(
       return
     }
 
+    // 平台原生 AI 生图能力（2026-08-23）：由宿主携带 JWT 代理请求 /webos/api/imagegen
+    if (method === 'media.generateImage') {
+      const prompt = typeof params.prompt === 'string' ? params.prompt : ''
+      if (!prompt.trim()) throw new Error('media.generateImage 需要 prompt')
+      const size = typeof params.size === 'string' ? params.size : '1024x1024'
+      const n = typeof params.n === 'number' ? params.n : 1
+      const reference_image = typeof params.reference_image === 'string' ? params.reference_image : undefined
+      const res = await generateImageApi({ prompt, size, n, reference_image })
+      respond(true, res)
+      return
+    }
+
+    // 平台原生 AI 对话与推理（2026-08-23）：由宿主代理发起对话流并聚合返回
+    if (method === 'ai.chat') {
+      const prompt = typeof params.prompt === 'string' ? params.prompt : undefined
+      const messages = Array.isArray(params.messages) ? params.messages as Array<{ role: string; content: string }> : undefined
+      const thinkingBudget = typeof params.thinkingBudget === 'string' ? params.thinkingBudget as never : undefined
+      const res = await simpleAiChat({ prompt, messages, thinkingBudget, appId: context.app.id })
+      respond(true, res)
+      return
+    }
+
+    // 用户身份与积分感知（2026-08-23）
+    if (method === 'user.getProfile' || method === 'user.getCredits') {
+      const boot = await getBootstrap()
+      if (method === 'user.getCredits') {
+        respond(true, { credits: boot?.credits ?? 0, user: boot?.user ?? null })
+      } else {
+        respond(true, boot?.user ?? { id: '', username: 'Guest', role: 'guest', guest: true })
+      }
+      return
+    }
+
     throw new Error(`Unsupported Runtime method: ${method}`)
   } catch (error) {
     respond(false, undefined, error instanceof Error ? error.message : String(error))
@@ -413,6 +460,36 @@ export function createWebOsSdk(port: MessagePort, context: WebOsRuntimeContext) 
         },
       })
     },
+    // 平台原生 AI 媒体能力（生图/素材生成，扣除当前用户积分）
+    media: Object.freeze({
+      generateImage(input: { prompt: string; size?: string; n?: number; reference_image?: string }): Promise<{ ok: boolean; url?: string; files?: Array<{ path: string; url: string; width?: number; height?: number }>; error?: string }> {
+        return request(port, 'media.generateImage', {
+          prompt: input.prompt,
+          size: input.size ?? '1024x1024',
+          n: input.n ?? 1,
+          reference_image: input.reference_image,
+        })
+      },
+    }),
+    // 平台原生 AI 对话与模型推理能力（自动扣除当前用户算力/Token）
+    ai: Object.freeze({
+      chat(input: { prompt?: string; messages?: Array<{ role: string; content: string }>; thinkingBudget?: string }): Promise<{ ok: boolean; text: string; error?: string }> {
+        return request(port, 'ai.chat', {
+          prompt: input.prompt,
+          messages: input.messages,
+          thinkingBudget: input.thinkingBudget,
+        })
+      },
+    }),
+    // 当前登录用户信息与余额感知
+    user: Object.freeze({
+      getProfile(): Promise<{ id: string; username: string; email: string | null; role: string; guest: boolean }> {
+        return request(port, 'user.getProfile', {})
+      },
+      getCredits(): Promise<{ credits: number; user: unknown }> {
+        return request(port, 'user.getCredits', {})
+      },
+    }),
   })
 }
 

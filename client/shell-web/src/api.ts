@@ -965,3 +965,63 @@ export function shareAppToFriend(appId: string): Promise<{ ok: boolean; shareId:
     body: JSON.stringify({ appId }),
   })
 }
+
+/** 平台 AI 生图能力（受限扣除当前用户积分） */
+export interface GenerateImageOptions {
+  prompt: string
+  n?: number
+  size?: string
+  reference_image?: string
+}
+
+export interface GenerateImageResult {
+  ok: boolean
+  files?: Array<{ path: string; url: string; width?: number; height?: number }>
+  url?: string
+  costMinor?: number
+  error?: string
+  message?: string
+}
+
+export async function generateImageApi(options: GenerateImageOptions): Promise<GenerateImageResult> {
+  const res = await request<GenerateImageResult>('/webos/api/imagegen', {
+    method: 'POST',
+    body: JSON.stringify(options),
+  })
+  if (res && res.ok && Array.isArray(res.files) && res.files.length > 0) {
+    res.url = res.files[0].url
+  }
+  return res
+}
+
+/** 平台 AI 对话单次生成（由宿主通过 chat/stream 聚合返回完整文本） */
+export async function simpleAiChat(options: { prompt?: string; messages?: Array<{ role: string; content: string }>; thinkingBudget?: WebOsThinkingLevel; appId?: string }): Promise<{ ok: boolean; text: string; error?: string }> {
+  const convId = options.appId ? `app-chat-${options.appId}` : `app-chat-${Date.now()}`
+  let fullText = ''
+  const msgs: WebOsChatMessage[] = options.messages
+    ? options.messages.map((m) => ({ role: m.role === 'system' ? 'user' : (m.role as 'user' | 'assistant'), text: m.content }))
+    : [{ role: 'user', text: options.prompt || '' }]
+
+  return new Promise((resolve) => {
+    sendChatStream(
+      msgs,
+      {
+        conversationId: convId,
+        thinking: options.thinkingBudget ?? 'medium',
+      },
+      {
+        onEvent: (event) => {
+          if (event.type === 'delta' && typeof event.text === 'string') {
+            fullText += event.text
+          } else if (event.type === 'done') {
+            resolve({ ok: true, text: fullText.trim() })
+          } else if (event.type === 'error') {
+            resolve({ ok: false, text: fullText.trim(), error: event.message })
+          }
+        },
+      },
+    ).catch((err) => {
+      resolve({ ok: false, text: fullText.trim(), error: err instanceof Error ? err.message : String(err) })
+    })
+  })
+}

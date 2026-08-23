@@ -638,25 +638,42 @@ data: {"sessionId":"session-uuid","usage":{"prompt_tokens":120,"completion_token
 
 ## 15. App 前端 SDK 与 Handler 编程规范
 
-### 15.1 前端容器 SDK（`window.daily`）
+### 15.1 前端容器 SDK（`window.DailyWebOs` / `window.daily`）
 
-运行在沙箱容器内的 HTML App 自动注入 `window.daily` 宿主通信对象：
+运行在沙箱容器内的 HTML App 自动注入 `window.DailyWebOs` 宿主通信对象：
 
 ```typescript
-// 1. App 私有 KV 存储
-await daily.storage.set('theme', 'dark')
-const theme = await daily.storage.get('theme')
+// 1. App 私有 KV 存储 (需声明 app.storage.private)
+await DailyWebOs.storage.set('theme', 'dark')
+const theme = await DailyWebOs.storage.get('theme')
 
-// 2. 调用 App API
-const notes = await daily.api.call('notes', 'list_notes', { limit: 5 })
+// 2. 平台原生 AI 生图能力 (需声明 media.imagegen，自动扣除当前用户积分)
+const imgResult = await DailyWebOs.media.generateImage({
+  prompt: '赛博朋克风格的猫咪头像，高清',
+  size: '1024x1024'
+})
+if (imgResult.ok) {
+  console.log('图片已生成:', imgResult.url) // 直接渲染在 <img> 中
+}
 
-// 3. 安全网络请求 (SSRF 防护出站代理)
-const res = await daily.http.fetch('https://api.example.com/data')
-const data = await res.json()
+// 3. 平台原生 AI 对话/推理 (需声明 ai.chat，自动扣除当前用户算力)
+const chatResult = await DailyWebOs.ai.chat({
+  prompt: '帮我为这个记事本起一个有创意的名字',
+  thinkingBudget: 'medium'
+})
+console.log('AI 回复:', chatResult.text)
 
-// 4. 多人协作空间
-const space = daily.net.useSpace('space-uuid')
-space.onEvent('bill_added', (bill) => console.log('新账单:', bill))
+// 4. 用户身份与积分感知 (需声明 user.info)
+const profile = await DailyWebOs.user.getProfile()
+const { credits } = await DailyWebOs.user.getCredits()
+console.log(`当前用户: ${profile.username}，剩余积分: ${credits}`)
+
+// 5. 调用 App API (需声明 app.api.invoke)
+const notes = await DailyWebOs.useApi('notes').listNotes({ limit: 5 })
+
+// 6. 安全外部网络请求 (需声明 network.outbound + 出站白名单)
+const res = await DailyWebOs.http.get('https://api.exchangerate.host/latest')
+const data = JSON.parse(res.body)
 ```
 
 ### 15.2 App API `api.json` 声明规范
