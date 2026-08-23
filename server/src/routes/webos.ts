@@ -77,9 +77,15 @@ import { syncPackageFromFs, syncAllPackagesFromWorkspace } from '../webos/packag
 // 2026-08-21（W2 App API）：handler 受限 vm + 动态工具 + owner 级端点（deps 由本文件注入防循环）
 import { setAppApiDeps, registerDynamicTools } from '../webos/appapi/index.js'
 // 2026-08-21（W3 统一包市场 R14）：AI 找包/装包工具（search_market_packages / install_market_package）
-import { registerMarketTools } from '../webos/market/index.js'
+import { registerMarketTools, setMarketDeps, getActiveTheme } from '../webos/market/index.js'
 // 2026-08-22 云服务器远程运维与微信通道管理工具
 import { createServerOpsTools } from '../webos/serverOpsTools.js'
+
+// 2026-08-23 统一安装引擎 deps 注入：market 安装 app 包需读写调用者 state（写桌面）
+setMarketDeps({
+  loadState: (p) => loadState(p as never),
+  saveState: (p, s) => saveState(p as never, s as never),
+})
 
 // W2 App API 依赖注入：loadState/saveState/chargeCredits 均为本文件函数声明（已提升），
 // 模块加载时注册，供 appapi-service 在 invoke 时访问 appStorage/扣积分（避免循环依赖）
@@ -1367,6 +1373,11 @@ async function buildBootstrap(principal: Principal, state: StoredState) {
       models: await listModelConfigs(),
     },
     apps: [...builtinApps, ...userApps],
+    // 2026-08-23 市场主题包（installed/）当前应用的设计 tokens：
+    // 前端把它注入桌面/App iframe 的 :root，实现「安装主题即换肤」
+    theme: (() => {
+      try { return getActiveTheme(principal.key) } catch { return null }
+    })(),
     payment: paymentState(),
     email: cloneJson(state.email),
     billing: {
@@ -5517,12 +5528,30 @@ webosRouter.get('/usage/credits-history', async (req, res, next) => {
 interface TaskBufferRec { events: BgTaskEvent[]; startedAt: number; endedAt: number | null; lastUserContent?: string }
 const activeTaskEvents = new Map<string, TaskBufferRec>()
 
+/** 2026-08-23 主动停止标记：用户按「停止」（/chat/cancel）后，同会话仍在后台
+ *  收尾的任务（abort 对工具执行阶段无效）其事件**不再写入任务缓冲也不会被新请求
+ *  busy 等待时重放**——否则前端「停止后再发消息」会瞬间收到旧任务全量内容
+ *  （缓冲被 cancel 清空后，subscribe 回调又会惰性重建，新请求从游标 0 全量转发，
+ *  表现为"瞬间出现一堆消息"）。任务真正结束时（agent_end）删除标记。 */
+const cancelledTaskKeys = new Set<string>()
+
 /** 清空某会话的后台任务缓冲（2026-08-08：用户按「停止」时调用——已取消的任务
  *  不再被前端恢复/展示，避免「按了停止还提示任务在后台」） */
 function clearTaskBuffer(scope: string, conversationId: string): void {
   const prefix = `webos:${scope}:${conversationId}:`
   for (const key of activeTaskEvents.keys()) {
     if (key.startsWith(prefix)) activeTaskEvents.delete(key)
+  }
+}
+
+/** 2026-08-23 标记某会话的全部在途任务为「已取消」：此后其事件不再进入缓冲
+ *  （appendTaskEvent 跳过），杜绝停止后新消息重放旧任务内容；任务结束时清除。
+ *  只标记仍在运行（endedAt===null）的任务——已结束任务不标记（其 agent_end
+ *  已清除标记，误标会导致后续同 key 新任务缓冲被永久跳过）。 */
+function markTaskCancelled(scope: string, conversationId: string): void {
+  const prefix = `webos:${scope}:${conversationId}:`
+  for (const [key, rec] of activeTaskEvents) {
+    if (key.startsWith(prefix) && rec.endedAt === null) cancelledTaskKeys.add(key)
   }
 }
 
@@ -5593,8 +5622,25 @@ function findTaskRecByPrefix(prefix: string): { key: string; rec: TaskBufferRec 
 /** 2026-08-11 任务缓冲写入统一入口：缓冲惰性创建（首个事件时），
  *  记录任务对应的最后一条 user 消息（前端恢复时校验归属）。
  *  2026-08-13 同时累积到 chatSessionEvents（统一对话 log 的 events 数据源），
- *  一次请求的完整事件序列（含 reasoning/工具调用）在结束分支统一落库。 */
+ *  一次请求的完整事件序列（含 reasoning/工具调用）在结束分支统一落库。
+ *  2026-08-23 主动停止（cancelledTaskKeys 命中）时**跳过缓冲写入**（事件不再被
+ *  新请求 busy 重放，杜绝「停止后再发消息瞬间出现旧任务全量内容」），
+ *  但统一对话 log 仍正常累积（审计不缺事件）。 */
 function appendTaskEvent(key: string, ue: BgTaskEvent, lastUserContent?: string): void {
+  // 统一对话 log 收集先行（无论是否被取消都记）
+  try {
+    let ev: ChatSessionEvent | null = null
+    if (ue.kind === 'thinking' || ue.kind === 'delta') ev = { kind: ue.kind, content: ue.content ?? '' }
+    else if (ue.kind === 'tool_start') ev = { kind: 'tool_start', tool: ue.tool ?? '' }
+    else if (ue.kind === 'tool_update') ev = { kind: 'tool_update', tool: ue.tool ?? '', content: ue.content ?? '' }
+    else if (ue.kind === 'tool_end') ev = { kind: 'tool_end', tool: ue.tool ?? '', ok: ue.ok }
+    else if (ue.kind === 'html') ev = { kind: 'html', content: ue.content ?? '', heightPx: ue.heightPx }
+    else if (ue.kind === 'app_created') ev = { kind: 'app_created', appId: ue.content ?? '' }
+    else if (ue.kind === 'app_updated') ev = { kind: 'app_updated', appId: ue.content ?? '' }
+    if (ev) collectChatSessionEvent(key, ev, lastUserContent)
+  } catch { /* 收集失败不阻断 */ }
+  // 2026-08-23 主动停止的任务：事件不进缓冲（不重放），任务结束时由 agent_end 清理标记
+  if (cancelledTaskKeys.has(key)) return
   let taskRec = activeTaskEvents.get(key)
   if (!taskRec || taskRec.endedAt !== null) {
     // 2026-08-08 修复：新任务必须重建缓冲——旧任务结束后 endedAt 已标记，
@@ -5607,18 +5653,6 @@ function appendTaskEvent(key: string, ue: BgTaskEvent, lastUserContent?: string)
     chatSessionEvents.delete(key)
   }
   taskRec.events.push(ue)
-  // 2026-08-13 统一对话 log 收集：BgTaskEvent → ChatSessionEvent（结构同构）
-  try {
-    let ev: ChatSessionEvent | null = null
-    if (ue.kind === 'thinking' || ue.kind === 'delta') ev = { kind: ue.kind, content: ue.content ?? '' }
-    else if (ue.kind === 'tool_start') ev = { kind: 'tool_start', tool: ue.tool ?? '' }
-    else if (ue.kind === 'tool_update') ev = { kind: 'tool_update', tool: ue.tool ?? '', content: ue.content ?? '' }
-    else if (ue.kind === 'tool_end') ev = { kind: 'tool_end', tool: ue.tool ?? '', ok: ue.ok }
-    else if (ue.kind === 'html') ev = { kind: 'html', content: ue.content ?? '', heightPx: ue.heightPx }
-    else if (ue.kind === 'app_created') ev = { kind: 'app_created', appId: ue.content ?? '' }
-    else if (ue.kind === 'app_updated') ev = { kind: 'app_updated', appId: ue.content ?? '' }
-    if (ev) collectChatSessionEvent(key, ev, lastUserContent)
-  } catch { /* 收集失败不阻断 */ }
 }
 
 /** 2026-08-11 从 assistantMessageEvent.partial（AssistantMessage）提取正在生成的
@@ -5875,18 +5909,26 @@ webosRouter.post('/chat/stream', async (req, res, next) => {
     const sourceVersionId = typeof body.sourceVersionId === 'string' ? body.sourceVersionId : null
     const lastUser = [...messages].reverse().find((message) => message.role === 'user')
     if (!lastUser) throw createError(400, 'INVALID_MESSAGES', '缺少 user 消息')
-    // 2026-08-18 rebuild 优化（用户反馈：刷新/重发消息会像第一条消息一样重跑
-    // 整个上下文 + 重新执行开场 skill（读记忆/存快照等），一次多花上万 tokens）：
-    // 旧实现：disposeWebosSessions 删除会话与 JSONL 文件 → 全新 session 重新加载
-    //   skills 并重新执行开场流程，且 historyContext 把整段历史文本重放一遍 =
-    //   「上下文没有损失但事实上跑了两遍」。
-    // 新实现（会话存活时）：**不销毁会话、不重放历史**——复用当前内存会话上下文，
-    //   AI 能看到之前已经执行过开场（读记忆/快照等记录都在上下文里），不会重复
-    //   执行；token 消耗回到普通消息水平（几百 tokens 而非上万）。
-    // 兜底（会话丢失，如服务重启/超时清理）：仍回退 historyContext 重放，避免
-    //   AI 完全失忆；但同样不再 dispose（本来就没有会话可清）。
-    const { hasWebosSession } = await loadPiBridge()
-    const sessionAlive = rebuild && hasWebosSession(principal.key, conversationId)
+    // 2026-08-23 回退重来语义修复（用户反馈：点「回退重来」只是删了眼前渲染，
+    // AI 并没有真正回退重来）：
+    // 8-18 起 rebuild 且会话存活时**不再 dispose**，只在 userText 里加一句
+    // "请忽略旧回复"——但 pi 会话内存中**被删掉的用户消息/旧 AI 回复/工具调用
+    // 仍然全部留在上下文里**，AI 依然带着旧记忆作答（"回退重来"失效）。
+    // 正确语义：rebuild=true 必须**销毁当前 pi 会话（内存 + JSONL 文件）并重建**，
+    // 同时把前端传来的「截断后的保留历史」（messages.slice(0,-1)）经
+    // formatHistoryContext 重放为背景——AI 只知道重来之后的历史，等价于
+    // DeepSeek 的「编辑消息后重新生成」。
+    // 注：8-18 改动的动机（重发消息重复执行开场 skill 多花 token）不适用于 rebuild
+    // 场景（用户主动重来的低频操作，语义正确性优先）；普通消息（非 rebuild）不受影响。
+    const { hasWebosSession, disposeWebosSessions: rebuildDispose } = await loadPiBridge()
+    let sessionAlive = rebuild && hasWebosSession(principal.key, conversationId)
+    if (rebuild && sessionAlive) {
+      rebuildDispose(principal.key, conversationId)
+      sessionAlive = false
+      tlog(`chat rebuild conv=${conversationId} scope=${principal.key} sessionAlive=yes -> dispose + historyContext replay`)
+    } else if (rebuild) {
+      tlog(`chat rebuild conv=${conversationId} scope=${principal.key} sessionAlive=no (historyContext replay)`)
+    }
     const timePrefix = beijingTimePrefix()
     const rebuildNotice = rebuild && sessionAlive
       ? '（系统提醒：用户修改了此前的消息或要求重新生成。请忽略你之前对应的旧回复，直接针对下面这条最新消息重新作答。本会话开场的初始化（读记忆/存快照等一次性动作）已完成，无需重复执行。）\n\n'
@@ -5911,12 +5953,11 @@ webosRouter.post('/chat/stream', async (req, res, next) => {
     // 上下文与记忆；不同会话独立上下文，可并行工作），并注入 App 工具集 + 工作区
     // 文件系统工具，让 pi agent 在对话中直接创建/修改 App（文件夹即 App 路径）。
     const { createWebosSession, disposeWebosSessions, abortWebosSessions } = await loadPiBridge()
+    // 2026-08-23 rebuild 的 dispose 已在上方（userText 构造前）执行——
+    // 此处不再处理；下方 createWebosSession 将创建全新会话并自动
+    // 恢复 JSONL（重建后空白）或新建，historyContext 已拼入 userText。
     if (rebuild) {
-      // 2026-08-18 不再 dispose：保留会话上下文，避免刷新/重发消息重复执行
-      // 开场 skill 与重放完整历史（用户实测：刷新一次多花上万 tokens）。
-      // 会话存活→直接复用；会话丢失→historyContext 重放兜底（见上方 userText 构造）。
-      // 旧逻辑 `disposeWebosSessions` 已挪到真正需要清空会话的错误恢复路径。
-      tlog(`chat rebuild conv=${conversationId} scope=${principal.key} sessionAlive=${sessionAlive} (keep/history fallback)`)
+      tlog(`chat rebuild continue conv=${conversationId} scope=${principal.key} sessionAlive=${sessionAlive} (dispose done, recreate)`)
     }
     // 2026-08-11 架构统一：任务缓冲 key（scope:convId:thinking）——活跃连接登记/
     // 事件转发/结束信号统一用它（声明提前，供 setupSse 后登记活跃连接使用）
@@ -6290,6 +6331,8 @@ webosRouter.post('/chat/stream', async (req, res, next) => {
         // 2026-08-11 粒度修正：结束前冲刷合并增量（否则缓冲缺尾段，恢复丢内容）
         flushDeltaNow()
         flushToolcallNow()
+        // 2026-08-23 主动停止标记随任务结束清除（该会话可恢复正常缓冲/重放）
+        cancelledTaskKeys.delete(tKey)
         const endedRec = activeTaskEvents.get(tKey)
         if (endedRec) endedRec.endedAt = Date.now()
 } else if (event.type === 'tool_execution_end') {
@@ -6744,6 +6787,15 @@ webosRouter.post('/chat/cancel', async (req, res, next) => {
     // 上下文始终保留——任务跑完后用户继续对话，AI 记得前面。
     let aborted = 0
     try { aborted = await abortWebosSessions(principal.key, conversationId) } catch { /* ignore */ }
+    // 2026-08-23 主动停止后该会话在途任务事件不再写入/重放缓冲（abort 对工具
+    // 执行阶段无效、任务仍在后台收尾；若不标记，subscribe 回调会惰性重建缓冲，
+    // 用户「停止后再发消息」时新请求 busy 等待会从游标 0 把旧任务全量内容重放，
+    // 表现为"瞬间出现一堆消息"）。旧任务真正结束（agent_end）时自动清除标记。
+    // 注意顺序：必须**先** markTaskCancelled（此时 activeTaskEvents 里还有在途
+    // 任务的 tKey，标记才有对象）**再** clearTaskBuffer 清缓冲（顺序反了会导致
+    // cancelledTaskKeys 永远为空、取消不生效，线上实证 405 条 background_progress
+    // 重放）。
+    markTaskCancelled(principal.key, conversationId)
     clearTaskBuffer(principal.key, conversationId)
     // 2026-08-10：用户取消 = 任务真正终止 → 清理该会话全部在途标记
     const inflightPrefix = `webos:${principal.key}:${conversationId}:`

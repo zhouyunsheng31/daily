@@ -9,14 +9,16 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { satisfies } from 'semver'
 import { Type } from 'typebox'
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { getWorkspaceRoot, logAgentAction } from '../../utils/webosWorkspace.js'
 import { requireNonGuest } from '../net/index.js'
 import { loadApiSpecs, publishNamespace, unpublishNamespace, type PrincipalLike } from '../appapi/index.js'
-import { packageDir } from '../packages/packages-service.js'
-import { getDetailForUser } from '../packages/packages-service.js'
+import { packageDir, getDetailForUser } from '../packages/packages-service.js'
+import { installedDir, readInstalledManifest } from './installed.js'
+import { themeEngine } from '../engines/theme-engine.js'
 import {
   upsertMarketEntry,
   getMarketEntry,
@@ -24,6 +26,7 @@ import {
   deleteMarketEntry,
   setMarketEntryStatus,
   upsertMarketInstall,
+  setMarketInstallEnabled,
   getMarketInstall,
   listMyInstalls,
   type MarketEntryRow,
@@ -112,8 +115,8 @@ export async function publishPackage(
   let dataScope: { storage?: { read: string[]; write: string[] }; endpoints?: string[]; publishes?: string[] } | null = null
   if (type === 'api') {
     const specs = await loadApiSpecs(principal.key)
-    const spec = specs.find((s) => s.packageId === packageId)
-    if (!spec) return fail('API_SPEC_MISSING', `包「${packageId}」找不到合法 api.json`)
+    const spec = specs.find((s) => s.packageId === packageId && !s.fromInstalled)
+    if (!spec) return fail('API_SPEC_MISSING', `包「${packageId}」找不到合法 api.json（市场安装的包不可重复发布）`)
     publicEndpoints = spec.spec.endpoints.filter((e) => e.visibility === 'public').map((e) => e.name)
     if (publicEndpoints.length === 0) return fail('NO_PUBLIC_ENDPOINTS', 'api 包至少需 1 个 visibility=public 端点才能上架')
     const pub = await publishNamespace(principal, spec.spec.namespace)
@@ -429,6 +432,178 @@ function copySkillToCaller(ownerKey: string, packageId: string, callerKey: strin
   }
 }
 
+// ---- 统一安装引擎（2026-08-23）：整包复制 → installed/ → 按类型/内容分派生效 ----
+
+/** deps 注入（webos.ts 挂载时传入 loadState/saveState，避免循环依赖） */
+export interface MarketDeps {
+  loadState: (principal: { key: string; guest?: boolean }) => Promise<{ apps?: unknown[] }>
+  saveState: (principal: { key: string; guest?: boolean }, state: unknown) => Promise<void>
+}
+let marketDeps: MarketDeps | null = null
+export function setMarketDeps(deps: MarketDeps): void { marketDeps = deps }
+
+/** 从发布者工作区整包复制到调用者 installed/<id>/（跳过 .trash 与 >6MB 大文件） */
+function copyPackageToCaller(ownerKey: string, packageId: string, callerKey: string): string | null {
+  const src = packageDir(ownerKey, packageId)
+  if (!fs.existsSync(src)) return null
+  const dest = installedDir(callerKey, packageId)
+  try {
+    fs.mkdirSync(dest, { recursive: true })
+    fs.cpSync(src, dest, { recursive: true, filter: (s) => {
+      const st = fs.statSync(s)
+      if (st.isFile() && st.size > 6 * 1024 * 1024) return false
+      if (st.isDirectory() && ['.trash'].includes(path.basename(s))) return false
+      return true
+    } })
+    return dest
+  } catch (error) {
+    console.warn('[market] copyPackageToCaller failed:', error instanceof Error ? error.message : String(error))
+    return null
+  }
+}
+
+/** 组合式内容声明（contents.*，schema 只允许 skills/mcp/tools/tokens/assets） */
+function readContents(manifest: Record<string, unknown>): { skills: string[]; tokens: Record<string, string> | null } {
+  const contents = manifest.contents && typeof manifest.contents === 'object' && !Array.isArray(manifest.contents)
+    ? manifest.contents as Record<string, unknown>
+    : {}
+  const skills = Array.isArray(contents.skills) ? contents.skills.map(String) : []
+  const tokens = contents.tokens && typeof contents.tokens === 'object' && !Array.isArray(contents.tokens)
+    ? contents.tokens as Record<string, string>
+    : null
+  return { skills, tokens }
+}
+
+/** 包显示名（schema 字段 display_name；兼容历史 displayName） */
+function displayNameOf(manifest: Record<string, unknown>, fallback: string): string {
+  const dn = manifest.display_name
+  if (dn && typeof dn === 'object' && !Array.isArray(dn)) {
+    const zh = (dn as Record<string, unknown>).zh
+    if (typeof zh === 'string' && zh) return zh
+    const en = (dn as Record<string, unknown>).en
+    if (typeof en === 'string' && en) return en
+  }
+  return typeof manifest.displayName === 'string' && manifest.displayName ? manifest.displayName : fallback
+}
+
+/** 把调用者已安装包的状态文件写到 system/config（当前主题等） */
+function activeThemeFile(callerKey: string): string {
+  return path.join(getWorkspaceRoot(callerKey), 'system', 'config', 'theme.json')
+}
+
+/** 读取当前启用的主题包（bootstrap 消费；fs 同步，供非 async 上下文调用） */
+export function getActiveTheme(callerKey: string): { packageId: string; tokens: Record<string, string> } | null {
+  try {
+    const file = activeThemeFile(callerKey)
+    if (!fs.existsSync(file)) return null
+    const cfg = JSON.parse(fs.readFileSync(file, 'utf-8')) as { packageId?: string }
+    if (!cfg.packageId) return null
+    const manifest = readInstalledManifest(callerKey, cfg.packageId)
+    if (!manifest) return null
+    const tokensPath = path.join(installedDir(callerKey, cfg.packageId), 'tokens.json')
+    const tokens = fs.existsSync(tokensPath) ? JSON.parse(fs.readFileSync(tokensPath, 'utf-8')) as Record<string, string> : {}
+    return { packageId: cfg.packageId, tokens }
+  } catch {
+    return null
+  }
+}
+
+/** 应用主题 tokens（写调用者工作区 + 记录 activeTheme） */
+function provisionTheme(callerKey: string, packageId: string, destDir: string, manifest: Record<string, unknown>): string {
+  const { tokens: contentTokens } = readContents(manifest)
+  // themeEngine.apply 第一参接受 manifest（含 contents.tokens）或裸 tokens 表
+  const tokens = contentTokens
+    ? themeEngine.apply({ contents: { tokens: contentTokens } }).tokens
+    : themeEngine.apply(manifest).tokens
+  try {
+    fs.writeFileSync(path.join(destDir, 'tokens.json'), JSON.stringify(tokens, null, 2), 'utf-8')
+    fs.mkdirSync(path.dirname(activeThemeFile(callerKey)), { recursive: true })
+    fs.writeFileSync(activeThemeFile(callerKey), JSON.stringify({ packageId, appliedAt: Date.now() }, null, 2), 'utf-8')
+  } catch (error) {
+    console.warn('[market] provisionTheme failed:', error instanceof Error ? error.message : String(error))
+  }
+  return '✅ 主题已应用：' + Object.keys(tokens).length + ' 个 CSS 变量（桌面/App 立即换肤，可在市场设置中关闭）'
+}
+
+/** app 包写入 state.apps（桌面立即出现，复用版本化打开/回滚机制） */
+async function provisionApp(callerKey: string, packageId: string, destDir: string, manifest: Record<string, unknown>): Promise<string> {
+  if (!marketDeps) return '⚠️ app 安装跳过（market deps 未注入）'
+  const entry = typeof manifest.entry === 'string' && manifest.entry ? String(manifest.entry) : 'index.html'
+  const htmlFile = path.join(destDir, entry)
+  if (!fs.existsSync(htmlFile)) return `⚠️ app 包缺少入口 ${entry}，已登记但未上桌面`
+  const html = fs.readFileSync(htmlFile, 'utf-8')
+  const principal = { key: callerKey, guest: callerKey.startsWith('guest:') }
+  try {
+    const state = await marketDeps.loadState(principal as never)
+    const apps = Array.isArray(state.apps) ? state.apps as unknown[] : []
+    const idx = apps.findIndex((a) => (a as { id?: string }).id === packageId || (a as { id?: string }).id === `pkg.${packageId}`)
+    const displayName = displayNameOf(manifest, packageId)
+    const now = Date.now()
+    const versionId = `version-${randomUUID()}`
+    const appRecord = {
+      id: `pkg.${packageId}`,
+      name: displayName,
+      source: 'store',
+      activeVersionId: versionId,
+      installed: true,
+      createdAt: existingAtOrNow(apps, packageId, now),
+      icon: typeof manifest.icon === 'string' ? manifest.icon : null,
+      versions: [{
+        id: versionId, appId: `pkg.${packageId}`, version: '1.0.0', status: 'active', source: 'store',
+        capabilities: ['app.storage.private'],
+        html, createdAt: now, createdBy: 'system', parentVersionId: null,
+      }],
+    }
+    if (idx >= 0) (apps as unknown[])[idx] = appRecord
+    else apps.push(appRecord)
+    ;(state as { apps?: unknown[] }).apps = apps
+    await marketDeps.saveState(principal as never, state)
+    return `✅ App「${displayName}」已装上桌面（刷新桌面即可看到，可回滚）`
+  } catch (error) {
+    console.warn('[market] provisionApp failed:', error instanceof Error ? error.message : String(error))
+    return `⚠️ App 安装写状态失败：${error instanceof Error ? error.message : String(error)}`
+  }
+}
+function existingAtOrNow(apps: unknown[], packageId: string, now: number): number {
+  const found = apps.find((a) => (a as { id?: string }).id === packageId || (a as { id?: string }).id === `pkg.${packageId}`)
+  return found && typeof (found as { createdAt?: number }).createdAt === 'number' ? (found as { createdAt: number }).createdAt : now
+}
+
+/** skill 内容复制到调用者 skills/ + 失效 pi loader（立即被 AI 加载） */
+async function provisionSkill(callerKey: string, packageId: string, destDir: string, manifest: Record<string, unknown>): Promise<string> {
+  try {
+    const { skillEngine } = await import('../engines/skill-engine.js')
+    const r = skillEngine.install({ ownerKey: callerKey, callerKey, packageId, pkgDir: destDir, manifest })
+    // 失效 pi 共享 loader：新会话立即加载新技能
+    try {
+      const pi = await import('../../piBridge.js')
+      pi.invalidateWebosServices?.()
+    } catch { /* piBridge 不可用忽略 */ }
+    return r.ok ? `✅ Skill 已安装到你的 skills/${packageId}/（AI 下一条消息即可使用）` : `⚠️ ${r.note}`
+  } catch (error) {
+    return `⚠️ skill 安装失败：${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
+/** 按 manifest/contents 对已安装包做统一生效分派 */
+async function provisionInstalled(callerKey: string, packageId: string, destDir: string, manifest: Record<string, unknown>): Promise<string[]> {
+  const notes: string[] = []
+  const type = String(manifest.type ?? '')
+  const { skills, tokens } = readContents(manifest)
+  if (type === 'app') {
+    notes.push(await provisionApp(callerKey, packageId, destDir, manifest))
+  }
+  if (type === 'skill' || skills.length > 0 || fs.existsSync(path.join(destDir, 'SKILL.md'))) {
+    notes.push(await provisionSkill(callerKey, packageId, destDir, manifest))
+  }
+  if (type === 'theme' || tokens) {
+    notes.push(provisionTheme(callerKey, packageId, destDir, manifest))
+  }
+  // api / toolpkg / mcp / bundle / subagent / workflow 等：整包已落地 installed/，
+  // 由各自消费端扫描生效（appapi 工具注册 / 后续运行时），无需此处额外动作
+  return notes
+}
+
 export async function installMarketPackage(
   principal: PrincipalLike,
   packageId: string,
@@ -443,21 +618,120 @@ export async function installMarketPackage(
   for (const item of closure.items) {
     const entry = await getMarketEntry(item.packageId)
     if (!entry) continue
-    await upsertMarketInstall(item.packageId, principal.key, entry.type)
+    await upsertMarketInstall(item.packageId, principal.key, entry.type, true)
     installed.push(item.packageId)
-    if (item.packageId === packageId && entry.type === 'skill') {
-      const r = copySkillToCaller(entry.ownerKey, packageId, principal.key)
-      if (r) notes.push(`${packageId}：${r}`)
+    // 整包落地（依赖闭包内的 api/skill/theme/app 一视同仁，全部安装即用）
+    const dest = copyPackageToCaller(entry.ownerKey, item.packageId, principal.key)
+    if (!dest) {
+      notes.push(`${item.packageId}：⚠️ 包复制失败（发布者侧文件缺失）`)
+      continue
     }
+    const manifest = readInstalledManifest(principal.key, item.packageId)
+    if (!manifest) {
+      notes.push(`${item.packageId}：⚠️ installed 缺少 daily.pkg.json`)
+      continue
+    }
+    const notes2 = await provisionInstalled(principal.key, item.packageId, dest, manifest)
+    if (notes2.length > 0) notes.push(`${item.packageId}：${notes2.join('；')}`)
   }
   await logAgentAction(principal.key, 'market_install', { packageId, installed }, true)
-  return ok({ installed, note: notes.join('；') || '已登记安装；api 包端点即公开可调（调用方计费 R15）' })
+  const note = notes.join('\n') || '已安装（内容将在对应位置生效：App→桌面 / Skill→AI 技能 / API→工具 / 主题→桌面换肤）'
+  return ok({ installed, note })
 }
 
-export async function listMyMarketInstalls(principal: PrincipalLike): Promise<MarketResult<{ items: Array<{ packageId: string; type: string; installedAt: number }> }>> {
+/** 启停开关：enabled=false 移除运行时产物（保留 installed/ 与安装记录，可恢复） */
+export async function toggleMarketInstall(
+  principal: PrincipalLike,
+  packageId: string,
+  enabled: boolean,
+): Promise<MarketResult<{ packageId: string; enabled: boolean; note: string }>> {
   const guest = requireNonGuest(principal)
   if (guest) return fail('GUEST_NOT_ALLOWED', '互通体系仅面向注册用户（R13）')
-  return ok({ items: await listMyInstalls(principal.key) })
+  const install = await getMarketInstall(packageId, principal.key)
+  if (!install) return fail('NOT_INSTALLED', `未安装「${packageId}」`)
+  const row = await setMarketInstallEnabled(packageId, principal.key, enabled)
+  if (!row) return fail('TOGGLE_FAILED', '启停写入失败')
+  const notes: string[] = []
+  // app：从 state.apps 增/删
+  if (install.type === 'app') {
+    try {
+      const manifest = readInstalledManifest(principal.key, packageId)
+      if (enabled && marketDeps && manifest) {
+        const dest = installedDir(principal.key, packageId)
+        notes.push(await provisionApp(principal.key, packageId, dest, manifest))
+      } else if (!enabled && marketDeps) {
+        const state = await marketDeps.loadState(principal as never)
+        const apps = Array.isArray(state.apps) ? state.apps as unknown[] : []
+        ;(state as { apps?: unknown[] }).apps = apps.filter((a) => (a as { id?: string }).id !== packageId && (a as { id?: string }).id !== `pkg.${packageId}`)
+        await marketDeps.saveState(principal as never, state)
+        notes.push('已从桌面移除（重新启用可恢复）')
+      }
+    } catch (error) {
+      notes.push(`app 同步失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+// skill：内容驱动（type=skill 或 contents.skills 或存在 SKILL.md）→ skills/<id> 增/删
+  const manifest = readInstalledManifest(principal.key, packageId)
+  const { skills, tokens } = readContents(manifest ?? {})
+  const hasSkillContent = (install.type === 'skill' || skills.length > 0 || fs.existsSync(path.join(installedDir(principal.key, packageId), 'SKILL.md')))
+  if (hasSkillContent) {
+    try {
+      const { skillEngine } = await import('../engines/skill-engine.js')
+      if (enabled) {
+        const m = readInstalledManifest(principal.key, packageId)
+        if (m) {
+          const r = skillEngine.install({ ownerKey: principal.key, callerKey: principal.key, packageId, pkgDir: installedDir(principal.key, packageId), manifest: m })
+          notes.push(r.ok ? '技能已恢复' : `⚠️ ${r.note}`)
+        }
+      } else {
+        const r = skillEngine.uninstall({ callerKey: principal.key, packageId })
+        notes.push(r.ok ? '技能已停用' : `⚠️ ${r.note}`)
+      }
+      const pi = await import('../../piBridge.js')
+      pi.invalidateWebosServices?.()
+    } catch (error) {
+      notes.push(`skill 同步失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  // theme：内容驱动（type=theme 或 contents.tokens）→ activeTheme 增/清
+  const hasThemeContent = (install.type === 'theme' || tokens !== null)
+  if (hasThemeContent) {
+    try {
+      if (enabled) {
+        const dest = installedDir(principal.key, packageId)
+        const m = readInstalledManifest(principal.key, packageId)
+        if (m) notes.push(provisionTheme(principal.key, packageId, dest, m))
+      } else {
+        const active = await getActiveTheme(principal.key)
+        if (active && active.packageId === packageId) {
+          fs.rmSync(activeThemeFile(principal.key), { force: true })
+          notes.push('主题已恢复默认（重新启用可再应用）')
+        } else {
+          notes.push('主题已停用（未作为当前主题）')
+        }
+      }
+    } catch (error) {
+      notes.push(`theme 同步失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  await logAgentAction(principal.key, 'market_toggle', { packageId, enabled }, true)
+  return ok({ packageId, enabled: row.enabled, note: notes.join('；') || (enabled ? '已启用' : '已停用') })
+}
+
+export async function listMyMarketInstalls(principal: PrincipalLike): Promise<MarketResult<{ items: Array<{ packageId: string; type: string; installedAt: number; enabled: boolean }> }>> {
+  const guest = requireNonGuest(principal)
+  if (guest) return fail('GUEST_NOT_ALLOWED', '互通体系仅面向注册用户（R13）')
+  const rows = await listMyInstalls(principal.key)
+  return ok({ items: rows.map((r) => ({ packageId: r.packageId, type: r.type, installedAt: r.installedAt, enabled: r.enabled })) })
+}
+
+/** 我的安装详情（含启停态 + 当前生效说明），市场设置页使用 */
+export async function myInstallDetail(principal: PrincipalLike, packageId: string): Promise<MarketResult<{ packageId: string; type: string; enabled: boolean }>> {
+  const guest = requireNonGuest(principal)
+  if (guest) return fail('GUEST_NOT_ALLOWED', '互通体系仅面向注册用户（R13）')
+  const row = await getMarketInstall(packageId, principal.key)
+  if (!row) return fail('NOT_INSTALLED', `未安装「${packageId}」`)
+  return ok({ packageId: row.packageId, type: row.type, enabled: row.enabled })
 }
 
 // ---- pi 工具：AI 找包 / 装包 ----

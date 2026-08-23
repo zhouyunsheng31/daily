@@ -9,12 +9,13 @@
 //   由 webos.ts 在模块加载时 setAppApiDeps 注入（同 packages.setAppViewProvider 模式）。
 // ============================================================================
 
+import fs from 'node:fs'
 import path from 'node:path'
 import { Type } from 'typebox'
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { validateApiSpec } from '../contracts/index.js'
 import { listPackages } from '../packages/packages-db.js'
-import { resolvePackageFilePath, PACKAGE_MANIFEST, PACKAGES_DIR } from '../packages/packages-service.js'
+import { resolvePackageFilePath, PACKAGE_MANIFEST, PACKAGES_DIR, syncAllPackagesFromWorkspace } from '../packages/packages-service.js'
 import {
   getWorkspaceRoot,
   logAgentAction,
@@ -60,6 +61,8 @@ export type LoadedApiSpec = {
   activeVersionId: string | null
   spec: WebOsApiSpecLike
   manifestActive: Record<string, unknown> | null
+  /** true = 来自市场安装（installed/），非本人 packages/ 包（不可作 owner 路径执行/发布） */
+  fromInstalled?: boolean
 }
 
 // ---- 依赖注入（webos.ts 注册） ----
@@ -115,7 +118,7 @@ function apiSpecRel(manifest: Record<string, unknown> | null): string {
 
 function readJsonFile(file: string): unknown | null {
   try {
-    return JSON.parse(require('node:fs').readFileSync(file, 'utf-8'))
+    return JSON.parse(fs.readFileSync(file, 'utf-8'))
   } catch {
     return null
   }
@@ -131,10 +134,12 @@ function readOwnManifest(userKey: string, packageId: string): Record<string, unk
 }
 
 /**
- * 聚合某用户本人所有 type=api 的包 specs（每条按 active 版本从文件夹现读，保证与
- * 包内容一致；owner 级 W2）。api.json 必须通过契约校验，失败跳过（不阻断其它包）。
+ * 聚合某用户本人 + 市场安装（installed/）所有 api/toolpkg 包 specs（每条按 active
+ * 版本从文件夹现读，保证与包内容一致；owner 级 W2 + 2026-08-23 安装即用）。
+ * api.json 必须通过契约校验，失败跳过（不阻断其它包）。
  */
 export async function loadApiSpecs(userKey: string): Promise<LoadedApiSpec[]> {
+  await syncAllPackagesFromWorkspace(userKey)
   const rows = await listPackages({ ownerKey: userKey, type: 'api' })
   const out: LoadedApiSpec[] = []
   for (const row of rows) {
@@ -150,7 +155,34 @@ export async function loadApiSpecs(userKey: string): Promise<LoadedApiSpec[]> {
       activeVersionId: row.activeVersionId,
       spec: (cr.normalized ?? raw) as WebOsApiSpecLike,
       manifestActive: manifest,
+      fromInstalled: false,
     })
+  }
+  // 2026-08-23 市场安装的 api/toolpkg/mcp 包（installed/ 目录，enabled 过滤在扫描内）：
+  // 整包已落地，api.json 直接在此发现 → appapi_* 工具自动注册（无需单独开通）
+  try {
+    const { listInstalledPackages, readInstalledManifest } = await import('../market/installed.js')
+    const installed = await listInstalledPackages(userKey, { type: undefined })
+    for (const pkg of installed) {
+      const type = pkg.type
+      if (!['api', 'toolpkg', 'mcp'].includes(type)) continue
+      if (out.some((s) => s.packageId === pkg.packageId)) continue // 与本人包重名时以本人为准
+      const manifest = pkg.manifest
+      const specRel = apiSpecRel(manifest)
+      const raw = readJsonFile(path.join(pkg.dir, specRel))
+      const cr = raw !== null ? validateApiSpec(raw) : null
+      if (!cr || !cr.ok) continue
+      out.push({
+        packageId: pkg.packageId,
+        ownerKey: userKey, // 市场安装后视同本人拥有的调用者（R15 计费按调用者）
+        activeVersionId: null,
+        spec: (cr.normalized ?? raw) as WebOsApiSpecLike,
+        manifestActive: readInstalledManifest(userKey, pkg.packageId),
+        fromInstalled: true,
+      })
+    }
+  } catch (error) {
+    console.warn('[appapi] installed specs scan failed:', error instanceof Error ? error.message : String(error))
   }
   return out
 }
@@ -165,14 +197,14 @@ export async function resolveEndpoint(
   userKey: string,
   namespace: string,
   endpointName: string,
-): Promise<{ packageId: string; ownerKey: string; spec: WebOsApiSpecLike; endpoint: ApiEndpointLike } | null> {
+): Promise<{ packageId: string; ownerKey: string; spec: WebOsApiSpecLike; endpoint: ApiEndpointLike; fromInstalled?: boolean } | null> {
   const specs = await loadApiSpecs(userKey)
   for (const item of specs) {
     if (item.spec.namespace !== namespace) continue
     const endpoint = item.spec.endpoints.find((e) => e.name === endpointName)
       ?? item.spec.endpoints.find((e) => e.name === camelToSnake(endpointName))
     if (!endpoint) return null
-    return { packageId: item.packageId, ownerKey: item.ownerKey, spec: item.spec, endpoint }
+    return { packageId: item.packageId, ownerKey: item.ownerKey, spec: item.spec, endpoint, fromInstalled: item.fromInstalled }
   }
   return null
 }
@@ -215,8 +247,8 @@ export async function publishNamespace(
 ): Promise<{ ok: boolean; namespace?: string; publicEndpoints?: string[]; error?: string; errorCode?: string }> {
   if (principal.guest) return { ok: false, errorCode: 'GUEST_NOT_ALLOWED', error: '互通体系仅面向注册用户（R13）' }
   const specs = await loadApiSpecs(principal.key)
-  const hit = specs.find((s) => s.spec.namespace === namespace)
-  if (!hit) return { ok: false, errorCode: 'NAMESPACE_NOT_FOUND', error: `未见本人 api 包（namespace=${namespace}）` }
+  const hit = specs.find((s) => s.spec.namespace === namespace && !s.fromInstalled)
+  if (!hit) return { ok: false, errorCode: 'NAMESPACE_NOT_FOUND', error: `未见本人 api 包（namespace=${namespace}；市场安装的包不可重复发布）` }
   const publicEndpoints = hit.spec.endpoints.filter((e) => e.visibility === 'public').map((e) => e.name)
   if (publicEndpoints.length === 0) return { ok: false, errorCode: 'NO_PUBLIC_ENDPOINTS', error: '该 api 包没有 visibility=public 的端点，无法公开' }
   await upsertApiPublic({ namespace, ownerKey: principal.key, packageId: hit.packageId })
@@ -230,8 +262,8 @@ export async function unpublishNamespace(
 ): Promise<{ ok: boolean; error?: string; errorCode?: string }> {
   if (principal.guest) return { ok: false, errorCode: 'GUEST_NOT_ALLOWED', error: '互通体系仅面向注册用户（R13）' }
   const specs = await loadApiSpecs(principal.key)
-  const hit = specs.find((s) => s.spec.namespace === namespace)
-  if (!hit) return { ok: false, errorCode: 'NAMESPACE_NOT_FOUND', error: `未见本人 api 包（namespace=${namespace}）` }
+  const hit = specs.find((s) => s.spec.namespace === namespace && !s.fromInstalled)
+  if (!hit) return { ok: false, errorCode: 'NAMESPACE_NOT_FOUND', error: `未见本人 api 包（namespace=${namespace}；市场安装的包不可撤回发布）` }
   await deleteApiPublic(namespace)
   return { ok: true }
 }
@@ -369,6 +401,8 @@ export async function invokeEndpoint(principal: PrincipalLike, input: InvokeInpu
   const { namespace, endpoint: endpointName, params, ip } = input
 
   // ---- 解析目标：① 本人 api 包（owner 路径）→ ② 全局发布索引（public 路径，R13） ----
+  // 2026-08-23：市场安装的包（fromInstalled）不算本人包——其执行/数据/计费语义
+  // 一律走 public 管道（属主执行 + 调用者计费），避免用本人 packages/ 路径读 handler 失败。
   const hit = await resolveEndpoint(principal.key, namespace, endpointName)
   let packageId: string
   let ownerKey: string
@@ -377,7 +411,7 @@ export async function invokeEndpoint(principal: PrincipalLike, input: InvokeInpu
   let execPrincipal: PrincipalLike = principal // 执行（数据）侧 principal；public 时为属主
   let isRemote = false // 跨用户（属主执行 + 调用者计费）
 
-  if (hit) {
+  if (hit && !hit.fromInstalled) {
     packageId = hit.packageId
     ownerKey = hit.ownerKey
     spec = hit.spec
@@ -490,7 +524,7 @@ function readHandlerSafe(userKey: string, packageId: string, handlerPath: string
   const full = resolvePackageFilePath(userKey, packageId, handlerPath)
   if (!full) return null
   try {
-    return require('node:fs').readFileSync(full, 'utf-8')
+    return fs.readFileSync(full, 'utf-8')
   } catch {
     return null
   }

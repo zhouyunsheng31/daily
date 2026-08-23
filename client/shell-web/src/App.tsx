@@ -406,8 +406,16 @@ function withRuntimeBootstrap(html: string, appId?: string, storeShareId?: strin
   const safeTop = typeof window !== 'undefined' ? (window.getComputedStyle(document.documentElement).getPropertyValue('--safe-top').trim() || '44px') : '44px'
   const safeBottom = typeof window !== 'undefined' ? (window.getComputedStyle(document.documentElement).getPropertyValue('--safe-bottom').trim() || '18px') : '18px'
   const safeStyleInject = `<style>:root{--safe-top:${safeTop};--safe-bottom:${safeBottom};}</style>`
+  // 2026-08-23 市场主题包：当前主题 tokens 注入 iframe :root（桌面/App 统一换肤，可回退）
+  const themeTokens = useShellStore.getState().themeTokens
+  const themeStyleInject = themeTokens && typeof themeTokens === 'object' && Object.keys(themeTokens).length > 0
+    ? `<style data-daily-webos-theme>:root{${Object.entries(themeTokens)
+        .filter(([k]) => /^--[a-zA-Z0-9_-]+$/.test(k))
+        .map(([k, v]) => `${k}:${String(v).replace(/[^#a-zA-Z0-9\s(),.%\-_/\[\]]/g, '')};`)
+        .join('')}}</style>`
+    : ''
   const script = `<script data-daily-webos-runtime>${APP_RUNTIME_BOOTSTRAP}</script>`
-  const inject = `${base}${storageInject}${safeStyleInject}${script}`
+  const inject = `${base}${storageInject}${safeStyleInject}${themeStyleInject}${script}`
   // bootstrap 必须最先执行（localStorage polyfill 需在 App 任何脚本之前就位），
   // 因此插到 <head> 开头；无 <head> 时退到 <html> 后，再退到文档最前。
   const headMatch = html.match(/<head\b[^>]*>/i)

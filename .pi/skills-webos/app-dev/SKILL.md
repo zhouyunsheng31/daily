@@ -68,14 +68,56 @@ agent_fs_write packages/zz-notes/handlers/list.js    # handler：main(ctx) { ctx
 - **常见坑**：manifest 的 `id` 必须与文件夹名一致；api.json 必须通过契约校验（缺 name/method/handler 会被拒）；handler 里不要硬编码密钥（上架会扫描拒绝，密钥走 api.json secrets + ctx.secrets）。
 - **关联**：AI 做好 App 后**主动补一致 api 包**（list/add/delete 三端点足够大多数场景），这样用户后续问数据时你能直接答。
 
-## 5. App 内 SDK 能力（写进 HTML 就能用）
+## 5. App 内 SDK 能力（写进 HTML 就能用，严禁在沙箱中写 fetch 同站接口）
 
+**重要铁律**：HTML App 运行在沙箱（sandbox iframe）中，**绝对不要写 `fetch('/webos/api/...')`**！因为沙箱跨域没有 Cookie，写 fetch 会 100% 报 401 失败！
+所有平台能力必须通过宿主注入的 `DailyWebOs`（或 `window.DailyWebOs`）SDK 调用：
+
+### 5.1 平台 AI 生图能力 (`DailyWebOs.media.generateImage`)
+做 AI 绘图、头像生成、插画制作类 App 时，**直接调用本 SDK，自动扣除当前用户积分并返回可渲染的图片 URL**：
+```javascript
+// 生图示例（写进 App 的 script 标签）：
+async function generateAvatar(prompt) {
+  const result = await DailyWebOs.media.generateImage({
+    prompt: prompt,
+    size: '1024x1024' // 可选尺寸，默认 1024x1024
+  });
+  if (result.ok && result.url) {
+    document.getElementById('avatar-preview').src = result.url; // 直接展示
+  } else {
+    alert(result.error || result.message || '生图失败，请检查积分余额');
+  }
+}
+```
+
+### 5.2 平台 AI 对话与模型推理 (`DailyWebOs.ai.chat`)
+做 AI 写作、聊天机器人、剧情生成、代码辅助类 App 时，**调用本 SDK，自动扣除当前用户 Token 算力**：
+```javascript
+async function askAi(userPrompt) {
+  const res = await DailyWebOs.ai.chat({
+    prompt: userPrompt,
+    thinkingBudget: 'medium' // 'low' | 'medium' | 'high'
+  });
+  if (res.ok) {
+    console.log('AI 回复:', res.text);
+  }
+}
+```
+
+### 5.3 用户身份与积分感知 (`DailyWebOs.user`)
+实时获取当前登录用户的用户名与剩余积分，用于在 App 界面展示“剩余 XX 积分”或在生图前做校验：
+```javascript
+const { credits } = await DailyWebOs.user.getCredits();
+const profile = await DailyWebOs.user.getProfile();
+console.log(`欢迎 ${profile.username}，您的剩余积分为: ${credits}`);
+```
+
+### 5.4 App 存储与能力
+- `DailyWebOs.storage.get / set / list / remove`：App 私有持久化 KV 存储（比 localStorage 更可靠）。
+- `DailyWebOs.useApi('namespace').endpoint(params)`：调用 App API 包的能力。
 - `DailyWebOs.apps.open('appId')`：跳转另一个 App。
-- `DailyWebOs.http.get/post`：外部 API 代理（天气/新闻/实时数据类 App；禁 SSRF 源）。
-- `DailyWebOs.api.register/call`：App 间互联互通（A 调 B 的 handler）。
+- `DailyWebOs.http.get/post`：外部 API 代理（天气/新闻/第三方公网 API；禁 SSRF 源）。
 - `DailyWebOs.fs.write/read/list`：App 文件夹文件读写（素材/导出）。
-- `window.__dailyWebOsApiHandlers`：注册供其他 App 调用的 handler。
-- localStorage 数据由系统自动持久化，不要自己 fetch 存储接口。
 
 ## 6. 常见坑（血泪清单）
 

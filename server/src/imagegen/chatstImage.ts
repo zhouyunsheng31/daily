@@ -50,7 +50,13 @@ export async function generateImages(params: GenerateImageParams): Promise<Gener
     }
   }
 
-  const endpoint = process.env.CHATST_IMAGE_BASE_URL?.trim() || 'https://api.chatst.cn/v1/images/generations'
+  // 2026-08-23 修复：默认网关域名改回 api.chatst.org（.env.example / gen-image.sh /
+  // 部署文档一致；api.chatst.cn 域名已失效 DNS 解析失败 → 生图 fetch failed，
+  // 线上实证 UPSTREAM_ERROR）。
+  // 2026-08-23 修复2：BASE_URL 为「网关 base（含 /v1）」，必须与生成路径拼接——
+  // 直接 fetch base 会得到上游 404 "Invalid URL (POST /v1)"（线上实证 HTTP_404）。
+  const endpointBase = (process.env.CHATST_IMAGE_BASE_URL?.trim() || 'https://api.chatst.org/v1').replace(/\/+$/, '')
+  const endpoint = `${endpointBase}/images/generations`
   const count = Math.max(1, Math.min(4, params.n || 1))
   const size = params.size || '1024x1024'
 

@@ -15,9 +15,15 @@ export {
   marketDetail,
   installMarketPackage,
   listMyMarketInstalls,
+  myInstallDetail,
+  toggleMarketInstall,
+  getActiveTheme,
+  setMarketDeps,
   resolveDependencyClosure,
   scanPackageForSecrets,
   registerMarketTools,
   type MarketResult,
 } from './service.js'
+export { installedDir, listInstalledPackages, readInstalledManifest } from './installed.js'
+export type { InstalledPackage } from './installed.js'
 export type { MarketEntryRow, MarketInstallRow } from './db.js'

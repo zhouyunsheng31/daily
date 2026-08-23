@@ -999,8 +999,8 @@ export async function simpleAiChat(options: { prompt?: string; messages?: Array<
   const convId = options.appId ? `app-chat-${options.appId}` : `app-chat-${Date.now()}`
   let fullText = ''
   const msgs: WebOsChatMessage[] = options.messages
-    ? options.messages.map((m) => ({ role: m.role === 'system' ? 'user' : (m.role as 'user' | 'assistant'), text: m.content }))
-    : [{ role: 'user', text: options.prompt || '' }]
+    ? options.messages.map((m) => ({ role: (m.role === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant', content: m.content }))
+    : [{ role: 'user', content: options.prompt || '' }]
 
   // 2026-08-23 修复：原实现引用了不存在的 sendChatStream（WIP 半截）+ delta 字段
   // 误用 event.text（实际是 event.content）→ ai.chat 一调就 ReferenceError。

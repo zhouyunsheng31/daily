@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { join, extname } from 'path'
+import { join, extname, basename } from 'path'
 import { writeFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'fs'
 import { AsyncLocalStorage } from 'async_hooks'
 // Phase 14 C5 修复：pi-coding-agent 改为懒加载，避免 server 启动时 import 超时
@@ -2280,7 +2280,7 @@ const WEBOS_SYSTEM_PROMPT = [
   '- 可替换的系统素材：Logo（system/logo.svg）、用户头像（system/avatar.svg）、称呼（set_display_name）、加载页（system/boot.html + boot.json）、桌面形态（apps/system.desktop/index.html）、商店形态（apps/system.store/index.html）——用户说"换/改"时读写对应文件，告知刷新生效；删除的 App 在 apps/.trash/ 可恢复；用户上传的文件在 home/uploads/。用户上传的图片要作为桌面壁纸或 App 图片时，必须使用 agent_fs_list / agent_fs_stat / agent_fs_read 返回的 publicUrl（形如 /webos/api/imagegen/file/up-... 的免鉴权公开 URL），不要使用 /webos/api/workspace/files/raw?path=... 或相对路径 home/uploads/...（桌面 sandbox iframe 不带 cookie，鉴权 URL 会 401/404）。',
   '- 对话内互动（show_interactive_html）：用户要"在对话里直接看/玩/操作"（计算器、投票、小游戏、表单、设计方向选择等）时用它，宽度 100%、高度 120-480px（建议 220-320）；完整 App 用文件夹方式创建（apps/<名称>/ 下写 index.html，见 app-dev skill）。互动 HTML 里放选择按钮时 postMessage interactive_answer（channel:"daily-webos-sdk"）把用户点击回传给你，形成问答闭环。',
   '- 应用商店（publish_webos_app / unpublish_webos_app）：用户说"发布/上架/分享到商店"时调用；商店形态 = system.store App 可改（改形态不改数据）。',
-  '- App 侧 SDK（写进 App HTML 的能力）：DailyWebOs.http（外部 API 代理，做天气/新闻/实时数据类 App）、DailyWebOs.api（App 互联互通）、DailyWebOs.apps.open（App 跳转）、DailyWebOs.fs（文件）——涉及这些需求时直接用，不要说做不到。',
+  '- App 侧 SDK（写进 App HTML 的能力，严禁在沙箱中写 fetch 同站接口）：DailyWebOs.media.generateImage({ prompt, size })（平台原生 AI 生图，自动扣当前用户积分并返回可展示 URL，做生图 App 必用！）、DailyWebOs.ai.chat({ prompt, messages })（平台原生 AI 对话与模型推理，自动扣用户算力，做 AI 对话/写作 App 必用！）、DailyWebOs.user.getCredits() / getProfile()（获取用户身份与剩余积分）、DailyWebOs.storage（私有 KV 存储）、DailyWebOs.http（外部第三方公网 API 代理）、DailyWebOs.api（App 间互联）、DailyWebOs.useApi（调用 App API 包）、DailyWebOs.apps.open（App 跳转）、DailyWebOs.fs（文件读写）——做生图/AI对话/工具类 App 时一律使用 DailyWebOs SDK，绝对禁止写 fetch(/webos/api/...)（沙箱跨域无 Cookie 会 100% 报 401 失败）！',
   '- **App API（让你读到 App 内数据的关键，2026-08-21 W2/W3 已上线）：在 packages/ 下建 api 包（文件夹即包），系统会自动把你的每个端点注册成 `appapi_<namespace>_<endpoint>` 工具——之后你在对话里直接调用它，就能读到用户在 App 里存的数据（用户记了什么、进度、配置等）。做法：`agent_fs_mkdir packages/<id>/` → 写 `daily.pkg.json`（type=api、id、version），再写 `api.json`（namespace + endpoints 声明，每个端点含 name/method/path/handler/storage 读写范围）与 `handlers/*.js`（handler 函数，`ctx.storage.get/set/del` 读写、`ctx.http` 受限请求、`ctx.secrets` 取密钥）→ 系统校验通过自动注册+建版本，**下一轮对话/重建会话后** `appapi_*` 工具即注入可用。用户问"我在 App 里记了什么/存了什么/进度如何"必须先查该 api 包工具再回答；没建过 api 包的 App 你读不到它的私有数据（隐私边界），需要读取时应主动建议补建 api 包（严格按 api.json storage 声明的最小范围）。规范见 04 文档/packages 校验反馈（写文件结果里的 ⚠️ 会告诉你哪里不合格）。',
   '- 媒体工具手册：工作区 system/tools/ 下有 ffmpeg.md / imagemagick.md / imagegen.md / edit-image.md——处理音视频/图片素材前先读对应手册；游戏角色动画用 edit_video 的 to-sprite 一键生成透明精灵图（生成视频时明确要求纯色背景方便抠图）。',
   '- 客服：站长联系方式是敏感信息，不要主动提供、不要写进 App/桌面/任何生成物；用户问"怎么联系站长/购买/反馈"时引导去个人主页查看，不要编造。',
@@ -2321,6 +2321,12 @@ interface SharedWebosServices {
   skillsDir: string
 }
 const sharedWebosServices = new Map<string, SharedWebosServices>()
+
+/** 2026-08-23 失效共享 pi 服务缓存（技能安装/启停后调用）：
+ *  新会话创建时将重新扫描 skills，新技能立即被 AI 加载。 */
+export function invalidateWebosServices(): void {
+  sharedWebosServices.clear()
+}
 
 /** 预热 pi 模块（2026-08-10）：server 启动后后台 import pi-coding-agent，
  *  首次对话不再承担模块加载开销（tsx 环境加载约 8-26s）。幂等，失败自动重试。 */
@@ -2505,7 +2511,25 @@ export async function createWebosSession(
     encodeURIComponent(conversationId),
     encodeURIComponent(modelRef),
   )
-  const sessionManager = SessionManager.create(cwd, sessionDir)
+  // 2026-08-23 会话恢复修复（用户反馈：重启/缓存失效后 AI 不记得前面的上下文）：
+  // pi 0.79.10 的 SessionManager.create() 总是"全新空会话"，不会读取 sessionDir 里
+  // 已有的 JSONL 历史文件——只有 SessionManager.open(path) 才加载既有会话并恢复
+  // 完整上下文（含工具调用/记忆）。此前依赖进程内存缓存 webosSessions 命中才能
+  // 连续；缓存一旦 miss（进程重启 / 错误恢复 dispose / 256 防泄漏淘汰），重建的
+  // 会话即从零开始，AI 失忆。
+  // 修复：恢复优先——sessionDir 已有历史文件时取最新一个 open（时间戳文件名排序，
+  // 与安卓 harness core.js 的 existing→SessionManager.open 逻辑一致），
+  // 无历史文件才 create 新建。
+  const sessionFiles = existsSync(sessionDir)
+    ? readdirSync(sessionDir).filter((f) => f.endsWith('.jsonl')).sort()
+    : []
+  const latestSessionFile = sessionFiles.length ? join(sessionDir, sessionFiles[sessionFiles.length - 1]) : null
+  const sessionManager = latestSessionFile
+    ? SessionManager.open(latestSessionFile, sessionDir)
+    : SessionManager.create(cwd, sessionDir)
+  if (latestSessionFile) {
+    console.log(`[PiBridge] webos session restored conv=${conversationId} file=${basename(latestSessionFile)} (${sessionFiles.length} jsonl)`)
+  }
 
   // webOS 专用 skills 目录（2026-08-11 起分两层）：
   // 1) 用户级 skills：<workspace>/skills/（myself 记忆等用户专属 skill，每个用户独立）
@@ -2645,9 +2669,12 @@ export function disposeWebosSessions(scope: string, conversationId?: string): vo
   }
 }
 
-/** 2026-08-08 临时调试：获取指定会话的 pi 实例（不创建；用于 dump 上下文排查消息重复） */
+/** 2026-08-08 临时调试：获取指定会话的 pi 实例（不创建；用于 dump 上下文排查消息重复）
+ *  2026-08-23 key 前缀修正：8-17 会话缓存 key 已从 `webos:scope:convId:thinking`
+ *  改为 `webos:scope:convId`（不含 thinking），此处前缀带尾冒号导致
+ *  hasWebosSession 恒 false（rebuild 兜底总是失效、重复重放历史）。 */
 export function getWebosSessionForDebug(scope: string, conversationId?: string): unknown {
-  const prefix = conversationId ? `webos:${scope}:${conversationId}:` : `webos:${scope}:`
+  const prefix = conversationId ? `webos:${scope}:${conversationId}` : `webos:${scope}:`
   for (const [key, s] of webosSessions) {
     if (key.startsWith(prefix)) return s
   }
@@ -2668,7 +2695,10 @@ export function hasWebosSession(scope: string, conversationId?: string): boolean
  * 中断前已消耗的 usage 仍会随 agent_end 正常结算（照常扣积分）。
  */
 export async function abortWebosSessions(scope: string, conversationId?: string): Promise<number> {
-  const prefix = conversationId ? `webos:${scope}:${conversationId}:` : `webos:${scope}:`
+  // 2026-08-23 prefix 尾冒号修正：8-17 缓存 key 已改为 `webos:scope:convId`（不含
+  // thinking 与尾冒号），旧 prefix 匹配不到任何会话 → abort 恒 0
+  // （「停止」按钮无效、AI 继续后台跑完，线上实证 aborted=0）。
+  const prefix = conversationId ? `webos:${scope}:${conversationId}` : `webos:${scope}:`
   let aborted = 0
   for (const [key, s] of webosSessions) {
     if (key.startsWith(prefix)) {

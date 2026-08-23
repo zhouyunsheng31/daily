@@ -6,6 +6,180 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 19:3x · docs(skill): package-market 完整版同步——Operit 本地副本与仓库权威版统一（鉴权校正 + 统一复合包 API）
+
+**背景**：站长确认「有没有给 Operit 自己装一份指导规范」——Operit 本地 skill（`/storage/emulated/0/Download/Operit/skills/daily-package-market/SKILL.md`）确实已装，但为旧版（§6.1 仍写 Bearer 鉴权、市场端点缺 toggle/install-state）。
+**修改**：
+- Operit 本地副本：§6.1 鉴权实测校正（JWT 走 `Cookie: access_token`，Bearer 是 SERVER_TOKEN 通道→401）；§6.3 补 install 安装即用语义（installed/ + app/skill/appapi/theme）、启停开关 toggle、安装态 install-state、public 调用语义（属主执行+调用者计费）；
+- 仓库权威版 `.pi/skills-webos/package-market/SKILL.md`：以 Operit 完整版（385 行，含 Sideload 直装/自愈清单/报错对照）替换，两处一致。
+**验证**：grep 校验两文件均含 `Cookie: access_token`、`install-state`、`Sideload`；git 推送 + 服务器同步后 AI 新会话读取最新版。
+
+### 2026-08-23 19:1x · docs(api): API 文档与系统指导 skill 同步统一复合包改造（toggle/install-state/鉴权校正）
+
+**背景**：站长核查「API 文档是否同步更新」——系统预置包（system.media / system.ai-chat，api 型自带指导 SKILL.md）与全局指导 skill（`.pi/skills-webos/` 的 package-market / media-package / app-dev / design 等）均已存在并有线上；但三份 API 文档停留在 W3 原始 6 端点，未同步本次统一复合包改造，且鉴权写法（Bearer 传 JWT）与实际不符（实测 401）。
+**修改文件**：
+- `docs/api-reference.md`：第 7 节补 `GET /market/:id/install-state`、`POST /market/:id/toggle`，install 补充「安装即用」落点（installed/ + app/skill/appapi/theme 生效）与 note 返回示例；
+- `docs/routes/web/10-package-market-guide.md`：§3 补鉴权说明（JWT 走 `Cookie: access_token`，Bearer 是 SERVER_TOKEN 通道）、安装即用/启停/安装态/public 调用语义（属主执行+调用者计费）；
+- `.pi/skills-webos/package-market/SKILL.md`（AI 运行时直接读取的指导 skill）：§6.1 鉴权实测校正 + §6.2 补 install/toggle/install-state/mine 端点与统一复合包安装即用说明。
+**验证**：三份文档与 `market/router.ts`（toggle/install-state 端点）、`market/service.ts`（安装引擎/启停分派）、`appapi-service.ts`（fromInstalled/public 语义）逐条核对一致；`.pi/skills-webos/` 已随 git 同步服务器（AI 新会话加载新 skill）。
+
+### 2026-08-23 18:2x · fix(appapi): ESM 下 `require('node:fs')` 未定义导致 App API 包全部加载失败（API_SPEC_MISSING）
+
+**用户反馈/验证发现**：统一复合包 E2E 中 A 发布 `test.unified`（type=api）恒报 `API_SPEC_MISSING`（包文件齐全、DB 已注册、GET /packages 能看到，但 loadApiSpecs 就是找不到合法 api.json）。
+**根因**：`server/src/webos/appapi/appapi-service.ts` 的 `readJsonFile` / `readHandlerSafe` 使用 **`require('node:fs')`**——服务器 `package.json` 为 `"type": "module"`（ESM），tsx 加载 ESM 模块时 `require` **未定义**，抛 ReferenceError 被 try/catch 静默吞掉 → 恒返回 null → 包 manifest/api.json/handler 全部读不到 → loadApiSpecs 跳过所有 api 包 → 发布报 API_SPEC_MISSING（同时 **appapi_* 动态工具注册、api handler 执行在线上从未真正生效**）。
+**修复**：静态 `import fs from 'node:fs'`，两处 `require('node:fs')` 改为 `fs`。
+**验证**：本地独立进程（initSandbox+initDb）走通链路；线上加分层日志实锤 `manifest=false raw=false fileExists=true`；修复后 A 发布 `test.unified` 成功（`{"ok":true,"publicEndpoints":["ping"]}`）。
+（另注：排查期间发现 pm2 累计重启 448+ 次，疑为部署期历史遗留/守护脚本无关；当前进程稳定、restarts 不再增长。）
+
+### 2026-08-23 18:4x · fix(appapi): 市场安装的 api 包不得作 owner 路径执行/发布（fromInstalled 语义修正）
+
+**验证发现**：E2E 中 B 安装 `test.unified` 后调用 `POST /webos/api/appapi/test_unified/ping` 报 `HANDLER_MISSING: handler 文件不存在：handlers/ping.js`。
+**根因**：`loadApiSpecs` 的 installed 分支把市场安装包标记为 `ownerKey=调用者本人` → `resolveEndpoint(B)` 将安装包误判为本人包 → invokeEndpoint 走 owner 分支，用调用者 `packages/<id>/` 路径读 handler（实际整包在 `installed/<id>/`）→ 解析失败。同时 `publishNamespace/unpublishNamespace/publishPackage` 存在**越权发布安装包**隐患（可把他人 namespace 重新发布到自己名下）。
+**修复**（`server/src/webos/appapi/appapi-service.ts` + `server/src/webos/market/service.ts`）：LoadedApiSpec 增加 `fromInstalled` 标志（installed 分支=true，本人 packages 分支=false）；`invokeEndpoint` 的 owner 分支条件改为 `hit && !hit.fromInstalled`（安装包一律走 public 管道：属主执行 + 调用者计费）；`publishNamespace/unpublishNamespace/publishPackage` 的查找排除 `fromInstalled`（市场安装的包不可重复发布/撤回）。
+**验证**：B 调 ping → `{"ok":true,"result":{"ok":true,"data":"pong"},"costMinor":1}`（属主 A 执行、调用者 B 计费）✅；A 调 ping → pong ✅；B 越权发布 → `FORBIDDEN 仅包所有者可发布` ✅。
+
+### 2026-08-23 18:5x · fix(market): 启停开关按内容驱动分派（复合包 skill/theme 真正可停用/恢复）
+
+**验证发现**：E2E 中 `POST /market/:id/toggle {"enabled":false}` 返回成功但主题未还原、skill 未移除。
+**根因**：`toggleMarketInstall` 按**包 type** 分派（skill/theme 分支仅处理 type=='skill'/'theme'），而统一复合包 type='api' 同时含 content skills/tokens → 走不进任何分支，只改了 enabled 记录。
+**修复**（`server/src/webos/market/service.ts`）：与 `provisionInstalled` 对齐，改为**内容驱动**判定——skill：`type=='skill' || contents.skills 非空 || 存在 SKILL.md`；theme：`type=='theme' || contents.tokens 非空`；app 分支保持原逻辑。
+**验证**：off → note「技能已停用；主题已恢复默认」+ bootstrap theme=null + skills/test.unified 移除 ✅；on → note「技能已恢复；✅ 主题已应用：7 个 CSS 变量」+ theme 恢复 + skills 恢复 ✅；前端构建产物已含 `data-daily-webos-theme` 注入逻辑（`/daily/assets/index-CSCguKSl.js`），bootstrap.theme.tokens → iframe :root 换肤链路全通 ✅。
+
+### 2026-08-23 17:4x · fix(chat): 「回退重来」真正生效——rebuild=true 时销毁 pi 会话重建 + historyContext 重放
+
+**用户反馈**：点「回退重来」只是删了眼前渲染，AI 并没有真正回退重来（此前该 bug 修过但 8-18 回归）。
+**根因**：8-18「优化」起 rebuild=true 且 pi 会话存活（内存缓存命中，最常见场景）时**不再 dispose**，只在 userText 里加一句"请忽略旧回复"——但 **pi 会话内存中被删掉的用户消息/旧 AI 回复/工具调用仍然全部留在上下文里**，AI 依旧带着旧记忆作答（前端截断了消息 = 只删渲染；服务端上下文没变 = 没真正重来）。
+**修复**（`server/src/routes/webos.ts`）：rebuild=true 时无论会话是否存活，**一律 `disposeWebosSessions`（内存会话 + JSONL 文件）**再重建，并把前端传来的「截断后的保留历史」经 `formatHistoryContext` 重放为背景——AI 只知道重来之后的历史（等价 DeepSeek「编辑后重新生成」）。8-18 的 token 优化动机仅适用于普通消息重发场景（非 rebuild 不受影响），重建放回 rebuild 路径。
+**验证**（线上 154.64.249.172，git pull + pm2 restart）：
+- 游客会话：记住「木星321」→「XZZ9」→ rebuild=true 重发 → 再问记住的内容 → AI 只答重放历史中的「木星321 / XZZ9」✅
+- pm2 日志：`chat rebuild ... sessionAlive=yes -> dispose + historyContext replay` + 新会话 `created in 7ms`（无旧 JSONL 恢复）✅
+- 提交 `7f62f9f` 已推送 GitHub
+
+### 2026-08-23 17:2x · fix(imagegen): 修复生图 API 失败（上游域名失效 + 路径拼接缺失）
+
+**用户反馈**：检查生图 API。线上实测：`GET /imagegen/config` available=true 但 `POST /imagegen` 报 `UPSTREAM_ERROR: fetch failed`。
+**根因（两个叠加）**：
+1. 代码默认网关域名 **api.chatst.cn 已失效**（DNS NXDOMAIN，本地/服务器/公共 DNS 全部解析失败；8-20 仍可用）；文档与 .env.example / gen-image.sh 均为 **api.chatst.org**（解析正常、401 正常响应）——代码 fallback 与文档不一致；
+2. `CHATST_IMAGE_BASE_URL`（含 /v1）被直接当作 endpoint fetch，缺少 `/images/generations` 路径拼接 → 上游 `HTTP_404: Invalid URL (POST /v1)`。
+
+**修改文件**：
+- `server/src/imagegen/chatstImage.ts`（fallback 域名 .cn → .org；BASE_URL 与 `/images/generations` 拼接并去尾部斜杠）
+- 服务器 `.env` 追加 `CHATST_IMAGE_BASE_URL=https://api.chatst.org/v1`（备份 .env.bak-20260823）
+
+**验证（线上部署走 git pull + pm2 restart 后实测）**：
+- `POST /webos/api/imagegen`（prompt: red apple）→ `ok:true`，耗时 15.2s，生成 `imagegen/file/1787474989626_gen_13f1f842.png`
+- 图片 URL 下载 http=200、625KB、image/png ✅
+- 修复前错误链：`UPSTREAM_ERROR fetch failed`（.cn DNS 失效）→ `HTTP_404 Invalid URL (POST /v1)`（路径未拼接）→ 修复后全通
+
+### 2026-08-23 16:5x · fix(chat): 修复「停止按钮无效 + 停止后再发消息瞬间重放旧任务内容」
+
+**用户反馈**：点停止只停渲染、AI 继续跑；停止后发新消息"瞬间出现一堆消息"。
+**排查（线上实证）**：
+- `/chat/cancel` 返回 `aborted:0`——`abortWebosSessions` 的缓存 key 前缀多带尾冒号（8-17 缓存 key 从 `webos:scope:convId:thinking` 改为 `webos:scope:convId` 后未同步），**匹配不到会话 → AI 根本没停**（客服端两个端都受影响）；
+- 停止后新消息 busy 等待时，服务端把旧任务缓冲（被 cancel 清空后由 subscribe 惰性重建）从游标 0 全量转发为 background_progress → 前端渲染进对话流 = "瞬间一堆消息"（实测 405+ 条重放）；
+- **安卓端 stop() 只取消本地 SSE、从未调用 /chat/cancel**（WebosApi/Repository 无此方法）→ AI 后台跑完、下一条消息撞 busy 重放。
+
+**修改文件**：
+- `server/src/piBridge.ts`（abortWebosSessions：prefix 去尾冒号，修复 abort 恒 0）
+- `server/src/routes/webos.ts`（新增 cancelledTaskKeys：主动停止后在途任务事件不再写入/重放缓冲，log 保留；cancel 路由先 markTaskCancelled 再 clearTaskBuffer；agent_end 清标记）
+- `client/android/core/.../WebosApi.kt` + `WebosRepository.kt`（新增 cancelChat）
+- `client/android/app/.../ChatViewModel.kt`（stop() 通知服务端 abort）
+
+**验证（线上部署走 git pull + pm2 restart 后实测）**：
+- `/chat/cancel` 返回 `{"ok":true,"aborted":1}`（此前恒 0 → AI 没停）✅
+- 长任务启动 7s → cancel → 立即发新消息：事件流仅 `start / thinking×2 / delta("OK") / done`——**0 条 background_progress、0 条 busy_waiting**（此前 405+ 条旧任务重放）✅
+- 旧任务后台 curl 随 cancel 立即结束（abort 生效，不再后台跑完）✅
+- 另排查教训：线上 pm2 实际以 `src/index.ts`（tsx）运行——**部署必须同步 src（git pull），仅更新 dist 不生效**（本轮已改走 git 通道）。
+
+### 2026-08-23 15:20 · 3cf926e · fix(pi): 修复服务重启/缓存失效后 webOS 会话上下文丢失（AI「不记得前面的上下文」）
+
+**背景**：用户反馈「安卓端和 AI 发消息，AI 没有前面的上下文」。按纪律先查对话记录（管理端三层 + 服务器 pm2 + session JSONL）确认：
+- 站长最新会话 `conv-1787463147985-0ptf2n`：13:33 做「绘梦·AI 生图」App 后，14:34 发「重新做一下」时 pi 会话**被重建**（pm2 日志 `webos session created in 158ms`），AI 思考过程原话：「日志只记录工具调用，不记录对话……拿不准你指的是哪一个」——只能翻工作区 execution.log 猜历史，对话上下文确实断了；
+- **根因**：pi-coding-agent 0.79.10 的 `SessionManager.create()` 总是「全新空会话」，**不会读取 sessionDir 已有 JSONL**（只有 `SessionManager.open(path)` 才加载既有会话）；上下文连续完全依赖进程内存缓存 `webosSessions`，缓存 miss（服务重启 / 错误恢复 dispose / 256 防泄漏淘汰）即失忆。8-17 的「文件持久化修复」实际未生效（create 不恢复既有文件；注释假设不成立）；
+- 会话 log 本身一直有保留（webos_chat_logs / webos_chat_sessions 含 reasoning，管理后台可查），但只作审计，不参与上下文恢复。
+
+**修改文件**：
+- `server/src/piBridge.ts`（`createWebosSession`）：恢复优先——sessionDir 已有 `.jsonl` 时取最新一个 `SessionManager.open(latest, sessionDir)` 恢复完整上下文（含工具调用/记忆，与安卓 harness `core.js` 的 existing→open 逻辑一致），无历史文件才 `SessionManager.create(cwd, sessionDir)` 新建；新增 `[PiBridge] webos session restored` 恢复日志；
+- `server/src/piBridge.ts`（`getWebosSessionForDebug`）：key 前缀修正——8-17 会话缓存 key 已从 `webos:scope:convId:thinking` 改为 `webos:scope:convId`，旧前缀带尾冒号导致 `hasWebosSession` 恒 false、rebuild 兜底（编辑/回退重来判会话存活）一直失效、重复重放历史。
+
+**验证（线上 154.64.249.172，已部署生效）**：
+- 新游客「请记住测试暗号：紫罗兰365」（明示不用工具，暗号只存在于 pi 会话上下文）→ `pm2 restart daily-server` 模拟服务重启 → 再问「刚才的暗号是什么」→ AI 直接答出「紫罗兰365」（input 仅 329 tokens，无历史重放）✅
+- 服务端日志确认 `[PiBridge] webos session restored conv=default file=2026-08-23T07-18-20-676Z_...jsonl (1 jsonl)` ✅
+- `npx tsc` 构建零错误、线上 health 正常、pm2 稳定（restart 后无崩溃）✅
+- 站长现有会话（conv-1787463147985-0ptf2n 等）历史 JSONL 完好，下次请求将自动恢复
+
+**部署补充（15:26-15:30）**：同步完整 `dist/` 至线上（此前仅有 piBridge.js 更新，dist 其余为 02:34 旧构建——桌面 V2 / System Packages 等新代码未上线）。替换后 pm2 restart 验证：
+- 新游客 `GET /webos/api/apps/system.desktop` 返回 HTML 含 `#pages`（多页体系）、`touch-action: pan-x pan-y`（手势解绑）、长按拖拽等 V2 特征 ✅
+- health 正常、pm2 稳定（restart 后无崩溃），旧 dist 备份于 `server/dist.bak-20260823-1526/`
+- 注：已被 AI/用户自定义过的桌面（untouched=false）不自动覆盖，保留用户版本；新用户与未改动桌面自动使用桌面 V2 模板
+
+### 2026-08-23 14:25 · ee907fc · feat(desktop): 交付桌面模板 V2，实现原生多页面体系、手势全面解绑与长按拖拽边缘自动创建新页面
+
+**修改文件路径**：
+- `server/src/webosDesktopV2.ts`（新增）
+- `server/src/webosDesktopV1.ts`
+- `client/shell-web/src/api.ts`
+- `client/shell-web/src/runtime.ts`
+- `CHANGELOG.md`
+
+**改动内容**：
+1. **原生多页面体系（Multi-page Launcher）**：
+   - 彻底摆脱单页写死限制，实现全功能多页面视口（`#pages` + `section.page` + `div.grid`）；
+   - 底部分页指示器（`#dots`）实时动态跟随页数增减与激活高亮，支持点击小圆点平滑切页；
+   - 支持多页 App 数据的本地持久化（`localStorage`）与平铺 `SDK.apps.reorder` 双向同步；
+2. **手势彻底解绑（图标区域滑动 100% 顺畅）**：
+   - 消除 `.app` 上的 `touch-action: none` 阻断，改为 `touch-action: pan-x pan-y`；
+   - 优化触摸识别算法：未达到 420ms 长按阈值前位移超过 8px 立即判定为滑屏手势并清除长按，完全放行浏览器原生 scroll-snap 水平滚动，彻底解决“有 app 图标的位置无法滑动”的体验痛点；
+3. **长按拖动 App 到边缘自动创建新页面与跨页重排**：
+   - 420ms 原地长按触发浮起与震动反馈，无缝转入拖拽模式；
+   - 引入视口边缘智能巡检（Edge Zone Detection）与边缘停留定时器（420ms）：
+     - 拖拽至左边缘持续停留：自动平滑翻到上一页；
+     - 拖拽至右边缘持续停留：若在中间页平滑翻入下一页；**若在最后一页，自动动态创建新的一页（New Page）** 并平滑翻入；
+     - 拖拽松手（Drop）：图标落入目标页网格中，并自动检测清理多余的非首页空白页面；
+4. **长按菜单与编辑模式协同**：
+   - 长按提供「整理桌面（拖拽排序）」、「分享给朋友」、「上传应用商店」、「下载源码 ZIP」、「删除（移入回收站）」等标准菜单；
+   - 编辑模式支持右上角「完成」按钮与空白处一键退出。
+
+**验证**：
+- `client/shell-web` 通过 `tsc -b && vite build` 生产构建验证；
+- `server` 通过 `tsc --noEmit` 编译验证；
+- `server` 单元测试 `desktopLayout.test.ts` (8/8)、`engines.test.ts` (21/21) 全数通过。
+
+### 2026-08-23 13:40 · feat(packages): 实现平台核心能力 100% 标准系统包化（System Packages），注入 system.media 与 system.ai-chat 种子包与权威 Skill
+
+**修改文件路径**：
+- `server/src/webos/packages/packages-service.ts`
+- `server/src/webos/packages/index.ts`
+- `server/src/webos/appapi/appapi-service.ts`
+- `client/shell-web/src/runtime.ts`
+- `.pi/skills-webos/media-package/SKILL.md`
+- `CHANGELOG.md`
+
+**改动内容**：
+1. **实现系统能力的 100% 标准系统包化（`ensureSystemPackages`）**：
+   - 彻底消除单体硬编码特例，建立官方系统包体系：
+     - `system.media`：提供平台原生 AI 生图与多媒体服务包（含 `daily.pkg.json v2`、`api.json`、`skills/SKILL.md` 与 handler）；
+     - `system.ai-chat`：提供平台原生 AI 对话与模型推理服务包；
+   - 随用户工作区初始化与包列表同步自动植入与激活；
+2. **随包分发的权威 Skill 体系（`skills/SKILL.md`）**：
+   - 每个系统包自带标准开发规范与使用指南，让 AI 在会话中自动学会如何调用 `appapi_media_generate_image`，以及如何在编写 App 时通过 `DailyWebOs.useApi('media').generateImage` 或 `DailyWebOs.media.generateImage` 规范编写；
+3. **App API 管道双轨直通**：
+   - App 前端支持 `DailyWebOs.useApi('media').generateImage(...)` 与 `DailyWebOs.media.generateImage(...)` 双轨调度，100% 跑通平台真实生图与自动扣费。
+
+### 2026-08-23 13:20 · feat(skills): 将 App 内 SDK 与原生生图/对话铁律写入 app-dev Skill 与 AI 系统提示词
+
+**修改文件路径**：
+- `.pi/skills-webos/app-dev/SKILL.md`
+- `server/src/piBridge.ts`
+- `CHANGELOG.md`
+
+**改动内容**：
+1. **app-dev Skill 强化（App 内 SDK 与生图/AI 模板）**：
+   - 明确立下沙箱铁律：严禁在 HTML App 内使用 `fetch('/webos/api/...')`（沙箱跨域无 Cookie 必报 401）；
+   - 提供 `DailyWebOs.media.generateImage`、`DailyWebOs.ai.chat` 与 `DailyWebOs.user.getCredits` 的完整示例代码与说明；
+2. **AI 系统提示词同步**：
+   - 将生图与 AI 对话的 App 编写规范同步写入 `piBridge.ts` 的系统核心指令，指导 AI 在制作 App 时 100% 消费 SDK 代理通道，保证生成的生图/AI 对话 App 开箱即用且自动扣费。
+
 ### 2026-08-23 13:05 · 67293ee · feat(runtime-sdk): 打通 App 沙箱内的平台原生 AI 生图与对话能力，全面开放用户与媒体 SDK 桥接
 
 **修改文件路径**：
