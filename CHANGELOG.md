@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 23:0x · feat(webos) [32273ee]: 模型目录全链路上线——admin.shadowshub.xyz 后台模型管理入口 + 生产库种子 + params 解析修复
+
+**背景/用户反馈**：站长反馈「像 Operit 那样管理员后台可配置多 provider 多模型、用户前端可切换」的实现「什么都没做」——后台无设置入口、用户前端无法切换、gemini 模型"被删"。
+**排查结论**（代码/部署双线核对）：
+- 后端模型目录（bb63d51：`ai_models` 表 + admin CRUD + 会话按模型隔离）此前已在生产（prod 154.64.249.172 跑 tsx 源码、`/api/admin/ai-models` 路由存在、`dist` 含 modelCatalog），**但管理端前端从未构建部署**：`admin.shadowshub.xyz` 服务的是 08-17 旧产物（`/var/www/daily-admin/public`），无「模型管理」入口；
+- 生产 SQLite 库 `ai_models` 为空表（种子仅在 admin 首次访问时触发）→ gemini 确实"看不到"；
+- 新增 bug：`modelCatalog.toCatalogModel` 对 sqlite 包装层已自动 JSON.parse 的 `params` 二次 `JSON.parse` 抛错被 catch 吞掉 → 模型 params（multimodal/note/supportsThinking）全部丢失。
+
+**改动**：
+- `server/src/db/modelCatalog.ts`：`toCatalogModel` 与 `listEnabledModelsForRegistry` 兼容「已是对象 / 仍是字符串」两种形态，修复 params 丢失（multimodal/note/supportsThinking/成本字段）；
+- `client/admin-web/src/api.ts`：补全 `SearchStats` 缺失字段（byDay/byEngine/byTool/byUser/failures/total），使 admin-web `tsc` 可构建；
+- `client/admin-web`：`@types/node` 依赖 + package-lock 入库；
+- 运维（不占提交）：admin-web `vite build` 新产物 `index-DV4qjSAW.js` 部署 `/var/www/daily-admin/public`（备份 `public.bak-20260823`）；`/root/daily-admin-guard.sh` 每分钟守卫改为识别新产物 `index-DV4qjSAW`（此前按旧 hash 把新部署当"误覆盖"还原）；生产库执行 `seedModelsIfEmpty()` 写入 3 个模型。
+
+**种子模型**（与站长要求一致）：
+- `deepseek/deepseek-v4-flash`（zen 网关 opencode.ai，默认，supportsThinking）；
+- `deepseek/deepseek-v4-pro`（zen 网关）；
+- `chatst/gemini-3.7-flash`（api.chatst.org，**multimodal=true** 原生多模态，note 标注）。
+
+**验证**（prod 本机）：admin API cookie 鉴权（`access_token` JWT）列模型 3 个、CRUD 增删临时模型通过；用户端 `/webos/api/bootstrap`（游客）返回 3 个可选模型，`ai.model=deepseek/deepseek-v4-flash`，gemini `multimodal=True`、全部 `supportsThinking=True`；`https://admin.shadowshub.xyz/` 已服务新 hash，守卫不再误还原；用户端 `shadowshub.xyz/daily/` 服务 `index-8cGiec3m.js`（含模型切换 UI，28bea05 重建版）。git 推送 `b5b028b`，prod 已 `git pull` + `pm2 restart daily-server`。
+
 ### 2026-08-23 22:56 · fix(shell-web) [28bea05]: 长会话全量发送触顶服务端 40 条上限 → 全员对话报错无法发送（400 INVALID_MESSAGES）
 
 **用户反馈/事故**：Berson 等多账号反馈「连不上 AI / 无法正常对话」。服务端排查（154.64.249.172，pm2 daily-server）：pm2 在线、上游 opencode.ai（zen/go/v1，deepseek-v4-flash）可调用、公网 SSE 实测 200 正常；nginx access log 显示各用户 `POST /webos/api/chat/stream` 反复 `400`（响应 116B = INVALID_MESSAGES），且 200（resume no_task）→400 交替。
