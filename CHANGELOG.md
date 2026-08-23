@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `npx tsc` 构建零错误、线上 health 正常、pm2 稳定（restart 后无崩溃）✅
 - 站长现有会话（conv-1787463147985-0ptf2n 等）历史 JSONL 完好，下次请求将自动恢复
 
+**部署补充（15:26-15:30）**：同步完整 `dist/` 至线上（此前仅有 piBridge.js 更新，dist 其余为 02:34 旧构建——桌面 V2 / System Packages 等新代码未上线）。替换后 pm2 restart 验证：
+- 新游客 `GET /webos/api/apps/system.desktop` 返回 HTML 含 `#pages`（多页体系）、`touch-action: pan-x pan-y`（手势解绑）、长按拖拽等 V2 特征 ✅
+- health 正常、pm2 稳定（restart 后无崩溃），旧 dist 备份于 `server/dist.bak-20260823-1526/`
+- 注：已被 AI/用户自定义过的桌面（untouched=false）不自动覆盖，保留用户版本；新用户与未改动桌面自动使用桌面 V2 模板
+
 ### 2026-08-23 14:25 · ee907fc · feat(desktop): 交付桌面模板 V2，实现原生多页面体系、手势全面解绑与长按拖拽边缘自动创建新页面
 
 **修改文件路径**：
