@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 14:25 · feat(desktop): 交付桌面模板 V2，实现原生多页面体系、手势全面解绑与长按拖拽边缘自动创建新页面
+
+**修改文件路径**：
+- `server/src/webosDesktopV2.ts`（新增）
+- `server/src/webosDesktopV1.ts`
+- `client/shell-web/src/api.ts`
+- `client/shell-web/src/runtime.ts`
+- `CHANGELOG.md`
+
+**改动内容**：
+1. **原生多页面体系（Multi-page Launcher）**：
+   - 彻底摆脱单页写死限制，实现全功能多页面视口（`#pages` + `section.page` + `div.grid`）；
+   - 底部分页指示器（`#dots`）实时动态跟随页数增减与激活高亮，支持点击小圆点平滑切页；
+   - 支持多页 App 数据的本地持久化（`localStorage`）与平铺 `SDK.apps.reorder` 双向同步；
+2. **手势彻底解绑（图标区域滑动 100% 顺畅）**：
+   - 消除 `.app` 上的 `touch-action: none` 阻断，改为 `touch-action: pan-x pan-y`；
+   - 优化触摸识别算法：未达到 420ms 长按阈值前位移超过 8px 立即判定为滑屏手势并清除长按，完全放行浏览器原生 scroll-snap 水平滚动，彻底解决“有 app 图标的位置无法滑动”的体验痛点；
+3. **长按拖动 App 到边缘自动创建新页面与跨页重排**：
+   - 420ms 原地长按触发浮起与震动反馈，无缝转入拖拽模式；
+   - 引入视口边缘智能巡检（Edge Zone Detection）与边缘停留定时器（420ms）：
+     - 拖拽至左边缘持续停留：自动平滑翻到上一页；
+     - 拖拽至右边缘持续停留：若在中间页平滑翻入下一页；**若在最后一页，自动动态创建新的一页（New Page）** 并平滑翻入；
+     - 拖拽松手（Drop）：图标落入目标页网格中，并自动检测清理多余的非首页空白页面；
+4. **长按菜单与编辑模式协同**：
+   - 长按提供「整理桌面（拖拽排序）」、「分享给朋友」、「上传应用商店」、「下载源码 ZIP」、「删除（移入回收站）」等标准菜单；
+   - 编辑模式支持右上角「完成」按钮与空白处一键退出。
+
+**验证**：
+- `client/shell-web` 通过 `tsc -b && vite build` 生产构建验证；
+- `server` 通过 `tsc --noEmit` 编译验证；
+- `server` 单元测试 `desktopLayout.test.ts` (8/8)、`engines.test.ts` (21/21) 全数通过。
+
 ### 2026-08-23 13:40 · feat(packages): 实现平台核心能力 100% 标准系统包化（System Packages），注入 system.media 与 system.ai-chat 种子包与权威 Skill
 
 **修改文件路径**：

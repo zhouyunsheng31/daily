@@ -999,28 +999,27 @@ export async function simpleAiChat(options: { prompt?: string; messages?: Array<
   const convId = options.appId ? `app-chat-${options.appId}` : `app-chat-${Date.now()}`
   let fullText = ''
   const msgs: WebOsChatMessage[] = options.messages
-    ? options.messages.map((m) => ({ role: m.role === 'system' ? 'user' : (m.role as 'user' | 'assistant'), text: m.content }))
-    : [{ role: 'user', text: options.prompt || '' }]
+    ? options.messages.map((m) => ({ role: (m.role === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant', content: m.content }))
+    : [{ role: 'user', content: options.prompt || '' }]
 
   return new Promise((resolve) => {
-    sendChatStream(
+    streamChat(
       msgs,
       {
+        model: 'flash',
         conversationId: convId,
         thinking: options.thinkingBudget ?? 'medium',
       },
       {
-        onEvent: (event) => {
-          if (event.type === 'delta' && typeof event.text === 'string') {
-            fullText += event.text
-          } else if (event.type === 'done') {
-            resolve({ ok: true, text: fullText.trim() })
-          } else if (event.type === 'error') {
-            resolve({ ok: false, text: fullText.trim(), error: event.message })
+        onEvent: (event: WebOsChatEvent) => {
+          if (event.type === 'delta' && typeof event.content === 'string') {
+            fullText += event.content
           }
         },
       },
-    ).catch((err) => {
+    ).then(() => {
+      resolve({ ok: true, text: fullText.trim() })
+    }).catch((err: unknown) => {
       resolve({ ok: false, text: fullText.trim(), error: err instanceof Error ? err.message : String(err) })
     })
   })

@@ -373,13 +373,14 @@ async function handleHostRequest(
       return
     }
 
-    // 用户身份与积分感知（2026-08-23）
+        // 用户身份与积分感知（2026-08-23）
     if (method === 'user.getProfile' || method === 'user.getCredits') {
       const boot = await getBootstrap()
+      const remainingCredits = boot?.billing?.credits?.remaining ?? 0
       if (method === 'user.getCredits') {
-        respond(true, { credits: boot?.credits ?? 0, user: boot?.user ?? null })
+        respond(true, { credits: remainingCredits, billing: boot?.billing ?? null })
       } else {
-        respond(true, boot?.user ?? { id: '', username: 'Guest', role: 'guest', guest: true })
+        respond(true, boot?.session ?? { authenticated: true, guest: true })
       }
       return
     }
