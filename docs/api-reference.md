@@ -530,7 +530,7 @@ data: {"sessionId":"session-uuid","usage":{"prompt_tokens":120,"completion_token
 获取当前生图引擎可用状态与计价模型（不暴露服务端 API Key）。
 
 ### POST `/webos/api/http`
-受限安全出站 HTTP 代理（供 App 前端拉取外部 API，内置严格 SSRF 防护：禁止 IP 字面量、localhost、内网网段及云元数据地址）。
+受限安全出站 HTTP 代理（供 App 前端拉取外部 API，内置严格 SSRF 防护：禁止 IP 字面量、localhost、内网网段及云元数据地址）。**仅注册用户可调用**：游客会话返回 `403 GUEST_NOT_ALLOWED`（2026-08-23，与互通体系 R13 对齐，检查在服务端）。
 
 * **Body**：
 ```json

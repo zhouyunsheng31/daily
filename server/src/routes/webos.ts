@@ -137,7 +137,9 @@ webosRouter.use((_req, res, next) => {
   next()
 })
 
-type WebOsModel = 'flash'
+type WebOsModel = 'flash' | string
+// 模型引用格式：provider/model（如 deepseek/deepseek-v4-flash、chatst/gemini-3.7-flash）
+// 'flash' 为历史兼容值，映射到目录默认模型
 // DeepSeek 官方思考深度四档（low/medium/high/max），与共享契约 WEBOS_THINKING_LEVELS 一致
 type WebOsThinkingLevel = 'low' | 'medium' | 'high' | 'max'
 type WebOsAppSource = 'builtin' | 'ai_generated' | 'local_import' | 'store'
@@ -153,7 +155,8 @@ type WebOsEmailBindingState =
 
 type PrincipalRole = 'guest' | 'member' | 'admin'
 
-const MODEL: WebOsModel = 'flash'
+const DEFAULT_MODEL_REF = 'deepseek/deepseek-v4-flash'
+const MODEL: WebOsModel = DEFAULT_MODEL_REF
 const THINKING_LEVELS: readonly WebOsThinkingLevel[] = ['low', 'medium', 'high', 'max']
 // 默认思考档：medium（DeepSeek V4 Flash 官方四档中的中等思考）。
 // 2026-07-31 线上回归：旧 high 档（reasoner 长思考）在 App 生成场景截断+超时；
@@ -1228,15 +1231,31 @@ function guestView(principal: Principal, state: StoredState) {
   }
 }
 
-function modelConfig() {
-  return {
-    id: MODEL,
-    label: 'Flash',
-    provider: 'DeepSeek',
-    available: Boolean(process.env.DEEPSEEK_API_KEY?.trim()),
-    priceHint: '按量计费，发送前预估',
-    supportsThinking: [...THINKING_LEVELS],
+async function listModelConfigs() {
+  const { listEnabledModels } = await import('../db/modelCatalog.js')
+  const catalog = await listEnabledModels()
+  if (catalog.length === 0) {
+    return [{
+      id: MODEL,
+      label: 'Flash',
+      provider: 'DeepSeek',
+      available: Boolean(process.env.DEEPSEEK_API_KEY?.trim()),
+      priceHint: '按量计费，发送前预估',
+      supportsThinking: [...THINKING_LEVELS],
+      multimodal: false,
+    }]
   }
+  const list = catalog.map((m) => ({
+    id: `${m.provider}/${m.model}`,
+    label: m.name.replace(/（.*）|[(（].*[)）]/g, ''),
+    provider: m.provider,
+    available: m.hasApiKey && m.enabled,
+    priceHint: m.params.note || '按量计费，发送前预估',
+    supportsThinking: m.params.supportsThinking ? [...THINKING_LEVELS] : [],
+    multimodal: m.params.multimodal ?? false,
+    isDefault: m.isDefault,
+  }))
+  return list
 }
 
 /** 支付商品目录（套餐；渠道未接入时仅展示，不创建订单） */
@@ -1299,7 +1318,7 @@ function clientIp(req: Request): string {
   return req.ip ?? '0.0.0.0'
 }
 
-function buildBootstrap(principal: Principal, state: StoredState) {
+async function buildBootstrap(principal: Principal, state: StoredState) {
   const builtinApps = BUILTIN_APPS.map((app) => ({
     id: app.id,
     name: app.name,
@@ -1345,7 +1364,7 @@ function buildBootstrap(principal: Principal, state: StoredState) {
     ai: {
       model: state.ai.model,
       thinking: state.ai.thinking,
-      models: [modelConfig()],
+      models: await listModelConfigs(),
     },
     apps: [...builtinApps, ...userApps],
     payment: paymentState(),
@@ -1367,7 +1386,7 @@ function buildBootstrap(principal: Principal, state: StoredState) {
 }
 
 /** 预估本次对话积分消耗（按输入字符估算 token → chatCostMinor；仅用于前端展示与不足提示） */
-function estimateCostMinor(messages: ChatMessage[], thinking: WebOsThinkingLevel): number {
+function estimateCostMinor(messages: ChatMessage[], thinking: WebOsThinkingLevel, model?: string): number {
   // 识图链路：data URI 只用于 M3，不会进入 DeepSeek 上下文，估算时不能按 base64 原文算
   const inputChars = messages.reduce((total, message) => {
     const text = message.content.replace(/data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[图片]')
@@ -1380,7 +1399,7 @@ function estimateCostMinor(messages: ChatMessage[], thinking: WebOsThinkingLevel
     max: 2_400,
   }[thinking]
   const inputTokens = Math.ceil(inputChars / 4)
-  return chatCostMinor({ promptTokens: inputTokens, completionTokens: outputBudget })
+  return chatCostMinor({ promptTokens: inputTokens, completionTokens: outputBudget, model })
 }
 
 /** 剩余积分 = 月卡/常规额度剩余 + 永久池剩余（2026-08-06 月卡模型） */
@@ -1662,9 +1681,28 @@ function thinkingToPi(thinking: WebOsThinkingLevel): 'low' | 'medium' | 'high' |
   }
 }
 
-function resolveModel(value: unknown): WebOsModel {
-  if (value === undefined || value === MODEL) return MODEL
-  throw createError(400, 'INVALID_MODEL', '当前只支持 flash 模型')
+async function resolveModel(value: unknown): Promise<WebOsModel> {
+  if (value === undefined || value === null || value === '' || value === 'flash') {
+    // 空/历史值 → 目录默认模型；目录不可用回退常量默认
+    const { getDefaultModel } = await import('../db/modelCatalog.js')
+    const def = await getDefaultModel()
+    if (def) return `${def.provider}/${def.model}`
+    return DEFAULT_MODEL_REF
+  }
+  if (typeof value !== 'string') {
+    throw createError(400, 'INVALID_MODEL', '模型参数不合法')
+  }
+  const ref = value.trim()
+  if (!ref.includes('/')) {
+    throw createError(400, 'INVALID_MODEL', `模型引用格式应为 provider/model（如 deepseek/deepseek-v4-flash），收到：${ref}`)
+  }
+  const { listEnabledModels } = await import('../db/modelCatalog.js')
+  const catalog = await listEnabledModels()
+  const found = catalog.find((m) => `${m.provider}/${m.model}` === ref)
+  if (!found) {
+    throw createError(400, 'INVALID_MODEL', `未知或未启用的模型：${ref}`)
+  }
+  return ref
 }
 
 function checkAiRateLimit(principal: Principal): boolean {
@@ -4661,7 +4699,7 @@ webosRouter.get('/bootstrap', async (req, res, next) => {
     // 「文件夹即 App」：apps/ 下新建的文件夹（含 index.html）自动注册
     if (syncAppsFromWorkspaceFolders(principal, state)) changed = true
     if (changed) await saveState(principal, state)
-    res.json(buildBootstrap(principal, state))
+    res.json(await buildBootstrap(principal, state))
   } catch (error) {
     next(error)
   }
@@ -5348,11 +5386,11 @@ webosRouter.put('/ai/config', async (req, res, next) => {
     const principal = requirePrincipal(req)
     const state = await loadState(principal)
     const body = req.body as { model?: unknown; thinking?: unknown }
-    const model = resolveModel(body.model)
+    const model = await resolveModel(body.model)
     const thinking = resolveThinking(state, body.thinking)
     state.ai = { model, thinking }
     await saveState(principal, state)
-    res.json({ model, thinking, models: [modelConfig()] })
+    res.json({ model, thinking, models: await listModelConfigs() })
   } catch (error) {
     next(error)
   }
@@ -5750,9 +5788,9 @@ webosRouter.post('/chat/stream', async (req, res, next) => {
     }
     const messages = validateMessages(body.messages)
     const state = await loadState(principal)
-    const model = resolveModel(body.model)
+    const model = await resolveModel(body.model)
     const thinking = resolveThinking(state, body.thinking)
-    const estimate = estimateCostMinor(messages, thinking)
+    const estimate = estimateCostMinor(messages, thinking, model)
     const requestId = randomUUID()
     // 多会话（2026-08-05）：每个会话独立 pi 上下文；rebuild 表示编辑/回退重来
     const rebuild = body.rebuild === true
@@ -5922,6 +5960,8 @@ webosRouter.post('/chat/stream', async (req, res, next) => {
       session = await createWebosSession(principal.key, thinkingToPi(thinking), {
         // 2026-08-06 搜索工具注入 webOS 会话（此前只在画布会话可用，webOS AI 搜不了网）
         // 2026-08-21（W2）动态 App API 工具：appapi_<ns>_<ep>
+        // 2026-08-23 模型目录：用户前端可切换模型，会话按 modelRef 隔离
+        modelRef: model,
         customTools: [...(await webosAppTools(principal)), ...searchTools],
         conversationId,
       })
@@ -6108,6 +6148,7 @@ webosRouter.post('/chat/stream', async (req, res, next) => {
     // 缓存命中时 createWebosSession 直接返回同一实例（O(1)，零开销）。
     try {
       session = await createWebosSession(principal.key, thinkingToPi(thinking), {
+        modelRef: model,
         customTools: [...(await webosAppTools(principal)), ...searchTools],
         conversationId,
       })
@@ -8022,6 +8063,12 @@ const httpProxyRateMap = new Map<string, { count: number; windowStart: number }>
 webosRouter.post('/http', async (req, res, next) => {
   try {
     const principal = requirePrincipal(req)
+    // 2026-08-23 外部 API 代理仅面向注册用户（游客 403，与互通体系 R13 对齐）：
+    // 桌面/App 接入外部 API 端点的能力统一以登录为前置门槛，检查落在服务端。
+    if (principal.guest) {
+      next(createError(403, 'GUEST_NOT_ALLOWED', '外部 API 调用仅面向注册用户，请先登录'))
+      return
+    }
     const now = Date.now()
     const rate = httpProxyRateMap.get(principal.key)
     if (!rate || now - rate.windowStart >= 60_000) {
@@ -8044,7 +8091,7 @@ webosRouter.get('/apps', async (req, res, next) => {
   try {
     const principal = requirePrincipal(req)
     const state = await loadState(principal)
-    res.json({ apps: buildBootstrap(principal, state).apps })
+    res.json({ apps: (await buildBootstrap(principal, state)).apps })
   } catch (error) {
     next(error)
   }

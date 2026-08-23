@@ -153,7 +153,7 @@ export function fetchShareMeta(shareId: string): Promise<{ item: StoreAppItem }>
 }
 
 export function updateAiConfig(config: {
-  model: 'flash'
+  model: string
   thinking: WebOsThinkingLevel
 }): Promise<Pick<WebOsAiConfig, 'model' | 'thinking' | 'models'>> {
   return request('/webos/api/ai/config', {
@@ -1002,26 +1002,40 @@ export async function simpleAiChat(options: { prompt?: string; messages?: Array<
     ? options.messages.map((m) => ({ role: m.role === 'system' ? 'user' : (m.role as 'user' | 'assistant'), text: m.content }))
     : [{ role: 'user', text: options.prompt || '' }]
 
+  // 2026-08-23 修复：原实现引用了不存在的 sendChatStream（WIP 半截）+ delta 字段
+  // 误用 event.text（实际是 event.content）→ ai.chat 一调就 ReferenceError。
+  // 改为复用现有 streamChat（/webos/api/chat/stream SSE），并加"流结束未收到 done"
+  // 的兜底，避免 Promise 永不 settle。
   return new Promise((resolve) => {
-    sendChatStream(
+    let settled = false
+    const finish = (result: { ok: boolean; text: string; error?: string }): void => {
+      if (settled) return
+      settled = true
+      resolve(result)
+    }
+    streamChat(
       msgs,
       {
+        model: 'flash',
         conversationId: convId,
         thinking: options.thinkingBudget ?? 'medium',
       },
       {
         onEvent: (event) => {
-          if (event.type === 'delta' && typeof event.text === 'string') {
-            fullText += event.text
+          if (event.type === 'delta') {
+            fullText += event.content
           } else if (event.type === 'done') {
-            resolve({ ok: true, text: fullText.trim() })
+            finish({ ok: true, text: fullText.trim() })
           } else if (event.type === 'error') {
-            resolve({ ok: false, text: fullText.trim(), error: event.message })
+            finish({ ok: false, text: fullText.trim(), error: event.message })
           }
         },
       },
-    ).catch((err) => {
-      resolve({ ok: false, text: fullText.trim(), error: err instanceof Error ? err.message : String(err) })
+    ).then(() => {
+      // SSE 正常结束但没有 done（异常流）：把已聚合文本返回，避免挂起
+      finish({ ok: fullText.trim().length > 0, text: fullText.trim(), error: fullText.trim() ? undefined : '对话结束但未收到完成事件' })
+    }).catch((err) => {
+      finish({ ok: false, text: fullText.trim(), error: err instanceof Error ? err.message : String(err) })
     })
   })
 }

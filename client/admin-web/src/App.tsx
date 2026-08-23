@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Activity, Ban, BarChart3, Check, CircleDollarSign, Eye, KeyRound, LoaderCircle,
-  LogOut, Search, ShieldCheck, Sparkles, Ticket, UserRound, Users, X,
+  Activity, Ban, BarChart3, Check, CircleDollarSign, Database, Eye, KeyRound, LoaderCircle,
+  LogOut, Plus, RefreshCw, Save, Search, ShieldCheck, Sparkles, Star, Ticket, Trash2, UserRound, Users, X,
 } from 'lucide-react'
-import { api, formatCredits, formatDate, formatTokens, type AdminUser, type GuestUser, type UsageItem, type UsageSummary, type ActivityStats, type ImageGenStats, type ImageGenPricing, type ImageGenUsageItem, type ServerStats, type ServerHealthAlert, type ServerMetricsPoint, type AfdianOrderItem, type RedeemCodeItem, type VisionStats, type VisionUsageItem, type SearchStats } from './api'
+import { api, formatCredits, formatDate, formatTokens, type AdminUser, type GuestUser, type UsageItem, type UsageSummary, type ActivityStats, type ImageGenStats, type ImageGenPricing, type ImageGenUsageItem, type ServerStats, type ServerHealthAlert, type ServerMetricsPoint, type AfdianOrderItem, type RedeemCodeItem, type VisionStats, type VisionUsageItem, type SearchStats, type CatalogModel } from './api'
 
-type View = 'dashboard' | 'users' | 'imagegen' | 'vision' | 'search' | 'orders' | 'redeem'
+type View = 'dashboard' | 'users' | 'imagegen' | 'vision' | 'search' | 'orders' | 'redeem' | 'models'
 
 /** 字节数格式化（服务器状态展示） */
 function formatBytes(value: number): string {
@@ -1019,6 +1019,214 @@ function SearchView() {
 }
 
 // ============================================================================
+// 模型目录（Operit 式：多 provider，每 provider 多模型，用户前端可切换）
+// ============================================================================
+
+function ModelsView() {
+  const [models, setModels] = useState<CatalogModel[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [editing, setEditing] = useState<CatalogModel | 'new' | null>(null)
+  const [fetchResult, setFetchResult] = useState<Array<{ id: string; owned_by?: string }> | null>(null)
+  const [fetchBusy, setFetchBusy] = useState(false)
+  const [fetchInput, setFetchInput] = useState({ provider: '', endpoint: '', apiKey: '' })
+
+  const load = useCallback(async () => {
+    setError(null)
+    try {
+      const result = await api.aiModels()
+      setModels(result.models)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+
+  useEffect(() => { void load() }, [load])
+
+  const doFetch = async () => {
+    setFetchBusy(true)
+    setFetchResult(null)
+    setError(null)
+    try {
+      const result = await api.aiModelsFetch({
+        provider: fetchInput.provider || undefined,
+        endpoint: fetchInput.endpoint || undefined,
+        apiKey: fetchInput.apiKey || undefined,
+      })
+      setFetchResult(result.models)
+    } catch (e) {
+      setError(`拉取失败：${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setFetchBusy(false)
+    }
+  }
+
+  const quickAdd = async (id: string) => {
+    if (!models || !fetchResult) return
+    const found = fetchResult.find((m) => m.id === id)
+    if (!found) return
+    const provider = fetchInput.provider || 'custom'
+    setBusy(true)
+    try {
+      await api.aiModelCreate({
+        name: found.id,
+        provider,
+        endpoint: fetchInput.endpoint || undefined,
+        model: found.id,
+        apiKey: fetchInput.apiKey || undefined,
+        params: { note: `自动拉取于 ${provider} /models${found.owned_by ? `（owned_by: ${found.owned_by}）` : ''}` },
+      })
+      setFetchResult(null)
+      await load()
+    } catch (e) {
+      setError(`添加失败：${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <div className="users-view">
+    <h2><Database size={17} /> 模型目录 <span className="muted">（多 provider · 每 provider 多模型 · 用户前端可切换）</span></h2>
+
+    <div className="model-fetch-box" style={{ background: 'var(--bg-soft, #f6f7f9)', borderRadius: 8, padding: '12px 14px', marginBottom: 16, border: '1px solid var(--border, #e5e7eb)' }}>
+      <h4 style={{ margin: '0 0 8px' }}><RefreshCw size={13} /> 从 provider 拉取模型列表（自动导入）</h4>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <input placeholder="provider 名（如 chatst / deepseek）" value={fetchInput.provider} onChange={(e) => setFetchInput({ ...fetchInput, provider: e.target.value })} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db' }} />
+        <input placeholder="endpoint（留空自动推断，如 https://api.chatst.org/v1）" value={fetchInput.endpoint} onChange={(e) => setFetchInput({ ...fetchInput, endpoint: e.target.value })} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db', minWidth: 280 }} />
+        <input placeholder="API Key（留空用目录里同 provider 的 key）" type="password" value={fetchInput.apiKey} onChange={(e) => setFetchInput({ ...fetchInput, apiKey: e.target.value })} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db', minWidth: 240 }} />
+        <button className="ghost-btn" onClick={() => void doFetch()} disabled={fetchBusy}><RefreshCw size={13} /> {fetchBusy ? '拉取中…' : '获取模型列表'}</button>
+      </div>
+      {fetchResult && <div style={{ marginTop: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <strong>找到 {fetchResult.length} 个模型</strong>
+          <button className="ghost-btn" onClick={() => setFetchResult(null)}>收起</button>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {fetchResult.map((m) => (
+            <button key={m.id} className="ghost-btn" disabled={busy} onClick={() => void quickAdd(m.id)} title={m.owned_by ? `owned_by: ${m.owned_by}` : '点击添加'}>+ {m.id}</button>
+          ))}
+        </div>
+      </div>}
+    </div>
+
+    {error && <div className="error-box" style={{ color: '#dc2626', background: '#fef2f2', padding: '8px 12px', borderRadius: 6, marginBottom: 12 }}>{error}</div>}
+
+    <div className="table-toolbar" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+      <button className="ghost-btn" onClick={() => setEditing('new')}><Plus size={13} /> 新增模型</button>
+      <button className="ghost-btn" onClick={() => void load()}><RefreshCw size={13} /> 刷新</button>
+    </div>
+
+    <table className="usage-table">
+      <thead><tr>
+        <th>名称</th><th>provider / model</th><th>endpoint</th><th>API Key</th><th>能力</th><th>状态</th><th>操作</th>
+      </tr></thead>
+      <tbody>
+        {!models && <tr><td colSpan={7} className="muted">加载中…</td></tr>}
+        {models && models.length === 0 && <tr><td colSpan={7} className="muted">暂无模型，点击「获取模型列表」或「新增模型」添加</td></tr>}
+        {models?.map((m) => (
+          <tr key={m.id}>
+            <td>{m.name} {m.isDefault && <Star size={12} style={{ color: '#f59e0b', verticalAlign: 'middle' }} />}</td>
+            <td><code>{m.provider}/{m.model}</code></td>
+            <td className="muted">{m.endpoint || '—'}</td>
+            <td>{m.hasApiKey ? <span style={{ color: '#16a34a' }}>✓ {m.apiKeyMasked}</span> : <span style={{ color: '#dc2626' }}>未配置</span>}</td>
+            <td className="muted">{m.params.multimodal ? '🖼 多模态' : '文本'}{m.params.supportsThinking ? ' · 思考四档' : ''}</td>
+            <td>{m.enabled ? <span style={{ color: '#16a34a' }}>启用</span> : <span style={{ color: '#9ca3af' }}>停用</span>}</td>
+            <td className="row-actions" style={{ whiteSpace: 'nowrap' }}>
+              <button className="ghost-btn" title="编辑" onClick={() => setEditing(m)}><Save size={12} style={{ transform: 'rotate(0deg)' }} /> 编辑</button>
+              {!m.isDefault && <button className="ghost-btn" title="设为默认" onClick={async () => { try { await api.aiModelSetDefault(m.id); await load() } catch (e) { setError(e instanceof Error ? e.message : String(e)) } }}><Star size={12} /> 设默认</button>}
+              <button className="ghost-btn" title="删除" style={{ color: '#dc2626' }} onClick={async () => { if (!window.confirm(`删除模型 ${m.name}？`)) return; try { await api.aiModelDelete(m.id); await load() } catch (e) { setError(e instanceof Error ? e.message : String(e)) } }}><Trash2 size={12} /> 删</button>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+
+    {editing && <ModelEditor
+      model={editing === 'new' ? null : editing}
+      onClose={() => setEditing(null)}
+      onSaved={() => { setEditing(null); void load() }}
+      onError={setError}
+    />}
+  </div>
+}
+
+function ModelEditor({ model, onClose, onSaved, onError }: {
+  model: CatalogModel | null
+  onClose: () => void
+  onSaved: () => void
+  onError: (msg: string) => void
+}) {
+  const [name, setName] = useState(model?.name ?? '')
+  const [provider, setProvider] = useState(model?.provider ?? 'deepseek')
+  const [endpoint, setEndpoint] = useState(model?.endpoint ?? '')
+  const [modelName, setModelName] = useState(model?.model ?? '')
+  const [apiKey, setApiKey] = useState('')
+  const [multimodal, setMultimodal] = useState(model?.params.multimodal ?? false)
+  const [supportsThinking, setSupportsThinking] = useState(model?.params.supportsThinking ?? true)
+  const [note, setNote] = useState(model?.params.note ?? '')
+  const [busy, setBusy] = useState(false)
+
+  const save = async () => {
+    if (!name.trim() || !provider.trim() || !modelName.trim()) {
+      onError('名称、provider、model 必填')
+      return
+    }
+    setBusy(true)
+    try {
+      if (model) {
+        await api.aiModelUpdate(model.id, {
+          name: name.trim(),
+          provider: provider.trim(),
+          endpoint: endpoint.trim() || null,
+          model: modelName.trim(),
+          apiKey: apiKey.trim() || undefined,
+          params: { ...(model.params ?? {}), multimodal, supportsThinking, note: note.trim() || undefined },
+        })
+      } else {
+        await api.aiModelCreate({
+          name: name.trim(),
+          provider: provider.trim(),
+          endpoint: endpoint.trim() || undefined,
+          model: modelName.trim(),
+          apiKey: apiKey.trim() || undefined,
+          params: { multimodal, supportsThinking, note: note.trim() || undefined },
+        })
+      }
+      onSaved()
+    } catch (e) {
+      onError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <div className="modal-overlay" onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
+    <div className="modal" onClick={(e) => e.stopPropagation()} style={{ background: '#fff', borderRadius: 12, padding: 20, width: 480, maxWidth: '92vw', boxShadow: '0 12px 40px rgba(0,0,0,.18)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+        <h3 style={{ margin: 0 }}>{model ? '编辑模型' : '新增模型'}</h3>
+        <button className="ghost-btn" onClick={onClose}><X size={15} /></button>
+      </div>
+      <div style={{ display: 'grid', gap: 10 }}>
+        <label style={{ display: 'grid', gap: 4 }}>名称<input value={name} onChange={(e) => setName(e.target.value)} placeholder="DeepSeek V4 Flash" style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db' }} /></label>
+        <label style={{ display: 'grid', gap: 4 }}>provider<input value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="deepseek / chatst / …" style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db' }} /></label>
+        <label style={{ display: 'grid', gap: 4 }}>model 名（请求用的 model id）<input value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder="deepseek-v4-flash" style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db' }} /></label>
+        <label style={{ display: 'grid', gap: 4 }}>endpoint（OpenAI 兼容 base URL）<input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://opencode.ai/zen/go/v1" style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db' }} /></label>
+        <label style={{ display: 'grid', gap: 4 }}>API Key{model?.hasApiKey ? `（已配置 ${model.apiKeyMasked}，留空保持不变）` : ''}<input value={apiKey} onChange={(e) => setApiKey(e.target.value)} type="password" placeholder="sk-…" style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db' }} /></label>
+        <div style={{ display: 'flex', gap: 16 }}>
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={multimodal} onChange={(e) => setMultimodal(e.target.checked)} /> 多模态（直接看图）</label>
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={supportsThinking} onChange={(e) => setSupportsThinking(e.target.checked)} /> 支持思考档位</label>
+        </div>
+        <label style={{ display: 'grid', gap: 4 }}>备注<input value={note} onChange={(e) => setNote(e.target.value)} placeholder="可选" style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db' }} /></label>
+      </div>
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
+        <button className="ghost-btn" onClick={onClose}>取消</button>
+        <button className="primary-btn" onClick={() => void save()} disabled={busy} style={{ background: '#2563eb', color: '#fff', padding: '6px 16px', borderRadius: 6 }}>{busy ? '保存中…' : '保存'}</button>
+      </div>
+    </div>
+  </div>
+}
+
+// ============================================================================
 // 主应用
 // ============================================================================
 
@@ -1067,6 +1275,7 @@ export function App() {
         <button className={view === 'imagegen' ? 'active' : ''} onClick={() => setView('imagegen')} data-short="生图"><Sparkles size={15} /><span>生图监测</span></button>
         <button className={view === 'vision' ? 'active' : ''} onClick={() => setView('vision')} data-short="视觉"><Eye size={15} /><span>视觉模型</span></button>
         <button className={view === 'search' ? 'active' : ''} onClick={() => setView('search')} data-short="搜索"><Search size={15} /><span>搜索 API</span></button>
+        <button className={view === 'models' ? 'active' : ''} onClick={() => setView('models')} data-short="模型"><Database size={15} /><span>模型管理</span></button>
       </nav>
       <div className="me"><Activity size={14} /><span>{me?.email ?? me?.username}</span><button className="ghost-btn" onClick={() => void logout()}><LogOut size={13} />退出</button></div>
     </header>
@@ -1083,7 +1292,9 @@ export function App() {
                 ? <VisionView />
                 : view === 'search'
                   ? <SearchView />
-                  : <ImageGenView />}
+                  : view === 'models'
+                    ? <ModelsView />
+                    : <ImageGenView />}
     </main>
     {adjustTarget ? <AdjustTokensModal userKey={adjustTarget.userKey} name={adjustTarget.name} onClose={() => setAdjustTarget(null)} onDone={() => { setAdjustTarget(null); void loadSummary() }} /> : null}
     {usageTarget ? <UsageModal userKey={usageTarget.userKey} name={usageTarget.name} onClose={() => setUsageTarget(null)} /> : null}

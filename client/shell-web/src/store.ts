@@ -1436,6 +1436,20 @@ export const useShellStore = create<ShellStore>((set, get) => ({
     }
   },
 
+  /** 2026-08-23 模型目录：用户前端切换模型（Operit 式多 provider） */
+  setModel: async (model: string) => {
+    const ai = get().ai
+    if (!ai || !model || model === ai.model) return
+    const prev = ai
+    set({ ai: { ...ai, model }, notice: `已切换到 ${model}` })
+    try {
+      const updated = await updateAiConfig({ model, thinking: ai.thinking })
+      set({ ai: { ...ai, ...updated }, notice: null })
+    } catch (error) {
+      set({ ai: prev, error: errorMessage(error) })
+    }
+  },
+
   // ---- 多会话操作 ----
 
   createConversation: () => {

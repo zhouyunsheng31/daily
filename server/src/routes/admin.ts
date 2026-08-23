@@ -6,6 +6,15 @@ import { requireAdmin } from '../middleware/auth.js'
 import type { UserRole } from '../utils/jwt.js'
 import { setSetting, clearPromptCache, SETTINGS_KEYS } from '../db/aiSettingsStore.js'
 import {
+  listModels,
+  upsertModel,
+  getModelById,
+  deleteModel,
+  setModelDefault,
+  seedModelsIfEmpty,
+  type ModelParams,
+} from '../db/modelCatalog.js'
+import {
   sanitizeApiKey,
   sanitizeModelName,
   sanitizeEndpointUrl,
@@ -469,5 +478,201 @@ adminRouter.put('/search-engines/:name', async (req, res, next) => {
 
     const result = await pool.query('SELECT * FROM search_engines WHERE name = $1', [name])
     res.json(toSearchEngine(result.rows[0] as SearchEngineRow))
+  } catch (e) { next(e) }
+})
+
+// ============================================================================
+// 模型目录管理 API（Operit 式：多 provider，每 provider 多模型，用户前端可切换）
+// - GET    /api/admin/ai-models            → 列出全部模型（api_key 脱敏）
+// - POST   /api/admin/ai-models            → 新增模型
+// - PUT    /api/admin/ai-models/:id        → 编辑模型
+// - DELETE /api/admin/ai-models/:id        → 删除模型
+// - PUT    /api/admin/ai-models/:id/default→ 设为默认
+// - POST   /api/admin/ai-models/fetch      → 拉取 provider 的 /models 列表（自动导入入口）
+// ============================================================================
+
+/** provider 的 /models 端点推断（与 aiSettings.ts 的 resolveModelsEndpoint 一致） */
+function resolveProviderModelsEndpoint(endpoint: string | null | undefined, provider: string): { url: string } {
+  const trimmed = endpoint?.trim()
+  if (trimmed) {
+    if (/\/v\d+$/.test(trimmed)) return { url: `${trimmed}/models` }
+    return { url: `${trimmed}/v1/models` }
+  }
+  switch (provider) {
+    case 'deepseek': return { url: 'https://api.deepseek.com/v1/models' }
+    case 'chatst': return { url: 'https://api.chatst.org/v1/models' }
+    case 'openai': return { url: 'https://api.openai.com/v1/models' }
+    case 'stepfun': return { url: 'https://api.stepfun.com/v1/models' }
+    default: return { url: `${trimmed || 'https://api.openai.com/v1'}/v1/models` }
+  }
+}
+
+// GET /api/admin/ai-models — 列出全部模型
+adminRouter.get('/ai-models', async (_req, res, next) => {
+  try {
+    await seedModelsIfEmpty()
+    const models = await listModels()
+    res.json({ models })
+  } catch (e) { next(e) }
+})
+
+// POST /api/admin/ai-models — 新增模型
+adminRouter.post('/ai-models', async (req, res, next) => {
+  try {
+    const body = req.body as {
+      name?: string
+      provider?: string
+      endpoint?: string
+      model?: string
+      apiKey?: string
+      params?: Record<string, unknown>
+      enabled?: boolean
+      isDefault?: boolean
+    }
+    if (!body.name || !body.provider || !body.model) {
+      next(createError(400, 'INVALID_INPUT', 'name, provider, model are required'))
+      return
+    }
+    let sanitizedEndpoint: string | null = null
+    if (body.endpoint) {
+      try { sanitizedEndpoint = sanitizeEndpointUrl(body.endpoint) }
+      catch (e) { next(createError(400, 'INVALID_INPUT', `endpoint: ${e instanceof Error ? e.message : String(e)}`)); return }
+    }
+    let sanitizedApiKey: string | null = null
+    if (body.apiKey) {
+      try { sanitizedApiKey = sanitizeApiKey(body.apiKey) }
+      catch (e) { next(createError(400, 'INVALID_INPUT', `apiKey: ${e instanceof Error ? e.message : String(e)}`)); return }
+    }
+    const model = await upsertModel({
+      name: String(body.name).slice(0, 128),
+      provider: String(body.provider).slice(0, 64),
+      endpoint: sanitizedEndpoint,
+      model: String(body.model).slice(0, 256),
+      apiKey: sanitizedApiKey,
+      params: body.params as ModelParams | undefined,
+      enabled: body.enabled ?? true,
+      isDefault: body.isDefault ?? false,
+    })
+    res.status(201).json(model)
+  } catch (e) { next(e) }
+})
+
+// PUT /api/admin/ai-models/:id — 编辑模型
+adminRouter.put('/ai-models/:id', async (req, res, next) => {
+  try {
+    const existing = await getModelById(req.params.id)
+    if (!existing) {
+      next(createError(404, 'NOT_FOUND', 'Model not found'))
+      return
+    }
+    const body = req.body as {
+      name?: string
+      provider?: string
+      endpoint?: string | null
+      model?: string
+      apiKey?: string
+      params?: Record<string, unknown>
+      enabled?: boolean
+      isDefault?: boolean
+    }
+    let sanitizedEndpoint: string | null | undefined = undefined
+    if (body.endpoint !== undefined) {
+      if (body.endpoint === null || body.endpoint === '') sanitizedEndpoint = null
+      else {
+        try { sanitizedEndpoint = sanitizeEndpointUrl(body.endpoint) }
+        catch (e) { next(createError(400, 'INVALID_INPUT', `endpoint: ${e instanceof Error ? e.message : String(e)}`)); return }
+      }
+    }
+    let sanitizedApiKey: string | null | undefined = undefined
+    if (body.apiKey !== undefined && body.apiKey !== null && body.apiKey !== '') {
+      try { sanitizedApiKey = sanitizeApiKey(body.apiKey) }
+      catch (e) { next(createError(400, 'INVALID_INPUT', `apiKey: ${e instanceof Error ? e.message : String(e)}`)); return }
+    }
+    const model = await upsertModel({
+      id: req.params.id,
+      name: body.name ?? existing.name,
+      provider: body.provider ?? existing.provider,
+      endpoint: sanitizedEndpoint !== undefined ? sanitizedEndpoint : existing.endpoint,
+      model: body.model ?? existing.model,
+      apiKey: sanitizedApiKey, // null → 保留原 key
+      params: body.params as ModelParams | undefined,
+      enabled: body.enabled ?? existing.enabled,
+      isDefault: body.isDefault ?? existing.isDefault,
+    })
+    if (body.isDefault) await setModelDefault(req.params.id)
+    res.json(model)
+  } catch (e) { next(e) }
+})
+
+// DELETE /api/admin/ai-models/:id — 删除模型
+adminRouter.delete('/ai-models/:id', async (req, res, next) => {
+  try {
+    const ok = await deleteModel(req.params.id)
+    if (!ok) {
+      next(createError(404, 'NOT_FOUND', 'Model not found'))
+      return
+    }
+    res.json({ ok: true })
+  } catch (e) { next(e) }
+})
+
+// PUT /api/admin/ai-models/:id/default — 设为默认
+adminRouter.put('/ai-models/:id/default', async (req, res, next) => {
+  try {
+    const model = await setModelDefault(req.params.id)
+    if (!model) {
+      next(createError(404, 'NOT_FOUND', 'Model not found'))
+      return
+    }
+    res.json(model)
+  } catch (e) { next(e) }
+})
+
+// POST /api/admin/ai-models/fetch — 拉取 provider 的 /models 列表（“获取模型列表”按钮）
+adminRouter.post('/ai-models/fetch', async (req, res, next) => {
+  try {
+    const body = req.body as { provider?: string; endpoint?: string; apiKey?: string }
+    const pool = getPool()
+    // 优先用请求体参数（未保存场景），其次查目录里同 provider 的端点/key
+    let apiKey = body.apiKey?.trim()
+    let endpoint = body.endpoint?.trim() || null
+    if (!apiKey || !endpoint) {
+      const result = await pool.query(
+        'SELECT endpoint, api_key FROM ai_models WHERE provider = $1 AND api_key != \'\' ORDER BY created_at ASC LIMIT 1',
+        [body.provider || ''],
+      )
+      if (result.rows.length > 0) {
+        if (!apiKey) apiKey = result.rows[0].api_key
+        if (!endpoint) endpoint = result.rows[0].endpoint
+      }
+    }
+    if (!apiKey) {
+      next(createError(400, 'API_KEY_MISSING', '未配置 API Key，请先填写 API Key'))
+      return
+    }
+    const provider = body.provider || 'custom'
+    const { url } = resolveProviderModelsEndpoint(endpoint, provider)
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10_000)
+    try {
+      const resp = await fetch(url, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        signal: controller.signal,
+      })
+      if (!resp.ok) {
+        const errorText = await resp.text().catch(() => '')
+        let code = 'UPSTREAM_ERROR'
+        if (resp.status === 401) code = 'API_KEY_INVALID'
+        else if (resp.status === 403) code = 'FORBIDDEN'
+        next(createError(502, code, `${provider} API 返回 ${resp.status}: ${errorText.slice(0, 300)}`))
+        return
+      }
+      const data = (await resp.json()) as { data?: Array<{ id: string; owned_by?: string }> }
+      const models = (data.data || []).map((m) => ({ id: m.id, owned_by: m.owned_by }))
+      res.json({ models, source: provider, endpoint: url })
+    } finally {
+      clearTimeout(timeout)
+    }
   } catch (e) { next(e) }
 })

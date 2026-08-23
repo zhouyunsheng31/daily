@@ -322,6 +322,27 @@ export const WEBOS_DESKTOP_V1_HTML = `<!doctype html>
     system: {
       navigate: function (view) { return call("system.navigate", { view: view }); },
       copy: function (text) { return call("system.copy", { text: text }); }
+    },
+    // 2026-08-23 桌面接入 API（宿主代理；仅登录用户可用，服务端强制）：
+    //   http.request → POST /webos/api/http（外部 API 代理，SSRF+限频在服务端）
+    //   api.invoke   → POST /webos/api/appapi/:ns/:ep（App API 端点，游客拒 R13）
+    http: {
+      request: function (opts) {
+        opts = opts || {};
+        return call("system.http", { url: opts.url, method: opts.method, headers: opts.headers, body: opts.body });
+      }
+    },
+    api: {
+      invoke: function (namespace, endpoint, params) {
+        return call("api.invoke", { namespace: namespace, endpoint: endpoint, params: params });
+      }
+    },
+    // 2026-08-23 桌面直接 AI 对话：经宿主代理 /webos/api/chat/stream（调用者本人计费）
+    ai: {
+      chat: function (opts) {
+        opts = opts || {};
+        return call("ai.chat", { prompt: opts.prompt, messages: opts.messages, thinkingBudget: opts.thinkingBudget });
+      }
     }
   };
   var pending = {};

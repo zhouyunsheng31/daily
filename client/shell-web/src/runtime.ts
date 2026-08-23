@@ -1,4 +1,4 @@
-import type { WebOsApp } from '@shared/webos-contracts'
+import type { WebOsApp, WebOsThinkingLevel } from '@shared/webos-contracts'
 import {
   createApp,
   deleteAppFile,
@@ -651,6 +651,12 @@ export interface DesktopSdkAdapters {
   exportUrl: (appId: string) => Promise<{ url: string }>
   download: (url: string, name?: string) => void
   copyText: (text: string) => Promise<boolean>
+  /** 2026-08-23 桌面接入外部 API：宿主代理到服务端 /webos/api/http（仅登录用户、SSRF+限频在服务端） */
+  http: (input: { method?: string; url: string; headers?: Record<string, string>; body?: unknown }) => Promise<{ status: number; body: string; contentType: string | null }>
+  /** 2026-08-23 桌面调用 App API 端点：宿主代理到 /webos/api/appapi/:ns/:ep（游客拒 R13，owner/public 由服务端判定） */
+  invokeApi: (namespace: string, endpoint: string, params?: Record<string, unknown>) => Promise<{ result: unknown; costMinor: number }>
+  /** 2026-08-23 桌面直接 AI 对话：宿主经 /webos/api/chat/stream 聚合返回完整文本（调用者本人计费） */
+  aiChat: (options: { prompt?: string; messages?: Array<{ role: string; content: string }>; thinkingBudget?: WebOsThinkingLevel }) => Promise<{ ok: boolean; text: string; error?: string }>
 }
 
 export interface DesktopRuntimeHandle {
@@ -746,6 +752,44 @@ async function handleDesktopRequest(
         return
       }
       throw new Error(`system.navigate 视图无效: ${view}`)
+    }
+    // 2026-08-23 桌面接入 API：宿主代理（带登录 cookie，服务端强制游客 403 / R13）
+    if (method === 'system.http') {
+      const url = typeof params.url === 'string' ? params.url : ''
+      if (!url) throw new Error('system.http 需要 url')
+      const headers = params.headers && typeof params.headers === 'object'
+        ? params.headers as Record<string, string>
+        : undefined
+      const input = {
+        method: typeof params.method === 'string' ? params.method : 'GET',
+        url,
+        headers,
+        body: params.body,
+      }
+      respond(true, await adapters.http(input))
+      return
+    }
+    if (method === 'api.invoke') {
+      const namespace = typeof params.namespace === 'string' ? params.namespace : ''
+      const endpoint = typeof params.endpoint === 'string' ? params.endpoint : ''
+      if (!namespace || !endpoint) throw new Error('api.invoke 需要 namespace 和 endpoint')
+      const callParams = params.params && typeof params.params === 'object'
+        ? params.params as Record<string, unknown>
+        : undefined
+      respond(true, await adapters.invokeApi(namespace, endpoint, callParams))
+      return
+    }
+    // 2026-08-23 桌面直接 AI 对话（与 App 运行时桥 ai.chat 对齐；经宿主代理，调用者本人计费）
+    if (method === 'ai.chat') {
+      const prompt = typeof params.prompt === 'string' ? params.prompt : undefined
+      const messages = Array.isArray(params.messages)
+        ? params.messages as Array<{ role: string; content: string }>
+        : undefined
+      const thinkingBudget = typeof params.thinkingBudget === 'string'
+        ? params.thinkingBudget as WebOsThinkingLevel
+        : undefined
+      respond(true, await adapters.aiChat({ prompt, messages, thinkingBudget }))
+      return
     }
     throw new Error(`Unsupported Desktop method: ${method}`)
   } catch (error) {

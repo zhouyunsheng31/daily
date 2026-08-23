@@ -56,6 +56,19 @@ export const BILLING_TABLE: BillingItem[] = [
     costBased: true,
   },
   {
+    kind: 'chat',
+    label: 'AI 对话（Gemini）',
+    model: 'gemini-3.7-flash',
+    unitLabel: '元 / 百万 token',
+    // 2026-08-23 模型目录：ChatST 聚合网关 gemini-3.7-flash（多模态），
+    // 成本按聚合网关公开价：输入 ¥1.4、输出 ¥4.2、缓存 ¥0.02
+    inputPerMillion: 1.4,
+    outputPerMillion: 4.2,
+    cacheHitPerMillion: 0.02,
+    peakMultiplier: 2,
+    costBased: true,
+  },
+  {
     kind: 'image',
     label: 'AI 生图',
     model: 'gpt-image-2-super',
@@ -160,15 +173,17 @@ export interface ChatBillingInput {
   cacheReadTokens?: number
   /** 高峰期强制计算（默认按当前时间判断） */
   peak?: boolean
+  /** 2026-08-23 模型目录：按模型计费（如 gemini-3.7-flash），缺省 deepseek-v4-flash */
+  model?: string
 }
 
 /**
- * 对话计费（deepseek-v4-flash）：
+ * 对话计费（按模型查 BILLING_TABLE）：
  * 成本 = 输入×1 + 输出×2 + 缓存命中×0.02（元/百万）→ 售价 = 成本 × 1.5 × 高峰倍率
  * 返回金额（分，即积分）。成本为 0 时返回 0（不计费场景由调用方处理）。
  */
 export function chatCostMinor(input: ChatBillingInput): number {
-  const item = billingItem('chat')
+  const item = billingItem('chat', input.model?.split('/').pop())
   const ratio = item.costBased ? CHAT_SALES_RATIO : 1
   const peak = input.peak ?? isDeepSeekPeak()
   const peakMul = peak ? item.peakMultiplier : 1

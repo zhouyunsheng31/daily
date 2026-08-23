@@ -2334,6 +2334,62 @@ export function preheatPiAgent(): void {
 }
 
 /**
+ * Operit 式动态注册：从 ai_models 目录读取全部启用模型，按 provider 分组注册。
+ * 不依赖硬编码——后台增删改模型后，下次建会话即生效（注册是幂等的，
+ * registerProvider 会替换该 provider 的全部模型定义）。
+ */
+async function registerCatalogModels(modelRegistry: { registerProvider(name: string, config: ProviderConfig): void }): Promise<void> {
+  try {
+    const { listEnabledModelsForRegistry } = await import('./db/modelCatalog.js')
+    const catalog = await listEnabledModelsForRegistry()
+    if (catalog.length === 0) return
+    const byProvider = new Map<string, typeof catalog>()
+    for (const m of catalog) {
+      const list = byProvider.get(m.provider) ?? []
+      list.push(m)
+      byProvider.set(m.provider, list)
+    }
+    for (const [provider, models] of byProvider) {
+      const first = models[0]
+      const baseUrl = first.endpoint?.trim() || 'https://api.deepseek.com'
+      // provider 下各模型可用不同 endpoint：第一种情况全部同 endpoint；
+      // 若单个模型有独立 endpoint，注册时以该模型 endpoint 为准（模型级覆盖）。
+      const providerModels = models.map((m) => {
+        const effectiveBaseUrl = m.endpoint?.trim() || baseUrl
+        const params = m.params ?? {}
+        const input: Array<'text' | 'image'> = params.multimodal ? ['text', 'image'] : ['text']
+        return {
+          id: m.model,
+          name: m.name,
+          api: 'openai-completions' as const,
+          baseUrl: effectiveBaseUrl,
+          compat: { requiresReasoningContentOnAssistantMessages: false, thinkingFormat: 'deepseek' as const },
+          reasoning: false,
+          thinkingLevelMap: {},
+          input,
+          cost: {
+            input: params.costInputPerMillion ?? 0.14,
+            output: params.costOutputPerMillion ?? 0.28,
+            cacheRead: params.costCacheReadPerMillion ?? 0.0028,
+            cacheWrite: 0,
+          },
+          contextWindow: params.contextWindow ?? 1_000_000,
+          maxTokens: params.maxTokens ?? 384_000,
+        }
+      })
+      modelRegistry.registerProvider(provider, {
+        baseUrl,
+        apiKey: first.apiKey,
+        models: providerModels,
+      })
+      console.log(`[PiBridge] catalog provider "${provider}" registered: ${models.map((m) => m.model).join(', ')}`)
+    }
+  } catch (err) {
+    console.warn('[PiBridge] registerCatalogModels failed (fallback to builtin):', err instanceof Error ? err.message : String(err))
+  }
+}
+
+/**
  * pi 内置 deepseek-v4-flash/v4-pro 的 thinkingLevelMap 把 low/medium 标为 null
  * （视为不支持），导致 pi-coding-agent 的 clampThinkingLevel 会把 low/medium
  * 静默升级为 high。DeepSeek 官方 API 实际支持 reasoning_effort=low/medium/
@@ -2410,14 +2466,13 @@ function registerDeepseekModels(
 export async function createWebosSession(
   scope: string,
   thinking: WebosSessionThinking,
-  options?: { systemPrompt?: string[]; customTools?: ToolDefinition[]; conversationId?: string },
+  options?: { systemPrompt?: string[]; customTools?: ToolDefinition[]; conversationId?: string; modelRef?: string },
 ): Promise<AgentSession> {
   const conversationId = options?.conversationId ?? 'default'
-  // 2026-08-17 会话持久化修复（用户反馈：重启丢上下文 + 换设备看不到历史）：
-  // - key 不再含 thinking：切换思考档（浅/中/深/极深）沿用同一会话文件，上下文不丢
-  // - 会话按 (scope, conversationId) 固定文件持久化（SessionManager.create + sessionDir），
-  //   重启后 buildSessionContext() 从 JSONL 文件恢复完整历史（含工具调用/记忆）
-  const key = `webos:${scope}:${conversationId}`
+  // 2026-08-23 模型目录（Operit 式）接入：用户可切换模型，会话按
+  // (scope, conversationId, modelRef) 隔离——切模型 = 新上下文，互不串扰
+  const modelRef = options?.modelRef?.trim() || process.env.DEEPSEEK_MODEL?.trim() || 'deepseek/deepseek-v4-flash'
+  const key = `webos:${scope}:${conversationId}:${modelRef}`
   const existing = webosSessions.get(key)
   if (existing) return existing
 
@@ -2448,6 +2503,7 @@ export async function createWebosSession(
     process.env.WEBOS_SESSION_DIR ?? join(cwd, 'data', 'webos-sessions'),
     encodeURIComponent(scope),
     encodeURIComponent(conversationId),
+    encodeURIComponent(modelRef),
   )
   const sessionManager = SessionManager.create(cwd, sessionDir)
 
@@ -2496,7 +2552,9 @@ export async function createWebosSession(
 
     const authStorage = AuthStorage.create(agentDir ? join(agentDir, 'auth.json') : undefined)
     const modelRegistry = ModelRegistry.create(authStorage)
-    // 覆盖 pi 内置 DeepSeek 模型定义：启用官方 low/medium/high/max 全部四档
+    // Operit 式：从模型目录（ai_models 表）动态注册全部启用的 provider/模型；
+    // 目录为空时回退内置 DeepSeek（zen 网关）定义。
+    await registerCatalogModels(modelRegistry)
     registerDeepseekModels(modelRegistry, process.env.DEEPSEEK_API_KEY?.trim() ?? '', process.env.DEEPSEEK_BASE_URL)
 
     shared = { loader: resourceLoader, authStorage, modelRegistry, agentDir, skillsDir: skillsDirs.join('|') }
@@ -2510,12 +2568,13 @@ export async function createWebosSession(
     authStorage.setRuntimeApiKey('deepseek', deepseekKey)
   }
 
-  const modelRef = process.env.DEEPSEEK_MODEL?.trim() || 'deepseek/deepseek-v4-flash'
+  // 用户显式选择的模型（webos 会话由前端切换，格式 provider/model）优先；
+  // 未指定时回退 DEEPSEEK_MODEL → 默认 deepseek/deepseek-v4-flash（modelRef 已在函数顶部解析）
   const [providerName = 'deepseek', ...modelParts] = modelRef.split('/')
   const modelName = modelParts.join('/') || 'deepseek-v4-flash'
   const model = modelRegistry.find(providerName, modelName)
   if (!model) {
-    throw new Error(`[webos] model not found in registry: ${modelRef}. Ensure provider "${providerName}" is built-in and DEEPSEEK_API_KEY is set.`)
+    throw new Error(`[webos] model not found in registry: ${modelRef}. Ensure provider "${providerName}" is registered (ai_models catalog or built-in) and its API key is set.`)
   }
 
   console.log(`[PiBridge] webos session ${key}: model ${providerName}/${modelName}, thinking ${thinking}`)

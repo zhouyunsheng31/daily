@@ -214,7 +214,7 @@ export interface ActivityMonth {
   guest: number
   member: number
 }
-export interface ActivityStats {
+export interface SearchStats {
   days: number
   timezone: string
   generatedAt: number
@@ -318,7 +318,27 @@ export interface SearchFailureSample {
   latencyMs: number | null
   errorMsg: string | null
 }
-export interface SearchStats {
+// 2026-08-23 Operit 式模型目录：每套模型独立 API/参数，前端可切换
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type ModelParams = Record<string, any>
+
+/** 模型目录条目（api_key 脱敏） */
+export interface CatalogModel {
+  id: string
+  name: string
+  provider: string
+  endpoint: string | null
+  model: string
+  apiKeyMasked: string
+  hasApiKey: boolean
+  params: ModelParams
+  enabled: boolean
+  isDefault: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ActivityStats {
   days: number
   since: number
   total: {
@@ -372,6 +392,16 @@ export const api = {
   activityStats: (days = 30) => request<ActivityStats>(`/api/admin/webos/stats/activity?days=${days}`),
   // 2026-08-17 搜索 API 状态可视化
   searchStats: (days = 7) => request<SearchStats>(`/api/admin/webos/search-stats?days=${days}`),
+  // 2026-08-23 Operit 式模型目录管理（多 provider，每 provider 多模型）
+  aiModels: () => request<{ models: CatalogModel[] }>('/api/admin/ai-models'),
+  aiModelCreate: (input: { name: string; provider: string; endpoint?: string; model: string; apiKey?: string; params?: Record<string, unknown>; enabled?: boolean; isDefault?: boolean }) =>
+    request<CatalogModel>('/api/admin/ai-models', { method: 'POST', body: JSON.stringify(input) }),
+  aiModelUpdate: (id: string, input: Partial<{ name: string; provider: string; endpoint: string | null; model: string; apiKey: string; params: Record<string, unknown>; enabled: boolean; isDefault: boolean }>) =>
+    request<CatalogModel>(`/api/admin/ai-models/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
+  aiModelDelete: (id: string) => request<{ ok: true }>(`/api/admin/ai-models/${id}`, { method: 'DELETE' }),
+  aiModelSetDefault: (id: string) => request<CatalogModel>(`/api/admin/ai-models/${id}/default`, { method: 'PUT' }),
+  aiModelsFetch: (input: { provider?: string; endpoint?: string; apiKey?: string }) =>
+    request<{ models: Array<{ id: string; owned_by?: string }>; source: string; endpoint: string }>('/api/admin/ai-models/fetch', { method: 'POST', body: JSON.stringify(input) }),
   ban: (id: string, isBanned: boolean) =>
     request<unknown>(`/api/admin/users/${encodeURIComponent(id)}/ban`, {
       method: 'PUT',

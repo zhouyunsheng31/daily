@@ -58,7 +58,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import type { WebOsApp, WebOsPayOrder, WebOsThinkingLevel } from '@shared/webos-contracts'
-import { blobToBase64, agentWorkspaceFileRawUrl, changePassword, createApp, createPackage, createPayOrder, createSystemShare, deleteWorkspaceFile, fetchShareMeta, getAppDetail, getAppStorage, getCreditsHistory, getEmailPuzzle, getPayOrder, getUserApiToken, listAgentWorkspaceFiles, listWorkspaceFiles, loginWithEmail, readAgentWorkspaceTextFile, redeemAfdianCode, registerWithEmail, resetPassword, sendAuthEmailCodeWithPuzzle, shareAppToFriend, storeExportUrl, storeGet, storeInstall, storeList, storeMy, storePublish, storeSkillInstall, storeSkillPublish, storeSkillsList, storeSkillsMine, storeSkillsMy, storeSkillUnpublish, storeUnpublish, storeVisit, updateDisplayName, uploadAvatar, uploadWorkspaceFile, uploadWorkspaceFileLarge, workspaceFileRawUrl, invokeAppApi, getAppApiSpec, listPackages, marketList, marketDetail, marketInstall, marketMine, marketApps, type CreditsHistoryItem, type RedeemResult, type StoreAppItem, type WebOsPackageListItem, type WebOsWorkspaceEntry } from './api'
+import { blobToBase64, agentWorkspaceFileRawUrl, changePassword, createApp, createPackage, createPayOrder, createSystemShare, deleteWorkspaceFile, fetchShareMeta, getAppDetail, getAppStorage, getCreditsHistory, getEmailPuzzle, getPayOrder, getUserApiToken, listAgentWorkspaceFiles, listWorkspaceFiles, loginWithEmail, proxyHttp, readAgentWorkspaceTextFile, redeemAfdianCode, registerWithEmail, resetPassword, sendAuthEmailCodeWithPuzzle, shareAppToFriend, simpleAiChat, storeExportUrl, storeGet, storeInstall, storeList, storeMy, storePublish, storeSkillInstall, storeSkillPublish, storeSkillsList, storeSkillsMine, storeSkillsMy, storeSkillUnpublish, storeUnpublish, storeVisit, updateDisplayName, uploadAvatar, uploadWorkspaceFile, uploadWorkspaceFileLarge, workspaceFileRawUrl, invokeAppApi, getAppApiSpec, listPackages, marketList, marketDetail, marketInstall, marketMine, marketApps, type CreditsHistoryItem, type RedeemResult, type StoreAppItem, type WebOsPackageListItem, type WebOsWorkspaceEntry } from './api'
 import type { ChatConversation, UiChatMessage, UiSegment } from './store'
 import { createRuntimeChannel, createDesktopRuntime, createStoreRuntime, setRuntimeOpenApp, type DesktopRuntimeHandle, type StoreRuntimeHandle, type StoreSdkAdapters, type WebOsRuntimeHandle } from './runtime'
 import { copyTextToClipboard, useShellStore } from './store'
@@ -641,6 +641,7 @@ function Toasts() {
 function ModelThinkingCard({ compact = false }: { compact?: boolean }) {
   const ai = useShellStore((state) => state.ai)
   const setThinking = useShellStore((state) => state.setThinking)
+  const setModel = useShellStore((state) => state.setModel)
   if (!ai) return null
   // 思考档位循环切换：浅 → 中 → 深 → 极深 → 浅（点击 AI 首页的「思考」chip 即可切换）
   const cycleThinking = (): void => {
@@ -648,8 +649,21 @@ function ModelThinkingCard({ compact = false }: { compact?: boolean }) {
     const current = order.indexOf(ai.thinking)
     void setThinking(order[(current + 1) % order.length])
   }
-  if (compact) return <div className="assistant-controls"><button className="control-chip" aria-label="模型（当前唯一可用）"><span>模型</span><strong>Flash</strong></button><button className="control-chip thinking-cycle" onClick={cycleThinking} aria-label="切换思考强度"><span>思考</span><strong>{thinkingOptions.find((item) => item.id === ai.thinking)?.label}</strong></button></div>
-  return <Surface className="ai-control-card"><div className="card-heading"><div><Eyebrow>AI CONTROL</Eyebrow><h2>保持两个选择独立</h2></div><Gauge size={18} /></div><div className="setting-row"><span className="setting-icon blue"><Sparkles size={16} /></span><span className="setting-copy"><strong>模型</strong><small>能力与价格由 Provider 决定</small></span><span className="read-only-value">Flash <small>DeepSeek</small><Check size={14} /></span></div><div className="setting-row thinking-setting"><span className="setting-icon ink"><Layers3 size={16} /></span><span className="setting-copy"><strong>思考强度</strong><small>只调整本次推理预算</small></span><div className="thinking-options">{thinkingOptions.map((option) => <button className={ai.thinking === option.id ? 'selected' : ''} key={option.id} onClick={() => void setThinking(option.id)}><span>{option.label}</span><small>{option.hint}</small></button>)}</div></div></Surface>
+  // 模型循环切换（2026-08-23 模型目录：多 provider 多模型）
+  const cycleModel = (): void => {
+    const list = ai.models?.length ? ai.models : []
+    if (list.length === 0) return
+    const currentIdx = list.findIndex((m) => m.id === ai.model)
+    const next = list[(currentIdx + 1) % list.length]
+    void setModel(next.id)
+  }
+  const currentModel = ai.models?.find((m) => m.id === ai.model)
+  const modelLabel = currentModel?.label ?? ai.model
+  if (compact) return <div className="assistant-controls">
+    <button className="control-chip" onClick={cycleModel} aria-label="切换模型"><span>模型</span><strong>{modelLabel}</strong></button>
+    <button className="control-chip thinking-cycle" onClick={cycleThinking} aria-label="切换思考强度"><span>思考</span><strong>{thinkingOptions.find((item) => item.id === ai.thinking)?.label}</strong></button>
+  </div>
+  return <Surface className="ai-control-card"><div className="card-heading"><div><Eyebrow>AI CONTROL</Eyebrow><h2>保持两个选择独立</h2></div><Gauge size={18} /></div><div className="setting-row"><span className="setting-icon blue"><Sparkles size={16} /></span><span className="setting-copy"><strong>模型</strong><small>能力与价格由 Provider 决定，点击切换</small></span><button className="model-switcher" onClick={cycleModel} title="点击切换模型（有多模型可选）">{modelLabel} <small>{currentModel?.provider ?? ''}</small><Check size={14} /></button></div><div className="setting-row thinking-setting"><span className="setting-icon ink"><Layers3 size={16} /></span><span className="setting-copy"><strong>思考强度</strong><small>只调整本次推理预算</small></span><div className="thinking-options">{thinkingOptions.map((option) => <button className={ai.thinking === option.id ? 'selected' : ''} key={option.id} onClick={() => void setThinking(option.id)}><span>{option.label}</span><small>{option.hint}</small></button>)}</div></div></Surface>
 }
 
 function escapeHtmlText(value: string): string {
@@ -2264,6 +2278,12 @@ function DesktopView({ onOpenLogin }: { onOpenLogin: () => void }) {
           }
         }
       },
+      // 2026-08-23 桌面接入 API（宿主代理）：http → /webos/api/http（仅登录用户）；
+      // invokeApi → /webos/api/appapi/:ns/:ep（游客拒 R13）。服务端鉴权/SSRF/限频兜底。
+      http: (input) => proxyHttp(input),
+      invokeApi: (namespace, endpoint, params) => invokeAppApi(namespace, endpoint, params),
+      // 2026-08-23 桌面直接 AI 对话：走 chat/stream（桌面用固定会话 app-chat-system.desktop），调用者本人计费
+      aiChat: (options) => simpleAiChat({ ...options, appId: 'system.desktop' }),
     })
     desktopRuntimeRef.current = runtime
     return () => {
@@ -3896,6 +3916,7 @@ function ApiTokenModal({ onClose }: { onClose: () => void }) {
                   className="file-preview-text"
                   style={{
                     maxHeight: '160px',
+                    overflow: 'auto',
                     fontSize: '11px',
                     margin: 0,
                     whiteSpace: 'pre-wrap',
