@@ -17,7 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `server/src/imagegen/chatstImage.ts`（fallback 域名 .cn → .org；BASE_URL 与 `/images/generations` 拼接并去尾部斜杠）
 - 服务器 `.env` 追加 `CHATST_IMAGE_BASE_URL=https://api.chatst.org/v1`（备份 .env.bak-20260823）
 
-**验证**：见下方部署验证。
+**验证（线上部署走 git pull + pm2 restart 后实测）**：
+- `POST /webos/api/imagegen`（prompt: red apple）→ `ok:true`，耗时 15.2s，生成 `imagegen/file/1787474989626_gen_13f1f842.png`
+- 图片 URL 下载 http=200、625KB、image/png ✅
+- 修复前错误链：`UPSTREAM_ERROR fetch failed`（.cn DNS 失效）→ `HTTP_404 Invalid URL (POST /v1)`（路径未拼接）→ 修复后全通
 
 ### 2026-08-23 16:5x · fix(chat): 修复「停止按钮无效 + 停止后再发消息瞬间重放旧任务内容」
 
