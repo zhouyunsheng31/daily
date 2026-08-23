@@ -432,15 +432,23 @@ data: {"sessionId":"session-uuid","usage":{"prompt_tokens":120,"completion_token
 * **处理流程**：触发静态安全扫描（检查危险 AST、SSRF 域名白名单、权限越界），通过后入库上架。
 
 ### POST `/webos/api/market/:id/install`
-安装市场包，并**自动解析并安装依赖闭包**。
+安装市场包，并**自动解析并安装依赖闭包**。2026-08-23 起为「安装即用」：整包复制到调用者工作区 `installed/<id>/`，并按包内容自动生效——app→桌面图标、skill→AI 技能即时可用、api/toolpkg/mcp→`appapi_*` 工具自动注册、theme→桌面/App 立即换肤（bootstrap 下发 `theme.tokens`）。
 
-* **Response 200**：`{ "success": true, "installed": ["com.developer.my-tool", "com.daily.auth-api"] }`
+* **Response 200**：`{ "ok": true, "installed": ["com.developer.my-tool", "com.daily.auth-api"], "note": "✅ Skill 已安装…；✅ 主题已应用…" }`
 
 ### POST `/webos/api/market/:id/unpublish`
 下架已发布的市场包。
 
+### GET `/webos/api/market/:id/install-state`
+查询某包对当前用户的安装态：`{ "ok": true, "packageId": "...", "type": "api", "enabled": true }`（`enabled` 为市场设置页启停开关状态）。
+
+### POST `/webos/api/market/:id/toggle`
+市场设置页「启停开关」：`{ "ok": true, "packageId": "...", "enabled": false, "note": "技能已停用；主题已恢复默认（重新启用可再应用）" }`
+* **Body**：`{ "enabled": false }`（false=停用：按包内容撤销运行时产物——app 从桌面移除、skill 目录删除+pi loader 失效、theme 还原为默认；true=恢复。`installed/` 与安装记录保留，可随时恢复）
+* **权限**：仅本机安装者操作自己的安装记录；api 包的 public 调用权不受本人开关影响（公开调用归属主发布语义，见 App API 管道）。
+
 ### GET `/webos/api/market/mine`
-获取当前用户在市场中发布和安装的包状态。
+获取当前用户在市场中发布和安装的包状态（含 enabled 启停态）。
 
 ---
 

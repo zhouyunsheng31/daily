@@ -215,11 +215,12 @@ async function main(ctx) {
 
 外部 AI 或第三方自动化脚本，可以通过标准的 HTTP REST 接口完成包的创建、校验、上架与安装。
 
-### 6.1 鉴权（Authentication）
-所有端点需携带标准 JWT Authorization 头：
+### 6.1 鉴权（Authentication · 2026-08-23 实测校正）
+平台 JWT 通过 **Cookie** 传递（Cookie 名 `access_token`），**不是** `Authorization: Bearer`（该头是 SERVER_TOKEN 内部工具通道，传 JWT 会 401）：
 ```http
-Authorization: Bearer <YOUR_JWT_TOKEN>
+Cookie: access_token=<YOUR_JWT_TOKEN>
 ```
+获取 JWT：登录后调 `GET /webos/api/user/token`（返回 `{ token, userId, role }`）。
 
 ### 6.2 常用端点速查
 
@@ -245,7 +246,7 @@ Content-Type: application/json
 ```
 
 #### 2. 上架到市场（POST `/webos/api/market/publish`）
-将已创建的包发布至公共市场（服务端自动执行静态安全扫描，检查内网穿透、明文密钥与大小超限）：
+将已创建的包发布至公共市场（服务端自动执行静态安全扫描，检查内网穿透、明文密钥与大小超限）。仅包所有者可发布；**市场安装来的包不可重复发布**（防越权劫持）：
 ```http
 POST /webos/api/market/publish
 Content-Type: application/json
@@ -261,10 +262,27 @@ GET /webos/api/market?type=app&q=weather
 ```
 
 #### 4. 从市场安装包（POST `/webos/api/market/:id/install`）
-服务端会自动解析并递归安装该包声明的所有 `dependencies` 闭包：
+服务端会自动解析并递归安装该包声明的所有 `dependencies` 闭包。**安装即用（2026-08-23 统一复合包）**：整包复制到调用者工作区 `installed/<id>/`，并按**包内容**自动生效——
+- `type=app` → 桌面出现图标；
+- 含 Skill（`type=skill` / `contents.skills` / `SKILL.md`）→ 复制到调用者 `skills/<id>/`，AI 下一条消息即可使用；
+- `type=api` / `toolpkg` / `mcp`（含合法 `api.json`）→ 自动注册 `appapi_<namespace>_<endpoint>` 工具；
+- 含主题 `contents.tokens` / `type=theme` → 桌面与 App 立即换肤（bootstrap 下发 `theme.tokens`，前端注入 `:root` CSS 变量）。
+
 ```http
 POST /webos/api/market/com.example.weather/install
 ```
+
+#### 5. 启停开关（POST `/webos/api/market/:id/toggle`）与安装态（GET `/webos/api/market/:id/install-state`）
+市场设置页可随时停用/恢复已装包，`installed/` 与安装记录保留：
+```http
+POST /webos/api/market/com.example.weather/toggle
+Content-Type: application/json
+
+{ "enabled": false }
+```
+停用时按包内容撤销运行时产物（app 下桌面 / skill 目录删除+pi loader 失效 / 主题还原默认）；`{ "enabled": true }` 一键恢复。查询状态：`GET /webos/api/market/:id/install-state` → `{ ok, packageId, type, enabled }`；本人全部安装：`GET /webos/api/market/mine`。
+
+> **App API 公开调用语义**：安装者调用包的 public 端点走全局发布索引的公开管道——**属主执行 + 调用者计费**（handler 从发布者包目录读取）；安装者不可对已装包重复发布/撤回。
 
 ---
 

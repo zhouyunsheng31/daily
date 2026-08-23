@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-23 19:1x · docs(api): API 文档与系统指导 skill 同步统一复合包改造（toggle/install-state/鉴权校正）
+
+**背景**：站长核查「API 文档是否同步更新」——系统预置包（system.media / system.ai-chat，api 型自带指导 SKILL.md）与全局指导 skill（`.pi/skills-webos/` 的 package-market / media-package / app-dev / design 等）均已存在并有线上；但三份 API 文档停留在 W3 原始 6 端点，未同步本次统一复合包改造，且鉴权写法（Bearer 传 JWT）与实际不符（实测 401）。
+**修改文件**：
+- `docs/api-reference.md`：第 7 节补 `GET /market/:id/install-state`、`POST /market/:id/toggle`，install 补充「安装即用」落点（installed/ + app/skill/appapi/theme 生效）与 note 返回示例；
+- `docs/routes/web/10-package-market-guide.md`：§3 补鉴权说明（JWT 走 `Cookie: access_token`，Bearer 是 SERVER_TOKEN 通道）、安装即用/启停/安装态/public 调用语义（属主执行+调用者计费）；
+- `.pi/skills-webos/package-market/SKILL.md`（AI 运行时直接读取的指导 skill）：§6.1 鉴权实测校正 + §6.2 补 install/toggle/install-state/mine 端点与统一复合包安装即用说明。
+**验证**：三份文档与 `market/router.ts`（toggle/install-state 端点）、`market/service.ts`（安装引擎/启停分派）、`appapi-service.ts`（fromInstalled/public 语义）逐条核对一致；`.pi/skills-webos/` 已随 git 同步服务器（AI 新会话加载新 skill）。
+
 ### 2026-08-23 18:2x · fix(appapi): ESM 下 `require('node:fs')` 未定义导致 App API 包全部加载失败（API_SPEC_MISSING）
 
 **用户反馈/验证发现**：统一复合包 E2E 中 A 发布 `test.unified`（type=api）恒报 `API_SPEC_MISSING`（包文件齐全、DB 已注册、GET /packages 能看到，但 loadApiSpecs 就是找不到合法 api.json）。
