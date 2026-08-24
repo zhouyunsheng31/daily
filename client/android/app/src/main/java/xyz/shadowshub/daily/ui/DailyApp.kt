@@ -102,16 +102,15 @@ fun DailyApp() {
     val navBarDp = navInsets.calculateBottomPadding().value.let { if (it > 0) it else 18f }
 
     // 物理返回键处理：拦截并转发给 Web 端的 __dailySystemBack 钩子
+    //（2026-08-24 平板返回修复：Web 侧统一消费返回——关浮层 / history 回退子视图 /
+    //  桌面回 AI；返回 false 表示已到顶层，宿主直接退出，不再走 WebView goBack
+    //  历史（SPA 内 pushState 占位会让 goBack 跳到空白历史页导致"卡死/回不去"））
     BackHandler(enabled = true) {
         val wv = webViewInstance
         if (wv != null) {
             wv.evaluateJavascript("window.__dailySystemBack ? __dailySystemBack() : false") { result ->
                 if (result != "true") {
-                    if (wv.canGoBack()) {
-                        wv.goBack()
-                    } else {
-                        (context as? Activity)?.finish()
-                    }
+                    (context as? Activity)?.finish()
                 }
             }
         } else {
@@ -178,15 +177,22 @@ fun DailyApp() {
                             return cacheHelper.interceptRequest(request) ?: super.shouldInterceptRequest(view, request)
                         }
 
-                        override fun onPageFinished(view: WebView, url: String?) {
-                            super.onPageFinished(view, url)
-                            android.util.Log.d("AppRuntime", "Shell Web onPageFinished: $url")
-                            // 注入系统安全区 CSS 变量：壁纸铺满全屏，内容完美避让状态栏与导航条
+                        // 2026-08-24 平板入口提速：首帧可见即撤下品牌启动图（不等
+                        // onPageFinished——慢网/大页面时 load 事件晚，加载层常被误认
+                        // 为"卡死"）；注入安全区 CSS 变量移到此处，页面一有内容就生效。
+                        override fun onPageCommitVisible(view: WebView, url: String?) {
+                            super.onPageCommitVisible(view, url)
                             val safeTop = if (statusBarDp > 0) statusBarDp else 28f
                             val safeBottom = if (navBarDp > 0) navBarDp else 14f
                             val script = "document.documentElement.style.setProperty('--safe-top', '${safeTop}px'); document.documentElement.style.setProperty('--safe-bottom', '${safeBottom}px');"
                             view.evaluateJavascript(script, null)
-                            // 页面首帧渲染完成后撤下品牌启动图
+                            pageRendered = true
+                        }
+
+                        override fun onPageFinished(view: WebView, url: String?) {
+                            super.onPageFinished(view, url)
+                            android.util.Log.d("AppRuntime", "Shell Web onPageFinished: $url")
+                            // 兜底：onPageCommitVisible 未触发（旧内核）时仍撤下启动图
                             pageRendered = true
                         }
                     }

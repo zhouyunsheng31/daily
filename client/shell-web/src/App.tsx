@@ -80,6 +80,13 @@ const appIcons: Record<string, IconType> = {
   'system.files': Folder,
 }
 
+declare global {
+  interface Window {
+    /** 宿主（Android 壳 / 系统返回键）调用的统一返回出口；返回 true = Web 已消费 */
+    __dailySystemBack?: () => boolean
+  }
+}
+
 const APP_RUNTIME_BOOTSTRAP = String.raw`(() => {
   // 2026-08-07 锚点导航修复：<base> 注入后点击 href="#xxx" 会被解析为对 base URL 的
   // 真实导航（App 内锚点点击 → raw 端点 → {"error":"NOT_FOUND"} 白屏）。拦截纯锚点
@@ -4491,6 +4498,48 @@ export default function App() {
     }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  // 宿主返回键统一出口（2026-08-24）：Android 壳 / 系统手势调 window.__dailySystemBack()。
+  // 返回 true = 本次返回已被 Web 侧消费；返回 false = 已在顶层（assistant/desktop）→ 宿主自行退出。
+  useEffect(() => {
+    window.__dailySystemBack = (): boolean => {
+      try {
+        // 1. 全局浮层优先关闭（登录 / 会话侧边栏 / 加号菜单 / 分享面板 / 大图查看）
+        const click = (selector: string): boolean => {
+          const el = document.querySelector(selector) as HTMLElement | null
+          if (el) { el.click(); return true }
+          return false
+        }
+        if (click('.login-close')) return true
+        const sidebar = document.querySelector('.conv-sidebar-layer')
+        if (sidebar?.classList.contains('conv-sidebar-open')) {
+          const backdrop = sidebar.querySelector('.conv-sidebar-backdrop') as HTMLElement | null
+          if (backdrop) { backdrop.click(); return true }
+        }
+        if (click('.composer-menu-backdrop')) return true
+        if (click('.share-panel-close')) return true
+        const lightbox = document.querySelector('.image-lightbox') as HTMLElement | null
+        if (lightbox) { lightbox.click(); return true }
+
+        const state = useShellStore.getState()
+        // 2. 子视图（App/文件/个人中心/商店/体验）：触发 history 占位回退（弹回桌面或上一个 App）
+        if (state.activeView !== 'assistant' && state.activeView !== 'desktop') {
+          window.history.back()
+          return true
+        }
+        // 3. 桌面板块 → 回 AI 对话
+        if (state.activeView === 'desktop') {
+          state.setView('assistant')
+          return true
+        }
+        // 4. AI 对话为顶层：返回 false → 宿主退出应用
+        return false
+      } catch {
+        return false
+      }
+    }
+    return () => { window.__dailySystemBack = undefined }
   }, [])
 
   // App 间跳转：SDK DailyWebOs.apps.open(appId) → 宿主打开目标 App（再压一栈，返回键可回）

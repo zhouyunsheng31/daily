@@ -1151,7 +1151,7 @@ export const WEBOS_DESKTOP_V2_HTML = `<!doctype html>
 
   function escapeHtml(text) {
     return String(text).replace(/[&<>"']/g, function (ch) {
-      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': """, "'": "&#39;" }[ch];
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
     });
   }
 

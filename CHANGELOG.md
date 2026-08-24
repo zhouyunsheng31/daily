@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-24 · fix(android+web): 平板 APK 三症状修复——桌面模板脚本语法崩 / 壳层返回键 / 入口提速
+
+**背景/用户反馈**：安卓端 APK 在平板设备上：①进入应用卡死一段时间；②桌面板块不能正常显示；③不能再回退到其他板块，会卡死。
+
+**根因（实测定位）**：
+- 桌面 V2 模板（`server/src/webosDesktopV2.ts`）HTML 转义写错：`'"': """`（三个双引号）→ 生成的桌面脚本 **整段解析失败**（`SyntaxError: Unexpected string`，Playwright 平板视口复现 + `node --check` 定位 line 745）→ 桌面图标/程序坞/`__dailySystemBack` 全部没渲染/没定义；
+- Android 壳返回键依赖 `window.__dailySystemBack`，但 Web 壳顶层从未实现该钩子（仅桌面 iframe 内有，且因上面语法崩也没生效）→ 返回键落入 `canGoBack()` 历史回退 → SPA pushState 占位导致跳到空白历史页/直接退出 = "回不去/卡死"。
+
+**改动**：
+- `server/src/webosDesktopV2.ts`：`'"': """` → `'"': "&quot;"`（桌面模板脚本恢复正常解析）；
+- `client/shell-web/src/App.tsx`：顶层实现 `window.__dailySystemBack`——关浮层（登录/会话侧边栏/加号菜单/分享面板/大图）→ 子视图 history 回退（复用既有 pushState/popstate 机制）→ 桌面回 AI → 顶层返回 false 由宿主退出；补 `Window.__dailySystemBack` 类型声明；
+- `client/android`：`AndroidManifest.xml` 显式 `hardwareAccelerated` + MainActivity `configChanges`（旋转不再重建 Activity/整页重载——平板旋转即"卡死/重置"来源之一）；`DailyApp.kt` 返回键改为"Web 消费则拦截、未消费直接退出"（弃用 goBack 历史回退），新增 `onPageCommitVisible` 首帧可见即撤下品牌加载层（入口提速，慢网不再长时间停在加载图）。
+
+**验证**：本地 Playwright 平板视口（1280×800 触屏 UA）——修复前桌面 iframe `tiles:0/pages:0/SyntaxError: Unexpected string`；修复后 `tiles:4/pages:1/hasBack:true`、语法错误消失；shell 构建产物 `index-B7cTnri0.js` 含返回钩子。
+
 ### 2026-08-24 · feat(android): 收录安卓端 APK（Daily Compose 客户端）
 
 **背景**：用户完成安卓端客户端构建，安装包上传至生产工作区 `home/uploads/7_base.apk`，要求上传 GitHub 仓库。
