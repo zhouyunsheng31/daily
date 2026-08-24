@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-24 · feat(android): 收录安卓端 APK（Daily Compose 客户端）
+
+**背景**：用户完成安卓端客户端构建，安装包上传至生产工作区 `home/uploads/7_base.apk`，要求上传 GitHub 仓库。
+
+**改动**：
+- `android/daily-android.apk`：签名安装包（23.6 MB，Jetpack Compose + Gradle/AGP 9.0.0，应用名 Daily），sha256 `0312045c3c45c8fa60e5ab321c23f1379599bc04fae3d67b10f036f0e07b9de0`；
+- `android/README.md`：文件说明、校验值与安装指引（原始文件来源、安卓原生端规划见 `docs/roadmap_mobile_v1.md`）；
+- 工作区同步保留副本 `/root/android/daily-android.apk`。
+
 ### 2026-08-24 · fix(shell-web): 桌面端舞台去卡片化——任何比例都整屏铺满（补 5a184a0 遗漏项）
 
 **背景/用户反馈**：「宽屏还是会有部分比例不能填满」——5a184a0 只去掉了舞台的 440px 宽度上限，但桌面媒体查询（`min-width:700px` + `hover:hover` + `pointer:fine`）仍把舞台压成 **max-height:900px 的圆角浮卡、上下各留 16px**：1080p/2K/4K 等较矮比例的屏幕上，舞台只占中间一块，上下露出 body 灰边。
