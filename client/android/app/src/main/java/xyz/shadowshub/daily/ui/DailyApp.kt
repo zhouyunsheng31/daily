@@ -197,6 +197,20 @@ fun DailyApp() {
                             val script = "document.documentElement.style.setProperty('--safe-top', '${safeTop}px'); document.documentElement.style.setProperty('--safe-bottom', '${safeBottom}px');"
                             view.evaluateJavascript(script, null)
                             pageRendered = true
+                            // 2026-08-24 首次启动引导登录：App 默认是自动游客身份，
+                            // 桌面/壁纸/应用全是默认模板，与网页登录账号完全不一致；
+                            // 首帧渲染后若仍是游客则自动弹出登录面板（登录后资产迁移自动可见）。
+                            val prefs = ctx.getSharedPreferences("daily_app", Context.MODE_PRIVATE)
+                            if (!prefs.getBoolean("first_run_login_prompt_done", false)) {
+                                prefs.edit().putBoolean("first_run_login_prompt_done", true).apply()
+                                view.postDelayed({
+                                    view.evaluateJavascript("window.__dailyIsGuest ? String(__dailyIsGuest()) : 'true'") { result ->
+                                        if (result == "true") {
+                                            view.evaluateJavascript("window.__dailyShowLogin ? __dailyShowLogin() : null", null)
+                                        }
+                                    }
+                                }, 1200)
+                            }
                         }
 
                         override fun onPageFinished(view: WebView, url: String?) {

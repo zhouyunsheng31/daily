@@ -84,6 +84,10 @@ declare global {
   interface Window {
     /** 宿主（Android 壳 / 系统返回键）调用的统一返回出口；返回 true = Web 已消费 */
     __dailySystemBack?: () => boolean
+    /** 宿主查询当前会话是否游客（引导登录用） */
+    __dailyIsGuest?: () => boolean
+    /** 宿主请求打开登录面板 */
+    __dailyShowLogin?: () => void
   }
 }
 
@@ -4410,6 +4414,14 @@ export default function App() {
   const [showLogin, setShowLogin] = useState(false)
   useEffect(() => { void boot() }, [boot])
 
+  // 2026-08-24 安卓壳首次启动引导登录：壳调 window.__dailyShowLogin() →
+  // 派发该事件 → 打开登录面板（App 内常是自动游客，桌面/壁纸/应用与网页登录账号不同）
+  useEffect(() => {
+    const onOpenLogin = (): void => setShowLogin(true)
+    document.addEventListener('daily:open-login', onOpenLogin)
+    return () => document.removeEventListener('daily:open-login', onOpenLogin)
+  }, [])
+
   // 2026-08-14 切回前台恢复 AI 实时渲染：移动端切后台（锁屏/切 app）时浏览器
   // 可能冻结或掐断 SSE fetch 流（不抛错、不推数据、也不触发 45s 空闲超时），
   // 回到前台后若无主动恢复，页面会一直停在"停止渲染"状态（任务其实还在后台跑）。
@@ -4503,6 +4515,15 @@ export default function App() {
   // 宿主返回键统一出口（2026-08-24）：Android 壳 / 系统手势调 window.__dailySystemBack()。
   // 返回 true = 本次返回已被 Web 侧消费；返回 false = 已在顶层（assistant/desktop）→ 宿主自行退出。
   useEffect(() => {
+    // 2026-08-24 安卓壳钩子：查询当前是否游客（登录态与网页一致性问题排查/引导用）
+    window.__dailyIsGuest = (): boolean => {
+      const s = useShellStore.getState()
+      return !s.session || s.session.guest !== false || s.session.user?.role === 'guest'
+    }
+    // 安卓壳首次启动引导：打开登录面板（触发 App 根组件的事件监听）
+    window.__dailyShowLogin = (): void => {
+      document.dispatchEvent(new CustomEvent('daily:open-login'))
+    }
     window.__dailySystemBack = (): boolean => {
       try {
         // 1. 全局浮层优先关闭（登录 / 会话侧边栏 / 加号菜单 / 分享面板 / 大图查看）
@@ -4539,7 +4560,7 @@ export default function App() {
         return false
       }
     }
-    return () => { window.__dailySystemBack = undefined }
+    return () => { window.__dailySystemBack = undefined; window.__dailyIsGuest = undefined; window.__dailyShowLogin = undefined }
   }, [])
 
   // App 间跳转：SDK DailyWebOs.apps.open(appId) → 宿主打开目标 App（再压一栈，返回键可回）
