@@ -282,14 +282,13 @@ button:disabled { cursor: not-allowed; }
 }
 .shell-stage {
   position: relative;
-  /* 兼容写法：width+max-width 表达 min(100%,440px)，min()/dvh 等新特性
-     在旧内核（老微信 XWeb / 旧 UC·QQ / 旧 WebView）不识别时自动降级 */
+  /* 2026-08-24 任意比例铺满：移除 440px 手机列上限，舞台始终占满视口。
+     宽屏下内容列由 @media (min-width:900px) 规则居中限宽（见文件尾），
+     舞台背景铺满整屏（无灰边）。旧内核不识别 dvh 时回退 100vh。 */
   width: 100%;
-  max-width: 440px;
   height: 100vh; /* fallback（旧内核无 dvh 支持） */
   overflow: hidden;
   background: var(--paper);
-  box-shadow: 0 0 0 1px rgba(23,25,24,.06), 0 28px 80px rgba(50,44,34,.16);
 }
 /* 全屏元素统一用 top/left + width/height:100%（等效 inset:0）：
    写 inset:0 会被 CSS minifier 规范化保留，旧内核不认识 inset 直接失效；
@@ -1220,9 +1219,9 @@ button.file-row-main { cursor: pointer; }
   .app-frame { border-radius: 22px; }
 }
 
-/* 平板横屏（触屏 + 宽 ≥ 900px）：桌面/商店/App 全屏已由 .os-screen 保证，
-   对话与系统页内容列限宽保持；此处仅微调横向留白 */
-@media (min-width: 900px) and (pointer: coarse) and (hover: none) and (orientation: landscape) {
+/* 宽屏任意比例（2026-08-24 放宽自平板横屏专用规则）：舞台已铺满视口，
+   对话/系统页内容列居中限宽 820px 保持可读；桌面/商店/App 全屏由 .os-screen 保证 */
+@media (min-width: 900px) {
   .assistant-scroll,
   .assistant-header,
   .conv-title-bar,
