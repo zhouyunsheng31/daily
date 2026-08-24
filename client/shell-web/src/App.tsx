@@ -104,7 +104,7 @@ const APP_RUNTIME_BOOTSTRAP = String.raw`(() => {
   }, true)
   const CHANNEL = 'daily-webos-sdk'
   const PRIVATE_STORAGE = 'app.storage.private'
-  const REQUEST_TIMEOUT = 8000
+  const REQUEST_TIMEOUT = 30000
   let port = null
   let context = null
   const pending = new Map()

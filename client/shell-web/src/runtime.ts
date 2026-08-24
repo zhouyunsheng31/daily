@@ -82,7 +82,7 @@ const ALLOWED_CAPABILITIES = new Set([
   WEBOS_USER_INFO_CAPABILITY,
   WEBOS_NET_SPACES_CAPABILITY,
 ])
-const REQUEST_TIMEOUT_MS = 8_000
+const REQUEST_TIMEOUT_MS = 30_000
 
 type RuntimeMessage = {
   channel?: unknown
@@ -368,7 +368,10 @@ async function handleHostRequest(
       const prompt = typeof params.prompt === 'string' ? params.prompt : undefined
       const messages = Array.isArray(params.messages) ? params.messages as Array<{ role: string; content: string }> : undefined
       const thinkingBudget = typeof params.thinkingBudget === 'string' ? params.thinkingBudget as never : undefined
-      const res = await simpleAiChat({ prompt, messages, thinkingBudget, appId: context.app.id })
+      // 2026-08-24 会话三态：显式 conversationId / fresh 随请求透传（向后兼容，缺省走固定会话）
+      const conversationId = typeof params.conversationId === 'string' && params.conversationId.trim() ? params.conversationId : undefined
+      const fresh = params.fresh === true
+      const res = await simpleAiChat({ prompt, messages, thinkingBudget, conversationId, fresh, appId: context.app.id })
       respond(true, res)
       return
     }
@@ -496,11 +499,13 @@ export function createWebOsSdk(port: MessagePort, context: WebOsRuntimeContext) 
     }),
     // 平台原生 AI 对话与模型推理能力（自动扣除当前用户算力/Token）
     ai: Object.freeze({
-      chat(input: { prompt?: string; messages?: Array<{ role: string; content: string }>; thinkingBudget?: string }): Promise<{ ok: boolean; text: string; error?: string }> {
+      chat(input: { prompt?: string; messages?: Array<{ role: string; content: string }>; thinkingBudget?: string; conversationId?: string; fresh?: boolean }): Promise<{ ok: boolean; text: string; error?: string }> {
         return request(port, 'ai.chat', {
           prompt: input.prompt,
           messages: input.messages,
           thinkingBudget: input.thinkingBudget,
+          conversationId: input.conversationId,
+          fresh: input.fresh,
         })
       },
     }),
@@ -679,7 +684,7 @@ export interface DesktopSdkAdapters {
   /** 2026-08-23 桌面调用 App API 端点：宿主代理到 /webos/api/appapi/:ns/:ep（游客拒 R13，owner/public 由服务端判定） */
   invokeApi: (namespace: string, endpoint: string, params?: Record<string, unknown>) => Promise<{ result: unknown; costMinor: number }>
   /** 2026-08-23 桌面直接 AI 对话：宿主经 /webos/api/chat/stream 聚合返回完整文本（调用者本人计费） */
-  aiChat: (options: { prompt?: string; messages?: Array<{ role: string; content: string }>; thinkingBudget?: WebOsThinkingLevel }) => Promise<{ ok: boolean; text: string; error?: string }>
+  aiChat: (options: { prompt?: string; messages?: Array<{ role: string; content: string }>; thinkingBudget?: WebOsThinkingLevel; conversationId?: string; fresh?: boolean }) => Promise<{ ok: boolean; text: string; error?: string }>
 }
 
 export interface DesktopRuntimeHandle {
@@ -811,7 +816,10 @@ async function handleDesktopRequest(
       const thinkingBudget = typeof params.thinkingBudget === 'string'
         ? params.thinkingBudget as WebOsThinkingLevel
         : undefined
-      respond(true, await adapters.aiChat({ prompt, messages, thinkingBudget }))
+      // 2026-08-24 会话三态：显式 conversationId / fresh 透传（缺省走桌面固定会话）
+      const conversationId = typeof params.conversationId === 'string' && params.conversationId.trim() ? params.conversationId : undefined
+      const fresh = params.fresh === true
+      respond(true, await adapters.aiChat({ prompt, messages, thinkingBudget, conversationId, fresh }))
       return
     }
     throw new Error(`Unsupported Desktop method: ${method}`)

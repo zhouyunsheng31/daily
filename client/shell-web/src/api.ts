@@ -995,8 +995,21 @@ export async function generateImageApi(options: GenerateImageOptions): Promise<G
 }
 
 /** 平台 AI 对话单次生成（由宿主通过 chat/stream 聚合返回完整文本） */
-export async function simpleAiChat(options: { prompt?: string; messages?: Array<{ role: string; content: string }>; thinkingBudget?: WebOsThinkingLevel; appId?: string }): Promise<{ ok: boolean; text: string; error?: string }> {
-  const convId = options.appId ? `app-chat-${options.appId}` : `app-chat-${Date.now()}`
+export async function simpleAiChat(options: {
+  prompt?: string
+  messages?: Array<{ role: string; content: string }>
+  thinkingBudget?: WebOsThinkingLevel
+  appId?: string
+  /** 2026-08-24 会话三态：显式指定会话（新 id 服务端自动建、同 id 多轮累积上下文） */
+  conversationId?: string
+  /** 2026-08-24 会话三态：fresh=true 每次调用自动新建会话（防固定会话膨胀） */
+  fresh?: boolean
+}): Promise<{ ok: boolean; text: string; error?: string }> {
+  // convId 优先级：conversationId > fresh（每次新建）> 默认固定（app-chat-<appId>）> 无 appId（app-chat-<时间戳>）
+  const convId = options.conversationId?.trim()
+    || (options.fresh
+      ? `app-chat-${options.appId ?? 'anon'}-${Date.now()}`
+      : (options.appId ? `app-chat-${options.appId}` : `app-chat-${Date.now()}`))
   let fullText = ''
   const msgs: WebOsChatMessage[] = options.messages
     ? options.messages.map((m) => ({ role: (m.role === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant', content: m.content }))

@@ -445,7 +445,7 @@ export const WEBOS_DESKTOP_V2_HTML = `<!doctype html>
     ai: {
       chat: function (opts) {
         opts = opts || {};
-        return call("ai.chat", { prompt: opts.prompt, messages: opts.messages, thinkingBudget: opts.thinkingBudget });
+        return call("ai.chat", { prompt: opts.prompt, messages: opts.messages, thinkingBudget: opts.thinkingBudget, conversationId: opts.conversationId, fresh: opts.fresh });
       }
     }
   };
@@ -457,7 +457,7 @@ export const WEBOS_DESKTOP_V2_HTML = `<!doctype html>
       var timer = setTimeout(function () {
         delete pending[id];
         reject(new Error("DesktopSDK 请求超时: " + method));
-      }, 8000);
+      }, 30000);
       pending[id] = { resolve: resolve, reject: reject, timer: timer };
       window.parent.postMessage({
         channel: "daily-webos-sdk", kind: "request", requestId: id,
