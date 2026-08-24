@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-24 · fix(shell-web): 桌面端舞台去卡片化——任何比例都整屏铺满（补 5a184a0 遗漏项）
+
+**背景/用户反馈**：「宽屏还是会有部分比例不能填满」——5a184a0 只去掉了舞台的 440px 宽度上限，但桌面媒体查询（`min-width:700px` + `hover:hover` + `pointer:fine`）仍把舞台压成 **max-height:900px 的圆角浮卡、上下各留 16px**：1080p/2K/4K 等较矮比例的屏幕上，舞台只占中间一块，上下露出 body 灰边。
+
+**改动**：
+- `client/shell-web/src/styles.css`：桌面媒体查询改为整屏铺满——`height:100vh; max-height:none; margin:0; border-radius:0`（`@supports (height:1dvh)` 分支同步为 `100dvh`），不再有上下留边和圆角灰角；
+- 宽屏可读性不受影响：`@media (min-width:900px)` 内容列居中限宽 820px 规则保持不变，桌面/商店/App 全屏由 `.os-screen` 保证。
+
+**验证**：`vite build` 通过，产物 CSS 内已无 `max-height:900px` / `calc(100vh - 32px)`；`server/public/index.html` 引用新产物（`index-CxtRmCJf.js` / `index-BdbUTfb8.css`），旧 bundle 已清理；`/daily` 由 daily-server 直接服务磁盘 `server/public`，无需重启即生效。
+
 ### 2026-08-24 · feat(shell-web): ai.chat 会话三态管理 + 请求超时放宽 30s [202b7d0]
 
 **背景/用户反馈**：`ai.chat` 为聚合式生成（SSE 全量 + 建 pi 会话 + 思考），首调冷启动 / 中等思考普遍 >8s；宿主桥 8s 超时导致客户端先行放弃（请求实际已在服务端运行）。且 AI 会话管理能力缺失：固定会话膨胀、App 无法新建对话。

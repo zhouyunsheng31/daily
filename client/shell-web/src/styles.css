@@ -570,7 +570,10 @@ button:disabled { cursor: not-allowed; }
 /* 2026-08-08 横屏全屏修复：手机/平板横屏（触屏）时 Shell 铺满视口，不触发
    桌面卡片样式（此前 min-width:700px 在手机横屏 844px 下误判为桌面，
    Shell 被压成 440px 居中卡片 → 横屏 App 只占中间一块） */
-@media (min-width: 700px) and (hover: hover) and (pointer: fine) { .shell-stage { height: calc(100vh - 32px); max-height: 900px; margin: 16px 0; border-radius: 42px; } .shell-root { align-items: flex-start; } }
+/* 2026-08-24 桌面端去卡片化：原规则把舞台压成 max-height:900px 的圆角浮卡
+   （上下 16px 留边），屏幕越高（1080p/2K/4K）上下越明显露出灰边——部分比例铺不满；
+   现桌面端同样整屏铺满，宽屏可读性由文件尾 @media (min-width:900px) 内容列限宽保证。 */
+@media (min-width: 700px) and (hover: hover) and (pointer: fine) { .shell-stage { height: 100vh; max-height: none; margin: 0; border-radius: 0; } }
 @media (orientation: landscape) and (hover: none) and (pointer: coarse) { .shell-stage { width: 100%; max-width: 100%; margin: 0; border-radius: 0; } }
 @media (max-width: 360px) { .greeting h1 { font-size: 31px; }.launcher-grid { gap-inline: 5px; }.app-tile { width: 52px; height: 52px; }.metric-card { padding-inline: 8px; }.metric-card strong { font-size: 14px; }.assistant-composer .os-button { padding-inline: 7px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
@@ -1039,7 +1042,7 @@ button.file-row-main { cursor: pointer; }
   .boot-screen { min-height: 100dvh; }
   .login-panel { max-height: min(560px, calc(100dvh - 48px)); }
   @media (min-width: 700px) and (hover: hover) and (pointer: fine) {
-    .shell-stage { height: calc(100dvh - 32px); max-height: 900px; }
+    .shell-stage { height: 100dvh; max-height: none; }
   }
   @media (orientation: landscape) and (hover: none) and (pointer: coarse) {
     .shell-stage { height: 100dvh; max-height: none; }
