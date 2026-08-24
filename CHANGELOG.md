@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-24 · feat(shell-web): ai.chat 会话三态管理 + 请求超时放宽 30s [202b7d0]
+
+**背景/用户反馈**：`ai.chat` 为聚合式生成（SSE 全量 + 建 pi 会话 + 思考），首调冷启动 / 中等思考普遍 >8s；宿主桥 8s 超时导致客户端先行放弃（请求实际已在服务端运行）。且 AI 会话管理能力缺失：固定会话膨胀、App 无法新建对话。
+
+**改动**：
+- `client/shell-web/src/App.tsx`：宿主桥请求超时 `REQUEST_TIMEOUT` 8000 → **30000**（App 桥所有请求，含 ai.chat / api.call）；
+- `client/shell-web/src/runtime.ts`：App 运行时 SDK 侧 `REQUEST_TIMEOUT_MS` 8000 → **30000**（避免 SDK 侧 8s 掐断长生成）；`DailyWebOs.ai.chat` 与宿主桥 `ai.chat` 分支、桌面桥 `aiChat` adapter 均支持 `conversationId` / `fresh` 透传；
+- `client/shell-web/src/api.ts` `simpleAiChat`：会话三态——convId 优先级 `conversationId` > `fresh`（`app-chat-<appId>-<ts>` 每次新建）> 默认固定（`app-chat-<appId>`）> 无 appId（`app-chat-<ts>`），向后兼容；
+- `server/src/webosDesktopV2.ts`：桌面模板 `SDK.ai.chat` 支持 `conversationId`/`fresh`，模板 SDK 请求超时 8000 → 30000。
+
+**验证**：shell-web `vite build` 通过（`index-CXb0BFT6.js`）；生产游客 `chat/stream` 自定义 `conversationId` 冒烟通过（服务端自动建新会话、正常 done、日志无异常）；公网 `shadowshub.xyz/daily/` 已服务新产物；游客闸门（`/webos/api/http` 403）回归通过；生产 `git pull` + 服务端 `tsc` 重建 + `pm2 restart`。
+
+### 2026-08-23 · feat(webos)+feat(shell-web): 桌面接入 API（宿主桥 http/api.invoke/ai.chat）+ 外部 API 仅登录用户 [bb63d51/a914caf]
+
+**背景**：系统桌面（V2 模板）此前为纯 postMessage 直连宿主（apps.list/open 等固定方法），无任何网络能力；外部 API 代理 `/webos/api/http` 游客亦可调用（匿名滥用面）。目标：桌面可接入 API 端点，且仅登录用户可用（服务端强制）。
+
+**改动**：
+- `server/src/routes/webos.ts`：`/webos/api/http` 增加游客闸门（403 `GUEST_NOT_ALLOWED`，与互通体系 R13 对齐，服务端强制）；
+- `client/shell-web/src/runtime.ts` `handleDesktopRequest`：新增 `system.http`（→ `/webos/api/http`，复用 SSRF+限频）、`api.invoke`（→ `/webos/api/appapi/:ns/:ep`，游客拒 R13）、`ai.chat`（→ `/webos/api/chat/stream` 聚合，调用者本人计费）三个宿主代理方法；
+- `client/shell-web/src/App.tsx`：注入 `proxyHttp` / `invokeAppApi` / `simpleAiChat` adapter（走用户登录会话）；
+- `server/src/webosDesktopV2.ts`：模板 SDK 新增 `SDK.http.request` / `SDK.api.invoke` / `SDK.ai.chat`；
+- `client/shell-web/src/api.ts`：修复 `simpleAiChat`（引用不存在的 `sendChatStream`、delta 字段误用 `event.text` → `event.content`，打通 App 运行时桥 `ai.chat`）。
+
+**验证**：游客调 `/webos/api/http` → 403（线上实测）；bootstrap 返回桌面模板含 `system.http`/`ai.chat`；生产部署后真实用户对话正常（日志 `chat done sent` 正常）。
+
 ### 2026-08-23 23:0x · feat(webos) [32273ee]: 模型目录全链路上线——admin.shadowshub.xyz 后台模型管理入口 + 生产库种子 + params 解析修复
 
 **背景/用户反馈**：站长反馈「像 Operit 那样管理员后台可配置多 provider 多模型、用户前端可切换」的实现「什么都没做」——后台无设置入口、用户前端无法切换、gemini 模型"被删"。
