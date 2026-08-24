@@ -149,7 +149,17 @@ fun DailyApp() {
                         builtInZoomControls = false
                         displayZoomControls = false
                         useWideViewPort = true
-                        loadWithOverviewMode = true
+                        // 2026-08-24 平板渲染对齐浏览器（用户反馈：App 内文字/图标/按钮
+                        // 排列偏差或互相覆盖、桌面排列错乱、壁纸位置不对，而网页端正常）：
+                        // - loadWithOverviewMode=false：不再把整页按"概览"缩放适配（宽屏平板
+                        //   上会整体缩小/错位，导致元素互相覆盖）；页面自带 viewport meta，
+                        //   按 device-width 精确布局，与 Chrome 浏览器一致；
+                        // - layoutAlgorithm=NORMAL：关闭 WebView 默认的 TEXT_AUTOSIZING
+                        //   （文本自动放大/压缩会打乱响应式布局的间距与换行）；
+                        // - textZoom=100：归一系统字体缩放，避免平板"加大字体"设置导致错位。
+                        loadWithOverviewMode = false
+                        layoutAlgorithm = WebSettings.LayoutAlgorithm.NORMAL
+                        textZoom = 100
                         cacheMode = WebSettings.LOAD_DEFAULT
                         mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                     }

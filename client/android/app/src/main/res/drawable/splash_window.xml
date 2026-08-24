@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 2026-08-24 启动图修复：原 splash_window.png 为手机 19.5:9 全幅图，平板窗口会拉伸变形。
+     改为纯色底 + 居中固定尺寸 logo（bitmap gravity=center 等比绘制，不拉伸，任何宽高比正常） -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <color android:color="@color/daily_splash_bg" />
+    </item>
+    <item>
+        <bitmap
+            android:src="@drawable/icon_e1_logo"
+            android:gravity="center"
+            android:antialias="true" />
+    </item>
+</layer-list>
