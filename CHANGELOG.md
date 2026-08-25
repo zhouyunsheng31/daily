@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 2026-08-26 07:30 · feat(webos): home 工作区支持上传整个文件夹 + 解压压缩包 (commit 48a7253)
 
+### 2026-08-26 07:49 · feat(webos): 给 daily 的 AI 助手加 extract_archive 解压工具（对话里可直接解压） (commit dd3a8ea)
+
+**背景/用户反馈**：用户在 daily 的 AI 助手对话里让它「解压」，AI 回复「工具链路调不动 / 前端文件页无解压入口」——因为解压端点是 HTTP 路由，而 daily 的 AI 工具集里没有对应工具（AI 沙箱也不能同站 fetch 该端点）。
+
+**改动**：
+- `server/src/routes/webos.ts`：新增 AI 工具 `extract_archive`（label「解压压缩包」），注入 `webosAppTools` 工具列表。AI 传工作区相对 `path`（如 `home/uploads/xx.zip`）+ 可选 `dir`；复用 `/workspace/files/extract` 同一套安全逻辑（`inspectArchive` 防穿越、`extractArchiveTo` 类型白名单/配额复核/工作区外临时目录），解压后登记 `files` 元数据并返回解出文件清单给 AI。仅支持 zip/tar/tar.gz/tgz/gz。
+
+**验证**：`server` `tsc --noEmit` 通过；已部署远端 `pm2 restart daily-server` 启动正常（`extract_archive` 已注入，`ss 3456` 在线）。前端「文件」页早已具备「上传文件夹 / 解压」入口（本次部署的 `assets/index-BKf-c9Ul.js` 含相关字符串）；用户需硬刷新清除 SW 缓存即可在文件页看到解压入口，或直接在对话里让 AI 解压。
+
+### 2026-08-26 07:30 · feat(webos): home 工作区支持上传整个文件夹 + 解压压缩包 (commit 48a7253)
+
 **背景/用户需求**：用户希望在「文件工作区」（home/ 用户可见区）一次性上传整个文件夹（含子文件夹与文件），并能对已上传的压缩包直接解压，不再需要 AI 代劳。
 
 **改动**：
