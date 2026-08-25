@@ -458,6 +458,31 @@ export function deleteWorkspaceFile(pathName: string): Promise<{ ok: boolean }> 
   return request(`/webos/api/workspace/files?path=${encodeURIComponent(pathName)}`, { method: 'DELETE' })
 }
 
+/** 在用户可见区（home/）创建目录（含父目录；幂等；上传文件夹时保空目录结构 / 单独新建文件夹） */
+export function mkdirWorkspaceFolder(dir: string): Promise<{ ok: boolean; path: string }> {
+  return request('/webos/api/workspace/files/mkdir', {
+    method: 'POST',
+    body: JSON.stringify({ dir }),
+  })
+}
+
+/** 解压用户可见区（home/）里的压缩包到指定文件夹（支持 zip/tar/tar.gz/tgz/gz）
+ *  path: 压缩包相对 home/ 的路径；dir: 解压目标文件夹（可选，默认 <所在目录>/<去扩展名>） */
+export function extractWorkspaceArchive(pathName: string, dir?: string): Promise<{
+  ok: boolean
+  path: string
+  extractedCount: number
+  skipped: string[]
+  bytesWritten: number
+  workspaceBytes: number
+  workspaceLimitBytes: number
+}> {
+  return request('/webos/api/workspace/files/extract', {
+    method: 'POST',
+    body: JSON.stringify({ path: pathName, ...(dir ? { dir } : {}) }),
+  })
+}
+
 /** 用户可见区文件 raw URL（图片预览/下载用；仅 home/ 内） */
 export function workspaceFileRawUrl(pathName: string): string {
   return `/webos/api/workspace/files/raw?path=${encodeURIComponent(pathName)}`

@@ -20,8 +20,10 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  FileArchive,
   FileText,
   Folder,
+  FolderInput,
   Gauge,
   Globe,
   Grid2X2,
@@ -58,7 +60,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import type { WebOsApp, WebOsPayOrder, WebOsThinkingLevel } from '@shared/webos-contracts'
-import { blobToBase64, agentWorkspaceFileRawUrl, changePassword, createApp, createPackage, createPayOrder, createSystemShare, deleteWorkspaceFile, fetchShareMeta, getAppDetail, getAppStorage, getCreditsHistory, getEmailPuzzle, getPayOrder, getUserApiToken, listAgentWorkspaceFiles, listWorkspaceFiles, loginWithEmail, proxyHttp, readAgentWorkspaceTextFile, redeemAfdianCode, registerWithEmail, resetPassword, sendAuthEmailCodeWithPuzzle, shareAppToFriend, simpleAiChat, storeExportUrl, storeGet, storeInstall, storeList, storeMy, storePublish, storeSkillInstall, storeSkillPublish, storeSkillsList, storeSkillsMine, storeSkillsMy, storeSkillUnpublish, storeUnpublish, storeVisit, updateDisplayName, uploadAvatar, uploadWorkspaceFile, uploadWorkspaceFileLarge, workspaceFileRawUrl, invokeAppApi, getAppApiSpec, listPackages, marketList, marketDetail, marketInstall, marketMine, marketApps, type CreditsHistoryItem, type RedeemResult, type StoreAppItem, type WebOsPackageListItem, type WebOsWorkspaceEntry } from './api'
+import { blobToBase64, agentWorkspaceFileRawUrl, changePassword, createApp, createPackage, createPayOrder, createSystemShare, deleteWorkspaceFile, fetchShareMeta, getAppDetail, getAppStorage, getCreditsHistory, getEmailPuzzle, getPayOrder, getUserApiToken, listAgentWorkspaceFiles, listWorkspaceFiles, loginWithEmail, proxyHttp, readAgentWorkspaceTextFile, redeemAfdianCode, registerWithEmail, resetPassword, sendAuthEmailCodeWithPuzzle, shareAppToFriend, simpleAiChat, storeExportUrl, storeGet, storeInstall, storeList, storeMy, storePublish, storeSkillInstall, storeSkillPublish, storeSkillsList, storeSkillsMine, storeSkillsMy, storeSkillUnpublish, storeUnpublish, storeVisit, updateDisplayName, uploadAvatar, uploadWorkspaceFile, uploadWorkspaceFileLarge, workspaceFileRawUrl, mkdirWorkspaceFolder, extractWorkspaceArchive, invokeAppApi, getAppApiSpec, listPackages, marketList, marketDetail, marketInstall, marketMine, marketApps, type CreditsHistoryItem, type RedeemResult, type StoreAppItem, type WebOsPackageListItem, type WebOsWorkspaceEntry } from './api'
 import type { ChatConversation, UiChatMessage, UiSegment } from './store'
 import { createRuntimeChannel, createDesktopRuntime, createStoreRuntime, setRuntimeOpenApp, type DesktopRuntimeHandle, type StoreRuntimeHandle, type StoreSdkAdapters, type WebOsRuntimeHandle } from './runtime'
 import { copyTextToClipboard, useShellStore } from './store'
@@ -2583,6 +2585,10 @@ function FilesView() {
   const uploadDoneTimerRef = useRef<number | null>(null)
   const [error, setErrorMsg] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  // 2026-08-25 上传整个文件夹（webkitdirectory：保留子文件夹与文件结构）
+  const folderInputRef = useRef<HTMLInputElement | null>(null)
+  const [extracting, setExtracting] = useState(false)
+  const extractInputRefPos = useRef('')
   // 2026-08-18 文件内容预览（AI 工作区只读打开文本/图片）
   const [preview, setPreview] = useState<{ name: string; kind: 'text' | 'image'; text?: string; url?: string } | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -2659,6 +2665,79 @@ function FilesView() {
     }
   }
 
+  /** 2026-08-25 上传整个文件夹：webkitdirectory 保留子文件夹与文件结构，逐个文件上传 + 建空目录 */
+  const onUploadFolder = async (files: FileList | null): Promise<void> => {
+    if (!files || files.length === 0) return
+    if (!session || session.guest) {
+      setView('profile')
+      return
+    }
+    setUploading(true)
+    setErrorMsg(null)
+    try {
+      // 收集待建目录（含父级，幂等；保空目录结构）+ 每个文件的目标 dir（相对 home/）
+      const dirs = new Set<string>()
+      const items = Array.from(files).map((file): { file: File; fileName: string; dirPath: string } => {
+        const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
+        const parts = rel.split('/').filter(Boolean)
+        const fileName = parts.pop() || file.name
+        const dirPath = ['uploads', ...parts].join('/')
+        let acc = ''
+        for (const p of ['uploads', ...parts]) {
+          acc = acc ? `${acc}/${p}` : p
+          dirs.add(acc)
+        }
+        return { file, fileName, dirPath }
+      })
+      // 建目录（幂等；文件夹上传时保空目录）
+      for (const d of [...dirs]) {
+        try { await mkdirWorkspaceFolder(d) } catch { /* 目录创建失败不阻断上传 */ }
+      }
+      // 逐文件上传（>20MB 分片）
+      let uploaded = 0
+      let lastEntry: WebOsWorkspaceEntry | null = null
+      for (const { file, fileName, dirPath } of items) {
+        const result = file.size > 20 * 1024 * 1024
+          ? await uploadWorkspaceFileLarge(fileName, file, dirPath)
+          : await uploadWorkspaceFile(fileName, await blobToBase64(file), dirPath)
+        lastEntry = result.file
+        uploaded += 1
+      }
+      setUploadDone(uploaded)
+      const topPath = items[0]?.dirPath ?? 'uploads'
+      setNotice(`已上传文件夹（${uploaded} 个文件）到 home/${topPath}/（AI 可直接读取）`)
+      if (uploadDoneTimerRef.current) window.clearTimeout(uploadDoneTimerRef.current)
+      uploadDoneTimerRef.current = window.setTimeout(() => setUploadDone(null), 1600)
+      await refresh()
+    } catch (caught) {
+      setErrorMsg(caught instanceof Error ? caught.message : '文件夹上传失败，请重试')
+    } finally {
+      setUploading(false)
+      if (folderInputRef.current) folderInputRef.current.value = ''
+    }
+  }
+
+  /** 2026-08-25 解压压缩包：解到 <压缩包所在目录>/<去扩展名> 下的新文件夹 */
+  const onExtract = async (name: string): Promise<void> => {
+    const pathName = previewPath(name)
+    if (!window.confirm(`解压「${name}」？将解压到同目录下的同名文件夹。`)) return
+    setExtracting(true)
+    setErrorMsg(null)
+    setExtractInputRefPos(name)
+    try {
+      const result = await extractWorkspaceArchive(pathName)
+      setNotice(result.skipped.length
+        ? `已解压 ${result.extractedCount} 个文件到 ${result.path}/（跳过 ${result.skipped.length} 个不支持的格式）`
+        : `已解压 ${result.extractedCount} 个文件到 ${result.path}/`)
+      await refresh()
+    } catch (caught) {
+      setErrorMsg(caught instanceof Error ? caught.message : '解压失败')
+    } finally {
+      setExtracting(false)
+      setExtractInputRefPos('')
+    }
+  }
+
   const onDelete = async (name: string, type: 'dir' | 'file'): Promise<void> => {
     if (!window.confirm(`删除${type === 'dir' ? '目录' : '文件'}「${name}」？不可恢复。`)) return
     setErrorMsg(null)
@@ -2673,6 +2752,8 @@ function FilesView() {
 
   const isImage = (name: string): boolean => /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(name)
   const isText = (name: string): boolean => /\.(txt|md|markdown|json|js|mjs|cjs|ts|tsx|jsx|html|htm|css|scss|less|xml|yml|yaml|toml|ini|conf|log|csv|svg|env|sh|bat|py|java|c|h|cpp|sql|properties|gitignore|npmrc|editorconfig|lock)$/i.test(name)
+  // 2026-08-25 可解压的压缩包（与后端 archiveKindOf 支持一致：zip/tar/tgz/tar.gz/gz）
+  const isArchive = (name: string): boolean => /\.(zip|tar|tgz|tar\.gz|gz)$/i.test(name)
   const previewPath = (name: string): string => (dir ? `${dir}/${name}` : name)
   // 游客不支持上传（2026-08-03）：登录后获得 10GB 空间
   const loggedIn = session && !session.guest
@@ -2722,8 +2803,11 @@ function FilesView() {
     <Surface className="file-list-card"><div className="card-heading"><div><Eyebrow>{agentZone ? 'AGENT WORKSPACE' : 'PRIVATE WORKSPACE'}</Eyebrow><h2>{agentZone ? 'AI 工作区文件（只读）' : '我的文件'}</h2></div><Folder size={18} /></div>
       {!agentZone ? <div className="file-upload-bar">
         <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => void onUpload(event.target.files)} />
+        {/* 2026-08-25 上传整个文件夹：webkitdirectory 让浏览器提供选中目录下全部文件（含子目录） */}
+        <input ref={folderInputRef} type="file" multiple hidden {...({ webkitdirectory: '' } as Record<string, unknown>)} onChange={(event) => void onUploadFolder(event.target.files)} />
         {loggedIn
-          ? <button type="button" className={`os-button os-button-primary file-upload-button ${uploadDone !== null ? 'os-button-done' : ''}`} disabled={uploading || uploadDone !== null} onClick={() => fileInputRef.current?.click()}>{uploadDone !== null ? <Check size={15} /> : uploading ? <LoaderCircle className="spin" size={15} /> : <Upload size={15} />} {uploadDone !== null ? `已上传 ${uploadDone} 个` : uploading ? '上传中…' : '上传文件'}</button>
+          ? <><button type="button" className={`os-button os-button-primary file-upload-button ${uploadDone !== null ? 'os-button-done' : ''}`} disabled={uploading || uploadDone !== null} onClick={() => fileInputRef.current?.click()}>{uploadDone !== null ? <Check size={15} /> : uploading ? <LoaderCircle className="spin" size={15} /> : <Upload size={15} />} {uploadDone !== null ? `已上传 ${uploadDone} 个` : uploading ? '上传中…' : '上传文件'}</button>
+              <button type="button" className="os-button file-upload-button" disabled={uploading || uploadDone !== null} onClick={() => folderInputRef.current?.click()}><FolderInput size={15} /> 上传文件夹</button></>
           : <button type="button" className="os-button file-upload-button" onClick={() => setView('profile')}><KeyRound size={15} /> 登录后上传</button>}
         <small>{loggedIn ? `图片 / 文档 / 音频 / 视频 / 压缩包（无单文件大小限制，工作区共 ${formatBytes(limit)}；大量存储需求可联系站长单独扩容）` : `游客暂不支持上传；登录后获得 ${formatBytes(limit)} 工作区空间，AI 可直接读取你上传的文件。`}</small>
       </div> : <p className="muted-copy plan-hint" style={{ margin: '0 0 8px' }}><Eye size={12} style={{ verticalAlign: -2 }} /> AI 工作区为只读浏览：文件可打开查看，修改/上传请通过对话让 AI 完成。</p>}
@@ -2745,6 +2829,7 @@ function FilesView() {
                     <small>{formatBytes(entry.size)}</small>
                   </button>}
                 {entry.type === 'file' ? <a className="file-action" href={agentZone ? agentWorkspaceFileRawUrl(previewPath(entry.name)) : workspaceFileRawUrl(previewPath(entry.name))} target="_blank" rel="noreferrer" aria-label="打开/下载"><Download size={15} /></a> : null}
+                {!agentZone && entry.type === 'file' && isArchive(entry.name) ? <button type="button" className="file-action" aria-label="解压" disabled={extracting} onClick={() => void onExtract(entry.name)}>{extracting && extractInputRefPos === entry.name ? <LoaderCircle className="spin" size={15} /> : <FileArchive size={15} />}</button> : null}
                 {!agentZone ? <button type="button" className="file-action file-action-danger" aria-label="删除" onClick={() => void onDelete(entry.name, entry.type)}><Trash2 size={15} /></button> : null}
               </div>
             ))}

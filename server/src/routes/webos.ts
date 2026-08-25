@@ -38,6 +38,14 @@ import {
   type WorkspaceFsHooks,
 } from '../utils/webosWorkspace.js'
 import { getSandboxRoot } from '../sandbox/index.js'
+// 2026-08-25 home 工作区「解压」+「上传文件夹」：压缩包检视/解压通用模块（recordFileStats 已在上面导入）
+import {
+  archiveKindOf,
+  inspectArchive,
+  extractArchiveTo,
+  archiveBaseName,
+  type ExtractResult,
+} from '../utils/archiveExtract.js'
 // 2026-08-14 MiniMax-M3 视觉桥接（AI 的眼睛）：DeepSeek 非视觉，
 // 图片/视频经 M3 转文字描述注入对话；用量落 webos_vision_usage（管理后台实时查看）
 import {
@@ -5292,6 +5300,115 @@ webosRouter.delete('/workspace/files', (req, res, next) => {
     res.json({ ok: true })
   } catch (error) {
     workspacePathError(error, next)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// 2026-08-25 home 工作区「上传文件夹 / 新建空目录」+「解压」（用户可见区 home/ 内）
+// 背景：用户希望一次性上传整个文件夹（含子文件夹与文件），并对已上传的压缩包直接解压。
+//   - mkdir    : 创建目录（含父目录）——文件夹上传时保空目录结构、也可单独新建文件夹
+//   - extract  : 解压 zip/tar/tar.gz/tgz/gz 到指定目标文件夹（含配额/防穿越/类型白名单）
+// ---------------------------------------------------------------------------
+
+/** POST /webos/api/workspace/files/mkdir — 在用户可见区（home/）创建目录（含父目录；幂等） */
+webosRouter.post('/workspace/files/mkdir', (req, res, next) => {
+  try {
+    const principal = requirePrincipal(req)
+    if (principal.guest) return void next(createError(403, 'GUEST_NOT_ALLOWED', '游客暂不支持文件操作，请先登录'))
+    const dir = typeof req.body?.dir === 'string' && req.body.dir.trim()
+      ? req.body.dir.trim().replace(/^\/+/, '').replace(/\/+$/, '')
+      : ''
+    if (!dir) return void next(createError(400, 'INVALID_PATH', '缺少 dir 参数'))
+    const full = resolveUserHomePath(principal.key, dir)
+    fs.mkdirSync(full, { recursive: true })
+    logAgentAction(principal.key, 'user_mkdir', { dir }, true)
+    res.json({ ok: true, path: dir })
+  } catch (error) {
+    workspacePathError(error, next)
+  }
+})
+
+/** POST /webos/api/workspace/files/extract — 解压用户可见区（home/）压缩包到目标文件夹
+ * body: { path, dir? }
+ *  - path: 压缩包相对 home/ 的路径（如 uploads/my.zip）；支持 zip/tar/tar.gz/tgz/gz
+ *  - dir : 解压目标文件夹相对 home/ 的路径（默认 <压缩包所在目录>/<去扩展名>）
+ * 安全：解压前检视（禁绝对路径/.. 穿越）+ 前置体积估算 + 入库前真实体积复核配额 + 类型白名单。 */
+webosRouter.post('/workspace/files/extract', async (req, res, next) => {
+  try {
+    const principal = requirePrincipal(req)
+    if (principal.guest) return void next(createError(403, 'GUEST_NOT_ALLOWED', '游客暂不支持解压文件，请先登录'))
+    const body = req.body as { path?: unknown; dir?: unknown }
+    const archiveRel = typeof body.path === 'string' ? body.path.trim().replace(/^\/+/, '') : ''
+    if (!archiveRel) return void next(createError(400, 'INVALID_PATH', '缺少 path 参数（压缩包路径）'))
+    const archiveFull = resolveUserHomePath(principal.key, archiveRel)
+    if (!fs.existsSync(archiveFull) || !fs.statSync(archiveFull).isFile()) {
+      return void next(createError(404, 'FILE_NOT_FOUND', '压缩包不存在'))
+    }
+    const kind = archiveKindOf(archiveRel)
+    if (!kind) return void next(createError(400, 'UNSUPPORTED_ARCHIVE', '仅支持 zip / tar / tar.gz / tgz / gz 压缩包'))
+    // 解压目标：dir 或 <压缩包所在目录>/<去扩展名>
+    const dirname = path.posix.dirname(archiveRel)
+    const targetRel = (typeof body.dir === 'string' && body.dir.trim())
+      ? body.dir.trim().replace(/^\/+/, '').replace(/\/+$/, '')
+      : (dirname === '.' ? archiveBaseName(archiveRel) : `${dirname}/${archiveBaseName(archiveRel)}`)
+    const targetFull = resolveUserHomePath(principal.key, targetRel)
+
+    // 检视（禁穿越）+ 前置体积估算（尽力；失败则靠入库前真实复核兜底）
+    let estimatedBytes = 0
+    try {
+      estimatedBytes = (await inspectArchive(archiveFull, kind)).estimatedBytes
+    } catch (error) {
+      return void next(createError(400, 'ARCHIVE_UNSAFE', error instanceof Error ? error.message : String(error)))
+    }
+    const state = await loadState(principal)
+    const limit = workspaceLimitForState(state)
+    if (workspaceUsedBytes(principal.key) + estimatedBytes > limit) {
+      return void next(createError(413, 'WORKSPACE_FULL', '解压后可能超出工作区空间上限，请先清理部分文件'))
+    }
+
+    // 解压（临时目录复核真实体积后再入库；超容由 checkCapacity 抛 413 中止）
+    // 临时解压目录放 sandbox 的 _uploads/ 区（工作区之外，避免解压中的文件计入配额）
+    const extractTmpDir = path.join(getSandboxRoot(), 'webos', '_uploads', workspaceDirName(principal.key), `extract-${randomUUID()}`)
+    let result: ExtractResult
+    try {
+      result = await extractArchiveTo(
+        archiveFull, kind, targetFull,
+        (name) => isAllowedUploadName(name),
+        extractTmpDir,
+        (tmpBytes) => {
+          if (workspaceUsedBytes(principal.key) + tmpBytes > limit) {
+            throw createError(413, 'WORKSPACE_FULL', '解压后超出工作区空间上限，已取消解压')
+          }
+        },
+      )
+    } catch (error) {
+      // 路径越界→400；其余（含 413 WORKSPACE_FULL）原样交给 next
+      workspacePathError(error, next)
+      return
+    }
+
+    // 登记 files 元数据（files 表；解出的文件）——失败静默不阻断解压
+    for (const fileFull of result.files) {
+      try { await recordFileStats(principal.key, fileFull) } catch { /* 静默 */ }
+    }
+
+    logAgentAction(principal.key, 'user_extract_archive', {
+      path: archiveRel, dir: targetRel,
+      files: result.files.length, skipped: result.skipped.length, bytes: result.bytesWritten,
+    }, true)
+
+    res.json({
+      ok: true,
+      path: targetRel,
+      extractedCount: result.files.length,
+      skipped: result.skipped,
+      bytesWritten: result.bytesWritten,
+      workspaceBytes: workspaceUsedBytes(principal.key),
+      workspaceLimitBytes: limit,
+      files: result.files.map((f) => ({ path: f, name: path.basename(f) })),
+    })
+  } catch (error) {
+    next(error)
   }
 })
 
