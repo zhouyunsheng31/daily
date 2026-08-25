@@ -6301,6 +6301,12 @@ webosRouter.post('/chat/stream', async (req, res, next) => {
             const lastUsage = last.usage as { input?: number; output?: number } | null | undefined
             const zeroUsage = (!lastUsage) || (Number(lastUsage.input ?? 0) === 0 && Number(lastUsage.output ?? 0) === 0)
             const emptyContent = !last.content || (Array.isArray(last.content) ? last.content.length === 0 : String(last.content).trim().length === 0)
+            // 2026-08-25 修复（长输出被误判截断）：agent_end 若已有完整文本答案
+            // （assistantText 取最后一条含文本的 assistant 消息），说明本轮生成是
+            // 正常收尾——最后一条 assistant 消息 content 为空 / usage=0 往往只是
+            // 工具调用边界的合成消息，不代表真截断。此时不再标记 truncated，避免
+            // 长输出正常完成却提示「内容可能被中断，未完整输出」。
+            const completeAnswer = assistantText(msgs).trim().length > 0
             if (lastRole === 'assistant' && (lastStop === 'error' || (zeroUsage && emptyContent))) {
               // 2026-08-22 修复（部分输出被误判失败）：DeepSeek/pi 在工具执行中途
               // 中断（agent_fs_write 大量写入/参数过长/上下文溢出）时，agent_end 的
@@ -6329,6 +6335,11 @@ webosRouter.post('/chat/stream', async (req, res, next) => {
                     disposeWebosSessions(principal.key, conversationId)
                   } catch { /* ignore */ }
                 }
+              } else if (completeAnswer) {
+                // 有可见输出且已产出完整文本答案：视为正常完成（不判 failed、不判
+                // truncated），照常走 done 计费——修复「长输出即便正常输出也被提示
+                // 截断」的误报（工具调用边界的空消息不再触发 truncated）。
+                console.warn(`[webos] agent_end abnormal (stop=${lastStop} err=${String(last.errorMessage ?? '').slice(0, 120)}) but complete answer present, NOT marking truncated (${principal.key.slice(0, 12)})`)
               } else {
                 // 有可见输出但 agent_end 异常：标记"可能截断"（不判失败），
                 // done 事件携带 truncated 提示，前端渲染时告知用户内容可能不完整

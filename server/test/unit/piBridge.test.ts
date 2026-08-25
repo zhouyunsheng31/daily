@@ -1345,8 +1345,9 @@ describe('piBridge handleUserMessage 路径测试', () => {
     vi.useFakeTimers()
     try {
       handleUserMessage('hello', TEST_DEVICE, TEST_PANEL)
-      // 推进 180s 触发 prompt 超时（advanceTimersByTimeAsync 会 flush microtasks）
-      await vi.advanceTimersByTimeAsync(180_000)
+      // 推进超过 180s 触发「无活动」空闲超时（idle 检查为 5s 间隔，需略超过 180s
+      // 才能被下一次 tick 捕获；advanceTimersByTimeAsync 会 flush microtasks）
+      await vi.advanceTimersByTimeAsync(185_000)
 
       expect(wsSendToDevice).toHaveBeenCalledWith(TEST_DEVICE, expect.objectContaining({
         kind: 'error',

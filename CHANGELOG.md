@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-25 11:00 · fix(webos+piBridge): 长输出被误判截断/超时——消息发送时间限制与 truncated 误报
+
+**背景/用户反馈**：较长输出即便正常输出，也会被「内容可能被中断 / 消息可能失败」提示截断。用户怀疑是否存在消息发送的最大时间限制。
+
+**根因（代码定位）**：
+1. `server/src/routes/webos.ts`（AI 对话主路径）agent_end 检测：只要最后一条 assistant 消息 `content` 为空且 `usage=0`（长输出多轮/工具调用场景最后常是一条工具边界的合成消息），就判定 `truncatedOutput=true`，SSE `done` 携带 `truncated:true` → 前端（`client/shell-web/src/store.ts`）在消息末尾追加「内容可能被中断，未完整输出」——**即便输出其实完整**，属误报；
+2. `server/src/piBridge.ts` `handleUserMessage`（画布/面板路径）使用**硬 180s 整体时钟**（`Promise.race` + `setTimeout(180_000)`），只要单次生成总时长超 180s 就会被硬杀——较长的正常输出也会被时间限制截断；而 `webos.ts` 的 `runPiPrompt` 已是「180s 空闲超时」，两处不一致。
+
+**改动**：
+- `server/src/routes/webos.ts`：agent_end 检测新增 `completeAnswer = assistantText(messages)`——当已有完整文本答案时，不再标记 `truncated`（正常走 done 计费），仅在**无完整答案**却仍有可见输出（thinking/tool 进度）时才标记截断；修复长输出正常完成却提示「内容可能被中断」的误报；
+- `server/src/piBridge.ts`：`handleUserMessage` 的硬 180s `Promise.race` 改为「180s 无任何会话事件才中断」的空闲超时（用 `session.subscribe` 刷新活动时间，与 `webos.ts` 的 `runPiPrompt` 行为一致），长输出只要在推进就不会被时钟硬杀；
+- `server/test/unit/piBridge.test.ts`：用例 82（prompt 超时 error）同步改为空闲超时语义（推进 185s，因空闲检查为 5s 间隔需略超 180s）。
+
+**验证**：`server` `tsc`（含 `--noEmit`）通过；`vitest run` 全量 22 个测试文件 480 通过（2 跳过），其中 `piBridge.test.ts` 104 用例全过（含更新后的 82）。
+
 ### 2026-08-24 · fix(android+web): 平板 APK 三症状修复——桌面模板脚本语法崩 / 壳层返回键 / 入口提速
 
 **背景/用户反馈**：安卓端 APK 在平板设备上：①进入应用卡死一段时间；②桌面板块不能正常显示；③不能再回退到其他板块，会卡死。

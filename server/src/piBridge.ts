@@ -2104,13 +2104,29 @@ export async function handleUserMessage(
         const promptStart = Date.now()
         console.log('[PiBridge] prompt START', panelId, 'content:', content.slice(0, 80))
         try {
-          // v3 修复 B1：3 分钟整体超时，防止 SDK 内部工具循环无限运行
-          await Promise.race([
-            session.prompt(content),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('prompt timeout 180s')), 180_000),
-            ),
-          ])
+          // v3 修复 B1：3 分钟「无活动」超时（2026-08-25 由硬 180s 时钟改为空闲超时，
+          // 与 webos chat/stream 的 runPiPrompt 一致）。此前这里是整体 180s 倒计时
+          // （Promise.race），只要生成总时长超 180s 就会被硬杀——较长输出即便正常
+          // 输出也被截断。改为「180s 内无任何会话事件才中断」：LLM 增量/工具执行
+          // 持续推进就不会被打断，仅在真卡死/工具 hang 时终止。
+          const activity = { last: Date.now() }
+          const unsubscribe = session.subscribe(() => { activity.last = Date.now() })
+          try {
+            await Promise.race([
+              session.prompt(content),
+              new Promise<never>((_, reject) => {
+                const idleTimer = setInterval(() => {
+                  if (Date.now() - activity.last > 180_000) {
+                    clearInterval(idleTimer)
+                    reject(new Error('prompt timeout: no activity for 180s'))
+                  }
+                }, 5000)
+                idleTimer.unref?.()
+              }),
+            ])
+          } finally {
+            try { unsubscribe?.() } catch { /* ignore */ }
+          }
           // v3 修复 B3：prompt END 日志
           console.log('[PiBridge] prompt END', panelId, 'durationMs:', Date.now() - promptStart)
           // 标记该面板 session ready（首次成功 prompt 后）
@@ -2122,7 +2138,7 @@ export async function handleUserMessage(
           console.error(`[PiBridge] prompt error for panel ${panelId}:`, err)
           const message = err instanceof Error ? err.message : String(err)
           if (message.includes('timeout')) {
-            console.warn('[PiBridge] prompt TIMEOUT', panelId, '180s')
+            console.warn('[PiBridge] prompt TIMEOUT', panelId, 'no activity for 180s')
           }
           // v3 修复 B1：销毁 session（超时或错误都销毁，避免 SDK 内部状态不一致）
           void disposePanelSession(panelId)
@@ -2130,7 +2146,7 @@ export async function handleUserMessage(
           const errorMsg = {
             kind: 'error' as const,
             message: message.includes('timeout')
-              ? 'AI 响应超时（3 分钟），已终止。请重新发送或简化任务。'
+              ? 'AI 响应超时（3 分钟无活动），已终止。请重新发送或简化任务。'
               : `Agent prompt failed: ${message}`,
             panelId,
           }
