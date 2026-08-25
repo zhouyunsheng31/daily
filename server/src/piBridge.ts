@@ -2380,14 +2380,17 @@ async function registerCatalogModels(modelRegistry: { registerProvider(name: str
         const effectiveBaseUrl = m.endpoint?.trim() || baseUrl
         const params = m.params ?? {}
         const input: Array<'text' | 'image'> = params.multimodal ? ['text', 'image'] : ['text']
+        // 2026-08-25 恢复推理流：catalog 模型若声明 supportsThinking 则开启推理，
+        // 并补全 DeepSeek thinkingLevelMap（reasoning_effort 仅 low/high/max）。
+        const supportsThinking = params.supportsThinking === true
         return {
           id: m.model,
           name: m.name,
           api: 'openai-completions' as const,
           baseUrl: effectiveBaseUrl,
           compat: { requiresReasoningContentOnAssistantMessages: false, thinkingFormat: 'deepseek' as const },
-          reasoning: false,
-          thinkingLevelMap: {},
+          reasoning: supportsThinking,
+          thinkingLevelMap: supportsThinking ? { low: 'low', medium: 'high', high: 'high', xhigh: 'max' } : {},
           input,
           cost: {
             input: params.costInputPerMillion ?? 0.14,
@@ -2438,8 +2441,13 @@ function registerDeepseekModels(
     api: 'openai-completions',
     baseUrl: effectiveBaseUrl,
     compat: { requiresReasoningContentOnAssistantMessages: false, thinkingFormat: 'deepseek' },
-    reasoning: false,
-    thinkingLevelMap: {},
+    // 2026-08-25 恢复推理流：改回 reasoning:true 并补全 thinkingLevelMap，让 pi-ai
+    // 重新请求 reasoning_effort，网关返回带 thinking_delta 的推理流 → 思考进「思考框」
+    // 而非正文。DeepSeek reasoning_effort 仅支持 low/high/max（无 medium），且本版本
+    // pi-ai 的 ThinkingLevel 最高为 xhigh（daily 的 max 档会 clamp 到 xhigh），所以
+    // medium/high→high、xhigh→max（见 DeepSeek 思考模式档位表）。
+    reasoning: true,
+    thinkingLevelMap: { low: 'low', medium: 'high', high: 'high', xhigh: 'max' },
     input: ['text'],
     // 2026-08-17 修复：缺少 cost 导致 completeSimple 计算费用时
     // model.cost.input 抛「Cannot read properties of undefined (reading 'input')」
@@ -2464,8 +2472,9 @@ function registerDeepseekModels(
         api: 'openai-completions',
         baseUrl: effectiveBaseUrl,
         compat: { requiresReasoningContentOnAssistantMessages: false, thinkingFormat: 'deepseek' },
-        reasoning: false,
-        thinkingLevelMap: {},
+        // 2026-08-25 恢复推理流（同 flash）：reasoning:true + thinkingLevelMap
+        reasoning: true,
+        thinkingLevelMap: { low: 'low', medium: 'high', high: 'high', xhigh: 'max' },
         input: ['text'],
         cost: { input: 0.435, output: 0.87, cacheRead: 0.003625, cacheWrite: 0 },
         contextWindow: 1_000_000,
@@ -2770,7 +2779,10 @@ export async function generateConversationTitle(texts: string[]): Promise<string
     })
 
     const textBlock = result.content.find((block) => block.type === 'text') as { text?: string } | undefined
-    const title = (textBlock?.text ?? '')
+    // 2026-08-25 推理开启后，短回复可能只返回 thinking 块、无 text 块
+    // （例如模型直接把标题写在思考里）。无 text 时回退取 thinking 内容。
+    const thinkingBlock = result.content.find((block) => block.type === 'thinking') as { thinking?: string } | undefined
+    const title = (textBlock?.text ?? thinkingBlock?.thinking ?? '')
       .trim()
       .replace(/^["'「『]+|["'」』]+$/g, '')
       .replace(/[。.!！?？\s]+$/g, '')
