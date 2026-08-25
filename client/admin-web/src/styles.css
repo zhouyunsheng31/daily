@@ -65,11 +65,14 @@ input { font-family: inherit; }
 /* 主布局 */
 .shell { min-height: 100%; display: flex; flex-direction: column; }
 .topbar { display: flex; align-items: center; gap: 22px; padding: 14px 26px; border-bottom: 1px solid var(--border); background: rgba(255, 255, 255, .86); backdrop-filter: blur(10px); position: sticky; top: 0; z-index: 20; }
-.brand { display: flex; align-items: center; gap: 9px; font-size: 15px; }
-.tabs { display: flex; gap: 4px; margin-left: 8px; }
-.tabs button { min-height: 36px; display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; border: 0; border-radius: 10px; color: var(--ink-soft); background: transparent; font-size: 13px; font-weight: 600; }
+.brand { display: flex; align-items: center; gap: 9px; font-size: 15px; flex: 0 0 auto; }
+/* 顶栏 tab 桶：允许横向溢出时在本区域内滚动（隐藏滚动条），而不是把右侧按钮挤出视口，
+   保证任何宽度下品牌/用户区不被压缩、tab 按钮都能点到。 */
+.tabs { display: flex; gap: 4px; margin-left: 8px; flex: 1 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button { min-height: 36px; display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; border: 0; border-radius: 10px; color: var(--ink-soft); background: transparent; font-size: 13px; font-weight: 600; flex: 0 0 auto; }
 .tabs button.active { color: var(--accent); background: var(--accent-soft); }
-.me { display: flex; align-items: center; gap: 9px; margin-left: auto; color: var(--ink-soft); font-size: 12px; }
+.me { display: flex; align-items: center; gap: 9px; margin-left: auto; color: var(--ink-soft); font-size: 12px; flex: 0 0 auto; }
 
 .content { flex: 1; width: min(1180px, 100%); margin: 0 auto; padding: 22px 26px 60px; }
 
@@ -236,7 +239,7 @@ input { font-family: inherit; }
   /* ---- 底部导航（顶栏 tabs 固定到屏幕底部，图标 + 短标签） ---- */
   .tabs {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
-    display: grid; grid-template-columns: repeat(7, 1fr); gap: 0; margin: 0;
+    display: grid; grid-template-columns: repeat(8, 1fr); gap: 0; margin: 0;
     padding: 4px 2px calc(4px + env(safe-area-inset-bottom));
     background: rgba(255, 255, 255, .96); backdrop-filter: blur(10px);
     border-top: 1px solid var(--border);
@@ -364,4 +367,22 @@ input { font-family: inherit; }
   /* ---- 兑换码导入 ---- */
   .redeem-import textarea { font-size: 16px; min-height: 130px; }
   .redeem-import-row .ghost-select { flex: 1 1 100%; }
+}
+
+/* ============================================================================
+   平板端（861–1200px）：桌面顶栏在平板宽度下会把右侧 tab 挤出视口（按钮不完整显示）。
+   这里顶栏改为紧凑单行：缩短间距/字号、tab 用 data-short 短标签 + 缩小图标，
+   保证 8 个 tab + 品牌 + 用户区一行内完整可见；超窄时由 .tabs 的横向滚动兜底。
+   ============================================================================ */
+@media (min-width: 861px) and (max-width: 1200px) {
+  .topbar { gap: 14px; padding: 12px 18px; }
+  .brand { font-size: 14px; gap: 7px; }
+  .logo-mark { width: 30px; height: 30px; border-radius: 9px; font-size: 13px; }
+  .tabs { gap: 2px; margin-left: 2px; }
+  .tabs button { min-height: 34px; padding: 0 8px; gap: 5px; font-size: 12px; }
+  .tabs button svg { width: 14px; height: 14px; }
+  .tabs button > span { display: none; }
+  .tabs button::after { content: attr(data-short); }
+  .me { gap: 6px; font-size: 11px; }
+  .me > span { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
