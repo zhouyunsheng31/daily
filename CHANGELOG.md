@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
-### 2026-08-25 11:00 · fix(webos+piBridge): 长输出被误判截断/超时——消息发送时间限制与 truncated 误报
+### 2026-08-25 11:00 · fix(webos+piBridge): 长输出被误判截断/超时——消息发送时间限制与 truncated 误报 (commit ab6dafa)
 
 **背景/用户反馈**：较长输出即便正常输出，也会被「内容可能被中断 / 消息可能失败」提示截断。用户怀疑是否存在消息发送的最大时间限制。
 
