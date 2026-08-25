@@ -4368,6 +4368,94 @@ function describeHookError(error: unknown): string {
   return String(error)
 }
 
+/**
+ * 2026-08-26 解压压缩包（AI 工具）：让 daily 的 AI 助手在对话里直接解压工作区压缩包。
+ * 复用 /workspace/files/extract 同一套安全逻辑（inspectArchive 防穿越 + extractArchiveTo
+ * 类型白名单/配额复核/工作区外临时目录），解压后登记 files 元数据。仅支持 zip/tar/tgz/tar.gz/gz。
+ */
+function extractArchiveTool(principal: Principal): ToolDefinition {
+  return {
+    name: 'extract_archive',
+    label: '解压压缩包',
+    description: [
+      '解压工作区里的压缩包（zip / tar / tar.gz / tgz / gz）到目标文件夹。',
+      'path：压缩包相对工作区根的路径（如 home/uploads/素材.zip、agent/backup.tar.gz）。',
+      'dir（可选）：解压目标文件夹相对工作区根的路径；不传则解压到 <压缩包所在目录>/<去扩展名>（如 home/uploads/素材/）。',
+      '解压后文件自动登记元数据，AI 可继续用 agent_fs_list/read 访问解出的内容。不支持 rar/7z；压缩包内含非法路径（穿越/绝对路径）会被拒绝。',
+    ].join(' '),
+    parameters: Type.Object({
+      path: Type.String({ description: '压缩包相对工作区根路径（如 home/uploads/xx.zip）' }),
+      dir: Type.Optional(Type.String({ description: '解压目标文件夹相对工作区根路径（默认 <所在目录>/<去扩展名>）' })),
+    }),
+    execute: async (_toolCallId, params: { path: string; dir?: string }) => {
+      try {
+        const rel = String(params.path ?? '').trim().replace(/^\/+/, '')
+        if (!rel) throw new Error('缺少 path 参数')
+        const archiveFull = resolveWorkspacePath(principal.key, rel)
+        if (!fs.existsSync(archiveFull) || !fs.statSync(archiveFull).isFile()) throw new Error(`压缩包不存在：${rel}`)
+        const kind = archiveKindOf(rel)
+        if (!kind) throw new Error('仅支持 zip / tar / tar.gz / tgz / gz 压缩包')
+        // 解压目标：dir 或 <压缩包所在目录>/<去扩展名>（工作区相对路径）
+        const dirPosix = rel.split(path.sep).join('/')
+        const dirname = path.posix.dirname(dirPosix)
+        const base = archiveBaseName(dirPosix)
+        const targetRel = String(params.dir ?? '').trim()
+          ? String(params.dir).trim().replace(/^\/+/, '').replace(/\/+$/, '')
+          : (dirname === '.' ? base : `${dirname}/${base}`)
+        const targetFull = resolveWorkspacePath(principal.key, targetRel)
+
+        // 检视（防穿越）+ 前置体积估算（尽力；失败靠入库前真实复核兜底）
+        let estimatedBytes = 0
+        try {
+          estimatedBytes = (await inspectArchive(archiveFull, kind)).estimatedBytes
+        } catch (error) {
+          throw new Error(error instanceof Error ? error.message : '压缩包检视失败（可能含非法路径）')
+        }
+        const state = await loadState(principal)
+        const limit = workspaceLimitForState(state)
+        if (workspaceUsedBytes(principal.key) + estimatedBytes > limit) {
+          throw new Error('解压后可能超出工作区空间上限，请先清理部分文件')
+        }
+        // 临时解压目录放 sandbox 的 _uploads/ 区（工作区之外，避免解压中文件计入配额）
+        const extractTmpDir = path.join(getSandboxRoot(), 'webos', '_uploads', workspaceDirName(principal.key), `extract-${randomUUID()}`)
+        const result = await extractArchiveTo(
+          archiveFull, kind, targetFull,
+          (name) => isAllowedUploadName(name),
+          extractTmpDir,
+          (tmpBytes) => {
+            if (workspaceUsedBytes(principal.key) + tmpBytes > limit) throw new Error('解压后超出工作区空间上限，已取消解压')
+          },
+        )
+        // 登记 files 元数据
+        for (const f of result.files) {
+          try { await recordFileStats(principal.key, f) } catch { /* 静默 */ }
+        }
+        logAgentAction(principal.key, 'agent_extract_archive', {
+          path: rel, dir: targetRel,
+          files: result.files.length, skipped: result.skipped.length, bytes: result.bytesWritten,
+        }, true)
+        return {
+          content: [{ type: 'text', text: JSON.stringify({
+            success: true,
+            path: targetRel,
+            extractedCount: result.files.length,
+            files: result.files.map((f) => path.relative(getWorkspaceRoot(principal.key), f).split(path.sep).join('/')),
+            skipped: result.skipped,
+            bytesWritten: result.bytesWritten,
+          }) }],
+          details: {},
+        }
+      } catch (error) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ success: false, message: error instanceof Error ? error.message : '解压失败' }) }],
+          details: {},
+          isError: true,
+        }
+      }
+    },
+  }
+}
+
 /** 对话会话注入的全部 App 工具 + Agent 工作区文件系统工具 +（W2）App API 动态工具 */
 async function webosAppTools(principal: Principal): Promise<ToolDefinition[]> {
   const appTools = [
@@ -4679,6 +4767,7 @@ async function webosAppTools(principal: Principal): Promise<ToolDefinition[]> {
     ...apiTools.map(wrapTool),
     ...marketTools.map(wrapTool),
     ...workspaceFsTools(principal.key, fsHooks).map(wrapTool),
+    wrapTool(extractArchiveTool(principal)),
     wrapTool(inspectWebosAppTool(principal)),
     ...sysSourceTools().map(wrapTool),
     wrapTool(readTool(principal)),
