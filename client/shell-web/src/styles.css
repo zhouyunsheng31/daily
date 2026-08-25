@@ -1294,3 +1294,23 @@ button.file-row-main { cursor: pointer; }
 .api-debug-actions { display: flex; align-items: center; gap: 8px; }
 .api-debug-error { color: #b3261e; }
 .api-debug-result { color: #0a5d33; }
+
+/* ============================================================================
+   老内核兼容（min()/max()）：CSS min()/max() 是 Chrome 79+ 才支持的函数。
+   Android 10 自带 WebView（HONOR Pad X7 的 System WebView 无法更新，约 Chrome 78）
+   不识别 min()/max()，会把这些属性声明整条丢弃 → 元素尺寸失控（输入框无限拉伸、
+   弹窗/登录面板超高、预览窗过宽、领取卡片失去限宽）。
+   这里用 @supports not 单独兜底：只对"不支持 min()"的内核生效，用 calc/双属性回退，
+   对现代内核零影响。注意：必须单独一片——与 dvh 同理，同规则块内双写会被 CSS
+   minifier 合并吃掉 fallback。
+   ============================================================================ */
+@supports not (width: min(1px, 1px)) {
+  /* .assistant-composer textarea：min(45vh, 320px) → 上限取 320px */
+  .assistant-composer textarea { max-height: 320px; }
+  /* .login-panel：min(580px, calc(100vh - 48px)) → 视口高度兜底 */
+  .login-panel { max-height: calc(100vh - 48px); }
+  /* .redeem-card：min(320px, 84vw) → width + max-width 等价回退 */
+  .redeem-card { width: 84vw; max-width: 320px; }
+  /* .file-preview：min(680px, 92vw) → width + max-width 等价回退 */
+  .file-preview { width: 92vw; max-width: 680px; }
+}
