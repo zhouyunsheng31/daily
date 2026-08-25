@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-25 12:37 · fix(webos+piBridge): 思考文本不再混入正文——恢复 DeepSeek 推理流，thinking 进「思考」折叠框 (commit d10d215)
+
+**背景/用户反馈**：在 WebOS 网页端，模型的思考/第一人称叙述过程被当作正文直接渲染出来。用户希望思考照常进行，但放进折叠的「思考」折叠框，而不是正文。
+
+**根因（代码定位）**：`server/src/piBridge.ts` 在 2026-08-17 为规避推理网关「思考与回答杂糅 / 标题生成失败」把 DeepSeek 模型设为 `reasoning:false` + `thinkingLevelMap:{}`。此后 pi-ai 不再请求 `reasoning_effort`，网关返回纯 content 流（无 thinking_delta），于是模型的思考被写进正文流 → 前端只能当正文渲染。（服务端 `webos.ts` 其实已完整支持 `thinking_delta → thinking 段 →「思考」折叠框` 的 120ms 合并与工具排序。）
+
+**改动**：
+- `server/src/piBridge.ts` `registerDeepseekModels`：`reasoning:true` + 补全 `thinkingLevelMap`（pi 档 low/medium/high/xhigh → DeepSeek `reasoning_effort` low/high/high/max；DeepSeek 仅支持 low/high/max，且本版本 pi-ai 的 ThinkingLevel 最高为 xhigh，daily 的 max 档会 clamp 到 xhigh）→ pi-ai 重新请求 reasoning_effort，网关返回带 thinking_delta 的推理流 → 思考进「思考」框；
+- `server/src/piBridge.ts` `registerCatalogModels`：catalog 模型按 `params.supportsThinking` 决定是否 `reasoning:true`，并补同样的 thinkingLevelMap；
+- `server/src/piBridge.ts` `generateConversationTitle`：推理开启后短回复可能只返回 thinking 块、无 text 块 → 无 text 时回退取 thinking 内容，避免标题生成失败。
+
+**验证**：`server` `tsc --noEmit` 通过；`vitest run test/unit/piBridge.test.ts` 104 用例全过。推理流的 wire 行为需在真实网关（opencode.ai/zen/go/v1）上确认——本地无法重放。
+
 ### 2026-08-25 11:00 · fix(webos+piBridge): 长输出被误判截断/超时——消息发送时间限制与 truncated 误报 (commit ab6dafa)
 
 **背景/用户反馈**：较长输出即便正常输出，也会被「内容可能被中断 / 消息可能失败」提示截断。用户怀疑是否存在消息发送的最大时间限制。
