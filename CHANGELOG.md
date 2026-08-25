@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-08-26 07:30 · feat(webos): home 工作区支持上传整个文件夹 + 解压压缩包 (commit 48a7253)
+
+**背景/用户需求**：用户希望在「文件工作区」（home/ 用户可见区）一次性上传整个文件夹（含子文件夹与文件），并能对已上传的压缩包直接解压，不再需要 AI 代劳。
+
+**改动**：
+- 新增 `server/src/utils/archiveExtract.ts`：压缩包检视与解压通用模块（`inspectArchive` 列条目/禁 `..` 与绝对路径穿越/估算体积；`extractArchiveTo` 解压到工作区之外的临时目录 → 真实体积复核 → 按类型白名单拷贝进目标目录，失败清临时目录不产生半成品；支持 zip/tar/tar.gz/tgz/gz）；
+- `server/src/routes/webos.ts`：新增 `POST /webos/api/workspace/files/mkdir`（创建目录/保空目录，幂等）与 `POST /webos/api/workspace/files/extract`（解压到 `<压缩包所在目录>/<去扩展名>`，含 type 白名单 `isAllowedUploadName`、`workspaceLimitForState` 配额前置估算 + 入库前真实体积复核、`logAgentAction` 记录、解出文件登记 `files` 元数据）；
+- `client/shell-web/src/api.ts`：新增 `mkdirWorkspaceFolder` / `extractWorkspaceArchive` 封装；
+- `client/shell-web/src/App.tsx` FilesView：新增「上传文件夹」按钮（`webkitdirectory` 保留子目录结构，逐个文件上传并按相对路径建目录/空目录）与压缩包「解压」动作按钮。
+
+**验证**：
+- `server` `tsc --noEmit` 通过；`client/shell-web` `tsc --noEmit` 通过；`VITE_BASE_PATH=/daily/ npx vite build` 成功；
+- 本地对 `archiveExtract` 做单元验证（含穿越压缩包拒绝、嵌套子目录保留、类型白名单跳过、临时目录清理）；
+- 远端线上（`154.64.249.172`，经 `pm2 restart daily-server`）实测：`uploads/testfolder.zip` 上传→解压→`uploads/testfolder/sub/deep/c.json` 子目录结构正确解析，`run.sh` 被白名单跳过，`mkdir` 空目录 `uploads/feat_empty/emptysub` 保留；测试产物已清理。前端新资源 `assets/index-BKf-c9Ul.js` / `index-Rwp-fX2M.css` 已上传并确认 200。
+
 ### 2026-08-25 12:37 · fix(webos+piBridge): 思考文本不再混入正文——恢复 DeepSeek 推理流，thinking 进「思考」折叠框 (commit d10d215)
 
 **背景/用户反馈**：在 WebOS 网页端，模型的思考/第一人称叙述过程被当作正文直接渲染出来。用户希望思考照常进行，但放进折叠的「思考」折叠框，而不是正文。
