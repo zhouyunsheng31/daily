@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 2026-08-26 07:30 · feat(webos): home 工作区支持上传整个文件夹 + 解压压缩包 (commit 48a7253)
 
+### 2026-08-26 08:08 · fix(webos): 上传/解压白名单补 Live2D/3D 模型格式 (commit d6cca0b)
+
+**背景/用户反馈**：用户上传 `hermes-yachiyo-live2d-yachiyo-20260423.zip`（Live2D 模型包）让 AI 解压，解压后模型无法使用——因为 `.moc3` 主模型文件不在上传/解压类型白名单里被跳过，导致模型缺核心文件（解压"看似成功"但模型残缺）。
+
+**改动**：
+- `server/src/utils/webosWorkspace.ts` `UPLOAD_EXT_WHITELIST`：新增 `moc3 / moc / vrm / vroid / pmx / pmd / fbx / gltf / glb / obj / dae / stl / blend`（均为数据/模型文件，非可执行；上传与解压共用同一白名单）。
+
+**验证**：`server` `tsc --noEmit` 通过。已部署远端 `pm2 restart daily-server`；对真实 `hermes-yachiyo-live2d-yachiyo-20260423.zip` 重新调用 `POST /workspace/files/extract` 后 `extractedCount=14 / skipped=[]`，完整解出 `yachiyo/八千代辉夜姬.moc3` 及 `.model3.json / .physics3.json / .exp3.json / .cdi3.json / .xyplugin.json / .vtube.json` + 贴图，Live2D 模型可用。
+
 ### 2026-08-26 07:49 · feat(webos): 给 daily 的 AI 助手加 extract_archive 解压工具（对话里可直接解压） (commit dd3a8ea)
 
 **背景/用户反馈**：用户在 daily 的 AI 助手对话里让它「解压」，AI 回复「工具链路调不动 / 前端文件页无解压入口」——因为解压端点是 HTTP 路由，而 daily 的 AI 工具集里没有对应工具（AI 沙箱也不能同站 fetch 该端点）。
