@@ -1472,6 +1472,8 @@ const UPLOAD_EXT_WHITELIST = new Set([
   // 压缩包 / 镜像 / 安装包（数据文件，服务器不执行）
   'zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'iso', 'img', 'dmg', 'pkg',
   'apk', 'msi', 'deb', 'rpm',
+  // 3D/模型/动画（Live2D .moc3、VRM/PMX/FBX 等：数据非可执行；2026-08-26 解压 Live2D 模型需放行 .moc3）
+  'moc3', 'moc', 'vrm', 'vroid', 'pmx', 'pmd', 'fbx', 'gltf', 'glb', 'obj', 'dae', 'stl', 'blend',
   // 二进制/数据
   'bin', 'dat', 'psd', 'ai', 'xmind', 'kml', 'kmz', 'dwg', 'dxf', 'cbr', 'cbz',
   // 其他常见安全格式
