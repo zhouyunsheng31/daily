@@ -14,10 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 生产模型目录（管理后台「模型管理」ai_models 单一来源）：provider=opencode 的 `deepseek-v4-flash` 两行（默认 + 备用）endpoint 改为 `https://ark.cn-beijing.volces.com/api/plan/v3`、api_key 改为 Ark key（`ark-f6e3...`），模型名保持 `deepseek-v4-flash`（Ark 接受该名，实际路由 `deepseek-v4-flash-ga-260731`）；
 - `server/.env`（生产）：`DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` 同步指向 Ark（引导/兜底对齐）；新增 `OPENCODE_API_KEY=ark-...`——pi 的「会话标题生成」（completeSimple）不会自动使用目录里配置的 provider key，只读 `options.apiKey` 或 `<PROVIDER>_API_KEY` 环境变量（provider=opencode → `OPENCODE_API_KEY`），不加则标题生成报「No API key for provider: opencode」；
 - `.env.example` / `.env.prod.example`：DEEPSEEK_BASE_URL 注释补充 Ark 网关选项，并记录「目录自定义 provider 需配 <PROVIDER>_API_KEY 供标题生成」的运维要点。
+- `server/src/routes/webos.ts` `resolveModel`（commit 3e0cb85）：目录中没有请求的模型引用时，**回退目录默认模型**而非 400——修复 `normalizeState` 强制 `ai.model=MODEL`（deepseek/deepseek-v4-flash）与目录 provider=opencode 不一致导致「新游客/存旧模型引用的用户首条消息直接 400 INVALID_MODEL」的问题，新游客开箱即可用 Ark。
 
 **验证**（生产 154.64.249.172，`pm2 restart daily-server` 后）：
 - 游客端到端冒烟：`POST /webos/api/chat/stream`（model=opencode/deepseek-v4-flash，thinking low/medium）→ thinking 事件 + delta 正文 + done，usage 正常落账（status=ok）；
 - `POST /webos/api/chat/title` → `{"title":"高三数学物理复习计划"}`（此前 title:null）；
+- 新游客（默认 `ai.model=deepseek/deepseek-v4-flash`，与目录 provider 不一致）直接 `/chat/stream`（不传 model）→ 回退 `opencode/deepseek-v4-flash` 走 Ark，delta「新人可用」+ done（此前 400 INVALID_MODEL）；
 - 直接 curl Ark `/chat/completions` 返回正常（含 `reasoning_content`，与 pi `thinkingFormat:'deepseek'` 匹配）；
 - 服务启动日志无异常。
 
