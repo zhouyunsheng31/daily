@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-09-04 07:06 · feat(webos): AI 对话 API 切换至火山方舟 Ark（deepseek-v4-flash）+ 修复标题生成 (commit b0d6681)
+
+**背景/用户反馈**：旧网关 opencode.ai（zen）余额不足（401 Insufficient balance），对话出现连续 `empty_response`、标题生成 `TITLE_GENERATION_FAILED`。用户提供火山方舟 Ark 网关与 key 要求切换。
+
+**改动**：
+- 生产模型目录（管理后台「模型管理」ai_models 单一来源）：provider=opencode 的 `deepseek-v4-flash` 两行（默认 + 备用）endpoint 改为 `https://ark.cn-beijing.volces.com/api/plan/v3`、api_key 改为 Ark key（`ark-f6e3...`），模型名保持 `deepseek-v4-flash`（Ark 接受该名，实际路由 `deepseek-v4-flash-ga-260731`）；
+- `server/.env`（生产）：`DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` 同步指向 Ark（引导/兜底对齐）；新增 `OPENCODE_API_KEY=ark-...`——pi 的「会话标题生成」（completeSimple）不会自动使用目录里配置的 provider key，只读 `options.apiKey` 或 `<PROVIDER>_API_KEY` 环境变量（provider=opencode → `OPENCODE_API_KEY`），不加则标题生成报「No API key for provider: opencode」；
+- `.env.example` / `.env.prod.example`：DEEPSEEK_BASE_URL 注释补充 Ark 网关选项，并记录「目录自定义 provider 需配 <PROVIDER>_API_KEY 供标题生成」的运维要点。
+
+**验证**（生产 154.64.249.172，`pm2 restart daily-server` 后）：
+- 游客端到端冒烟：`POST /webos/api/chat/stream`（model=opencode/deepseek-v4-flash，thinking low/medium）→ thinking 事件 + delta 正文 + done，usage 正常落账（status=ok）；
+- `POST /webos/api/chat/title` → `{"title":"高三数学物理复习计划"}`（此前 title:null）；
+- 直接 curl Ark `/chat/completions` 返回正常（含 `reasoning_content`，与 pi `thinkingFormat:'deepseek'` 匹配）；
+- 服务启动日志无异常。
+
 ### 2026-09-03 19:09 · feat(webos): 文件工作区 md 阅读双模式——同一 md 既可看源码也可看排版展示 (commit 525d92c)
 
 **背景/用户需求**：工作区（「我的文件」home/ 与「AI 工作区」agent/）里打开 `.md` 文件只能看原始 Markdown 源码；希望不离开工作区目录，同一文件既能阅读源码、也能看排版后的展示效果。
