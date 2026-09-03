@@ -1260,7 +1260,7 @@ async function listModelConfigs() {
       id: MODEL,
       label: 'Flash',
       provider: 'DeepSeek',
-      available: Boolean(process.env.DEEPSEEK_API_KEY?.trim()),
+      available: Boolean(process.env.DEEPSEEK_API_KEY?.trim() || process.env.PI_API_KEY?.trim()),
       priceHint: '按量计费，发送前预估',
       supportsThinking: [...THINKING_LEVELS],
       multimodal: false,
@@ -1733,6 +1733,13 @@ async function resolveModel(value: unknown): Promise<WebOsModel> {
   const catalog = await listEnabledModels()
   const found = catalog.find((m) => `${m.provider}/${m.model}` === ref)
   if (!found) {
+    // 2026-09-04 兼容修复：目录中没有该引用时回退目录默认模型，而不是 400。
+    // 背景：normalizeState 会强制 ai.model=MODEL（deepseek/deepseek-v4-flash），而目录
+    // provider 可能是 opencode（Ark 网关）——新游客/存有旧模型引用的用户首条消息会
+    // 直接 400 INVALID_MODEL，表现为「新用户没法聊天」。回退默认模型后开箱即用。
+    const { getDefaultModel } = await import('../db/modelCatalog.js')
+    const def = await getDefaultModel()
+    if (def) return `${def.provider}/${def.model}`
     throw createError(400, 'INVALID_MODEL', `未知或未启用的模型：${ref}`)
   }
   return ref
