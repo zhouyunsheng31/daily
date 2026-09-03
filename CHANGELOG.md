@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-09-03 19:09 · feat(webos): 文件工作区 md 阅读双模式——同一 md 既可看源码也可看排版展示 (commit 525d92c)
+
+**背景/用户需求**：工作区（「我的文件」home/ 与「AI 工作区」agent/）里打开 `.md` 文件只能看原始 Markdown 源码；希望不离开工作区目录，同一文件既能阅读源码、也能看排版后的展示效果。
+
+**改动**：
+- `client/shell-web/src/App.tsx` FilesView：新增 `previewMdRendered` 状态；预览头部对 `.md/.markdown` 文件显示「源码 / 展示」分段切换（`Code2` / `Eye` 图标）：
+  - 「源码」= 原样只读文本（`<pre class="file-preview-text">`）；
+  - 「展示」= 复用既有 `MarkdownContent`（标题/列表/表格/代码块/引用/LaTeX/粗斜体/行内码/链接全量渲染），纯前端零请求，切换即时；
+  - 模式仅在本次预览内记忆：重新打开默认回「源码」，关闭预览/切换区域自动复位；
+- `client/shell-web/src/styles.css`：新增 `.file-preview-md-toggle`（分段切换钮）与 `.file-preview-md-body`（渲染正文）样式；
+- 顺手修正同一组件遗留 bug：`extractInputRefPos` 此前误写 `useRef` 却调用 `setExtractInputRefPos(...)`（上游源码点击「解压」即 ReferenceError），改为 `useState`（生产走打包压缩、不受此影响，仅上游源码修正）。
+
+**验证**：
+- `client/shell-web` `VITE_BASE_PATH=/daily/ npx vite build` 通过（`assets/index-Cx5MYZKC.css` / `index--Hp-wQmR.js`）；
+- md 渲染函数按源码 1:1 复刻跑样本 md：标题/粗体/无序列表/代码块转义/引用/表格/行内 LaTeX/链接/行内码全部正确输出；
+- 生产（`154.64.249.172`）shell-web `tsc -b --noEmit` 0 错 + `vite build` 通过，新资源部署到 `server/public`，线上 `/daily/` 已服务新产物。
+
 ### 2026-08-26 07:30 · feat(webos): home 工作区支持上传整个文件夹 + 解压压缩包 (commit 48a7253)
 
 ### 2026-08-26 08:08 · fix(webos): 上传/解压白名单补 Live2D/3D 模型格式 (commit d6cca0b)
