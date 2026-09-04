@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-09-04 15:32 · feat(webos): md/文本预览阅读优化——字号缩放（60%–200%）+ 网页内全屏 (commit b2b19ef)
+
+**背景/用户需求**：工作区「文件」里读 md（源码/展示）或长文本时，希望可以放大/缩小字号，或把整个阅读页面在网页内全屏，提升长文阅读体验。
+
+**改动**：
+- `client/shell-web/src/App.tsx` FilesView 文件预览：新增 `previewZoom`（60%–200%，10% 步进）与 `previewFullscreen`（Fullscreen API）：
+  - 预览头部新增「阅读控制」工具组（文本/md 均可用）：`ZoomOut −` / 百分比 / `ZoomIn +` / `RotateCcw 重置` / `Maximize2 全屏`；
+  - 缩放作用于渲染正文（`.file-preview-md-body`，基准 13px）与源码（`.file-preview-text`，基准 11px），KaTeX 公式随容器字号联动；重新打开/关闭/换区自动回 100%；
+  - 全屏用 `requestFullscreen()` 作用于预览弹层（移动端 WebView 兼容 `webkitRequestFullscreen` 兜底），按 Esc 或按钮退出，`fullscreenchange` 同步图标；关闭预览/切换区域兜底 `exitFullscreen()`；
+- `client/shell-web/src/styles.css`：新增 `.file-preview-md-controls` / `.zoom-val` / `.fs-active` 与全屏态样式（`width/max-width` 等价写法避免 `min()` 老内核兼容问题，含 `:-webkit-full-screen` 前缀）。
+
+**验证**：`client/shell-web` `tsc -b --noEmit` 0 错（生产源）+ `VITE_BASE_PATH=/daily/ npx vite build` 通过（`assets/index-CZyK5Nnl.js` / `index-D6M0Mat-.css`）；线上 `shadowshub.xyz/daily/` 已服务新产物，bundle 含 `file-preview-md-controls` 与「网页内全屏/退出全屏」文案，js/css 200；pm2 稳定。
+
 ### 2026-09-04 07:06 · feat(webos): AI 对话 API 切换至火山方舟 Ark（deepseek-v4-flash）+ 修复标题生成 (commit b0d6681)
 
 **背景/用户反馈**：旧网关 opencode.ai（zen）余额不足（401 Insufficient balance），对话出现连续 `empty_response`、标题生成 `TITLE_GENERATION_FAILED`。用户提供火山方舟 Ark 网关与 key 要求切换。
