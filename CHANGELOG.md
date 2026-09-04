@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-09-04 17:04 · feat(webos): 工作区文件支持直接下载（行内 + 预览内）+ 缩放可输入精确百分比 (commit 9e424e8)
+
+**背景/用户反馈**：工作区文件点下载只是新开标签浏览 raw 内容（md/文本/图片都在浏览器里显示，不是真下载）；缩放只能步进按钮，希望输入具体百分比（如 150%）。要求验证其他文件类型是否同样不能直接下载。
+
+**改动**：
+- `client/shell-web/src/App.tsx` FilesView：
+  - **文件行下载图标改为真下载**：`<a download={entry.name}>`（同源 + cookie 鉴权，`download` 属性强制保存，覆盖后端 `Content-Disposition: inline`）——md/文本/图片/压缩包等全部类型都可直接保存，不再只是新标签浏览；
+  - **预览头部新增下载按钮**：`preview` 状态增加 `rawUrl`（原始字节链接，agent/用户区各自 raw 端点），文本/md/图片预览内可直接下载原文件；
+  - **缩放支持输入精确百分比**：百分比显示改为数字输入框（`type=number` 50–300，输入 150 → 150%），失焦/回车提交并 clamp，按钮/双指捏合改变缩放时输入框同步显示。
+- `client/shell-web/src/styles.css`：新增 `.file-preview-download`（预览内下载按钮）与 `.zoom-input-wrap/.zoom-input/.zoom-pct`（缩放输入框，隐藏数字调节箭头）。
+
+**验证**：
+- 后端 raw 端点核实：用户区 `/workspace/files/raw` 按 MIME 流式返回（无 Content-Disposition），agent 区 `Content-Disposition: inline`；鉴权走 cookie（`res.cookie`），同源 `<a download>` 导航携带 cookie 可正常下载；
+- 生产源 `tsc -b --noEmit` 0 错 + `VITE_BASE_PATH=/daily/ vite build` 通过；线上 `shadowshub.xyz/daily/` 已服务 `assets/index-DV0eRkvD.js` / `index-_N5S-gsZ.css`（200），bundle 含 `file-preview-download` / `zoom-input-wrap`，CSS 含 `file-preview-download` / `zoom-input{` 规则；pm2 稳定。
+
 ### 2026-09-04 15:50 · fix(webos): md 展示视图缩放/全屏重做——双指捏合动态缩放 + 全屏卡片填满 + 默认展示视图 + 设备比例自适应 (commit fb9821c)
 
 **背景/用户反馈**：上一版（b2b19ef）缩放只改了部分字号、双指不好用，全屏只黑屏、卡片大小不变。用户要求：双指动态缩放、全屏卡片充满整个页面、md 展示视图设备比例自适应、打开默认展示视图。
