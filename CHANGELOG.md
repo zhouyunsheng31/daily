@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-09-04 15:50 · fix(webos): md 展示视图缩放/全屏重做——双指捏合动态缩放 + 全屏卡片填满 + 默认展示视图 + 设备比例自适应 (commit fb9821c)
+
+**背景/用户反馈**：上一版（b2b19ef）缩放只改了部分字号、双指不好用，全屏只黑屏、卡片大小不变。用户要求：双指动态缩放、全屏卡片充满整个页面、md 展示视图设备比例自适应、打开默认展示视图。
+
+**改动**：
+- `client/shell-web/src/App.tsx` FilesView 文件预览：
+  - 缩放改用 CSS `zoom` 属性**整体缩放布局**（正文/代码块/表格/KaTeX 公式全部跟随），不再是只改 `font-size`；新增 `.file-preview-zoom-wrap` 容器承载缩放，按钮缩放范围 50%–300%；
+  - **双指捏合动态缩放**：原生非被动 `touchmove` 监听（React 合成事件无法 preventDefault），双指距离比例实时映射缩放（clamp 0.5–3.0）；单指仍正常滚动；监听依赖 `[preview]`——组件挂载时预览未打开（ref 为空），须在预览出现后再绑定（上一版漏了这个，监听器从未挂上）；
+  - **全屏修复**：全屏元素是 `.file-preview-overlay`，卡片放大改用**后代选择器** `.file-preview-overlay:fullscreen .file-preview`（此前写成 `.file-preview:fullscreen`，卡片非全屏元素不命中 → 只黑屏不放大）；全屏后卡片填满 96vw/96vh，body `flex:1` 撑满内部滚动；
+  - **打开 md 默认「展示」渲染视图**：`setPreviewMdRendered(isMarkdown(entry.name))`，源码可随时用头部按钮切回；
+- `client/shell-web/src/styles.css`：
+  - 新增 `.file-preview-zoom-wrap`（zoom 容器）；`.file-preview-body` 加 `flex:1 1 auto; min-height:0`（填满卡片、内部滚动）；
+  - 全屏态改后代选择器 + `width/max-width` 等价写法（老内核避免 `min()`）；
+  - **设备比例自适应**：卡片 `min(720px, 94vw)`；`≤480px` 小屏卡片 96vw + md 正文 15px、更紧凑边距、源码 12px；宽屏正文 `max-width:68ch` 限宽保可读；md 正文基准字号 14px。
+
+**验证**：生产源 `tsc -b --noEmit` 0 错 + `VITE_BASE_PATH=/daily/ vite build` 通过；线上 `shadowshub.xyz/daily/` 已服务 `assets/index-BKArqYjO.js` / `index-hkPopZJA.css`（均 200），bundle 含 `file-preview-zoom-wrap` 与 `touchstart/touchmove` 捏合逻辑、CSS 含 `@media (max-width:480px)` / `max-width:68ch` / `width:96vw;max-width:none` 等规则；pm2 稳定。
+
 ### 2026-09-04 15:32 · feat(webos): md/文本预览阅读优化——字号缩放（60%–200%）+ 网页内全屏 (commit b2b19ef)
 
 **背景/用户需求**：工作区「文件」里读 md（源码/展示）或长文本时，希望可以放大/缩小字号，或把整个阅读页面在网页内全屏，提升长文阅读体验。
