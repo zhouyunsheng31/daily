@@ -2595,8 +2595,8 @@ function FilesView() {
   // 2026-08-31 修正遗留 bug：解压中定位用 state（此前写成 useRef，导致 setExtractInputRefPos 未定义，
   // 点击「解压」即 ReferenceError 且进度 spinner 永不显示；不影响生产（生产走打包压缩），只在上游源码修正）
   const [extractInputRefPos, setExtractInputRefPos] = useState('')
-  // 2026-08-18 文件内容预览（AI 工作区只读打开文本/图片）
-  const [preview, setPreview] = useState<{ name: string; kind: 'text' | 'image'; text?: string; url?: string } | null>(null)
+  // 2026-08-18 文件内容预览（AI 工作区只读打开文本/图片）；rawUrl：原始字节链接（预览内下载用）
+  const [preview, setPreview] = useState<{ name: string; kind: 'text' | 'image'; text?: string; url?: string; rawUrl?: string } | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
   // 2026-08-31 md 阅读双模式：false=源码（只读原样文本），true=展示（渲染 Markdown 排版）。
@@ -2610,6 +2610,8 @@ function FilesView() {
   // 2026-09-04 双指捏合：原生 touch 处理器需读最新缩放值（避免闭包过期）
   const previewZoomRef = useRef(1)
   previewZoomRef.current = previewZoom
+  // 2026-09-04 缩放可输入精确百分比（如 150），输入框独立字符串态，失焦/回车提交
+  const [zoomInput, setZoomInput] = useState('100')
 
   const refresh = useCallback(async (nextDir = dir, nextZone = zone): Promise<void> => {
     setLoading(true)
@@ -2703,6 +2705,19 @@ function FilesView() {
   /** 预览缩放步进（50%–300%，步长 10%） */
   const previewZoomStep = (delta: number): void => {
     setPreviewZoom((z) => Math.min(3, Math.max(0.5, Math.round((z + delta) * 100) / 100)))
+  }
+
+  // 2026-09-04 缩放输入框：按钮/捏合改变缩放时同步输入框显示；输入状态（打字中）不被覆盖
+  useEffect(() => {
+    setZoomInput(String(Math.round(previewZoom * 100)))
+  }, [previewZoom])
+
+  /** 提交输入框的精确百分比（如 150 → 150%），越界 clamp 50–300 */
+  const commitZoomInput = (): void => {
+    const n = Math.round(Number(zoomInput))
+    const clamped = Number.isFinite(n) ? Math.min(300, Math.max(50, n)) : 100
+    setPreviewZoom(clamped / 100)
+    setZoomInput(String(clamped))
   }
 
   const switchZone = (nextZone: 'user' | 'agent'): void => {
@@ -2861,22 +2876,21 @@ function FilesView() {
     // 2026-09-04 每次打开重置缩放（100%）
     setPreviewZoom(1)
     // 2026-08-21：图片优先用免鉴权公开 URL（App iframe / 生成图参考可直接复用），无则回退带鉴权 raw
-    const url = agentZone
-      ? agentWorkspaceFileRawUrl(pathName)
-      : (entry.publicUrl ?? workspaceFileRawUrl(pathName))
+    const rawUrl = agentZone ? agentWorkspaceFileRawUrl(pathName) : workspaceFileRawUrl(pathName)
+    const url = agentZone ? rawUrl : (entry.publicUrl ?? rawUrl)
     if (isImage(entry.name)) {
-      setPreview({ name: entry.name, kind: 'image', url })
+      setPreview({ name: entry.name, kind: 'image', url, rawUrl })
       return
     }
     if (isText(entry.name)) {
       setPreviewLoading(true)
       setPreviewError(null)
-      setPreview({ name: entry.name, kind: 'text' })
+      setPreview({ name: entry.name, kind: 'text', rawUrl })
       try {
         const text = agentZone
           ? await readAgentWorkspaceTextFile(pathName)
           : await (await fetch(url, { credentials: 'include' })).text()
-        setPreview({ name: entry.name, kind: 'text', text })
+        setPreview({ name: entry.name, kind: 'text', text, rawUrl })
       } catch (caught) {
         setPreviewError(caught instanceof Error ? caught.message : '文件读取失败')
       } finally {
@@ -2925,7 +2939,7 @@ function FilesView() {
                     <span title={entry.name}>{entry.name}</span>
                     <small>{formatBytes(entry.size)}</small>
                   </button>}
-                {entry.type === 'file' ? <a className="file-action" href={agentZone ? agentWorkspaceFileRawUrl(previewPath(entry.name)) : workspaceFileRawUrl(previewPath(entry.name))} target="_blank" rel="noreferrer" aria-label="打开/下载"><Download size={15} /></a> : null}
+                {entry.type === 'file' ? <a className="file-action" href={agentZone ? agentWorkspaceFileRawUrl(previewPath(entry.name)) : workspaceFileRawUrl(previewPath(entry.name))} download={entry.name} aria-label="下载"><Download size={15} /></a> : null}
                 {!agentZone && entry.type === 'file' && isArchive(entry.name) ? <button type="button" className="file-action" aria-label="解压" disabled={extracting} onClick={() => void onExtract(entry.name)}>{extracting && extractInputRefPos === entry.name ? <LoaderCircle className="spin" size={15} /> : <FileArchive size={15} />}</button> : null}
                 {!agentZone ? <button type="button" className="file-action file-action-danger" aria-label="删除" onClick={() => void onDelete(entry.name, entry.type)}><Trash2 size={15} /></button> : null}
               </div>
@@ -2944,16 +2958,25 @@ function FilesView() {
               <button type="button" role="tab" aria-selected={previewMdRendered} className={previewMdRendered ? 'active' : ''} onClick={() => setPreviewMdRendered(true)}><Eye size={13} />展示</button>
             </div>
           ) : null}
-          {/* 2026-09-04 阅读优化：缩放（60%–200%）+ 网页内全屏（文本/md 预览可用） */}
+          {/* 2026-09-04 阅读优化：缩放（50%–300%，可输入精确百分比）+ 网页内全屏 + 下载（文本/md 预览可用） */}
           {preview.kind === 'text' ? (
             <div className="file-preview-md-controls" role="group" aria-label="阅读控制">
               <button type="button" aria-label="缩小字号" onClick={() => previewZoomStep(-0.1)}><ZoomOut size={13} /></button>
-              <span className="zoom-val" aria-live="polite">{Math.round(previewZoom * 100)}%</span>
+              <span className="zoom-input-wrap"><input
+                className="zoom-input" inputMode="numeric" type="number" min={50} max={300} step={10}
+                value={zoomInput}
+                onChange={(e) => setZoomInput(e.target.value)}
+                onBlur={commitZoomInput}
+                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                aria-label="缩放百分比（50–300）"
+              /><span className="zoom-pct">%</span></span>
               <button type="button" aria-label="放大字号" onClick={() => previewZoomStep(0.1)}><ZoomIn size={13} /></button>
               <button type="button" aria-label="重置缩放" onClick={() => setPreviewZoom(1)}><RotateCcw size={13} /></button>
               <button type="button" className={previewFullscreen ? 'fs-active' : ''} aria-label={previewFullscreen ? '退出全屏' : '网页内全屏'} onClick={togglePreviewFullscreen}>{previewFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>
             </div>
           ) : null}
+          {/* 2026-09-04 直接下载当前预览的文件（原字节，md/文本/图片都可用） */}
+          {preview.rawUrl ? <a className="file-preview-download" href={preview.rawUrl} download={preview.name} aria-label="下载文件" title="下载"><Download size={15} /></a> : null}
           <button type="button" className="file-preview-close" aria-label="关闭预览" onClick={() => { setPreview(null); setPreviewError(null); setPreviewMdRendered(false); setPreviewZoom(1); exitPreviewFullscreen() }}><X size={16} /></button>
         </div>
         <div className="file-preview-body">

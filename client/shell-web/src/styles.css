@@ -1268,8 +1268,15 @@ button.file-row-main { cursor: pointer; }
 .file-preview-md-controls { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px; padding: 3px; border-radius: 10px; background: var(--paper-muted); }
 .file-preview-md-controls button { height: 26px; min-width: 26px; display: inline-flex; align-items: center; justify-content: center; gap: 3px; padding: 0 7px; border: 0; border-radius: 8px; color: var(--muted); background: transparent; font-size: 10px; font-weight: 650; cursor: pointer; }
 .file-preview-md-controls button:hover { background: rgba(23,25,24,.07); }
-.file-preview-md-controls .zoom-val { min-width: 34px; text-align: center; color: var(--ink-soft); font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; }
+/* 2026-09-04 缩放输入框：可输入精确百分比（如 150） */
+.file-preview-md-controls .zoom-input-wrap { height: 26px; display: inline-flex; align-items: center; padding: 0 4px; border-radius: 8px; background: rgba(255,255,255,.8); border: 1px solid var(--line); }
+.file-preview-md-controls .zoom-input { width: 40px; border: 0; outline: 0; background: transparent; text-align: right; color: var(--ink); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.file-preview-md-controls .zoom-input::-webkit-outer-spin-button, .file-preview-md-controls .zoom-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.file-preview-md-controls .zoom-pct { color: var(--ink-soft); font-size: 10px; font-weight: 700; }
 .file-preview-md-controls button.fs-active { color: #fff; background: var(--blue); box-shadow: 0 3px 8px rgba(49,91,214,.2); }
+/* 2026-09-04 预览内直接下载按钮（原字节下载） */
+.file-preview-download { width: 30px; height: 30px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 9px; color: var(--muted); background: var(--paper-muted); text-decoration: none; }
+.file-preview-download:hover { color: var(--ink); background: rgba(23,25,24,.07); }
 /* 全屏态：弹层铺满 + 卡片填充整个页面（全屏元素是 overlay，用后代选择器放大卡片；
    老内核用 width/max-width 等价写法，避免 min() 兼容问题） */
 .file-preview-overlay:fullscreen, .file-preview-overlay:-webkit-full-screen { width: 100vw; height: 100vh; padding: 10px; }
