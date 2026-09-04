@@ -2602,10 +2602,14 @@ function FilesView() {
   // 2026-08-31 md 阅读双模式：false=源码（只读原样文本），true=展示（渲染 Markdown 排版）。
   // 仅对 .md/.markdown 文件生效，切换不重新拉取（复用已读文本，渲染纯前端）。
   const [previewMdRendered, setPreviewMdRendered] = useState(false)
-  // 2026-09-04 阅读优化：md/文本预览支持缩放（字号 60%–200%）与「网页内全屏」（Fullscreen API）。
+  // 2026-09-04 阅读优化：md/文本预览支持缩放（50%–300%）与「网页内全屏」（Fullscreen API）。
   const [previewZoom, setPreviewZoom] = useState(1)
   const [previewFullscreen, setPreviewFullscreen] = useState(false)
   const previewRef = useRef<HTMLDivElement | null>(null)
+  const pinchRef = useRef<HTMLDivElement | null>(null)
+  // 2026-09-04 双指捏合：原生 touch 处理器需读最新缩放值（避免闭包过期）
+  const previewZoomRef = useRef(1)
+  previewZoomRef.current = previewZoom
 
   const refresh = useCallback(async (nextDir = dir, nextZone = zone): Promise<void> => {
     setLoading(true)
@@ -2637,6 +2641,45 @@ function FilesView() {
     return () => document.removeEventListener('fullscreenchange', onFsChange)
   }, [])
 
+  // 2026-09-04 双指捏合缩放：原生非被动 touch 监听（React 合成事件对 touchmove 无法 preventDefault）。
+  // 单指仍可滚动，双指动态缩放（zoom 属性整体缩放布局，代码块/表格/公式全部跟随）。
+  // 注意：依赖 [preview]——组件挂载时预览未打开（pinchRef 为 null），须在预览出现后再绑定。
+  useEffect(() => {
+    const el = pinchRef.current
+    if (!el) return
+    let pinchStartDist = 0
+    let pinchStartZoom = 1
+    const clamp = (z: number): number => Math.min(3, Math.max(0.5, Math.round(z * 100) / 100))
+    const onTouchStart = (e: TouchEvent): void => {
+      if (e.touches.length === 2) {
+        const a = e.touches[0]; const b = e.touches[1]
+        pinchStartDist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+        pinchStartZoom = previewZoomRef.current
+      }
+    }
+    const onTouchMove = (e: TouchEvent): void => {
+      if (e.touches.length === 2) {
+        e.preventDefault()
+        const a = e.touches[0]; const b = e.touches[1]
+        const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+        if (pinchStartDist > 0) {
+          setPreviewZoom(clamp(pinchStartZoom * (dist / pinchStartDist)))
+        }
+      }
+    }
+    const onTouchEnd = (): void => { pinchStartDist = 0 }
+    el.addEventListener('touchstart', onTouchStart, { passive: true })
+    el.addEventListener('touchmove', onTouchMove, { passive: false })
+    el.addEventListener('touchend', onTouchEnd)
+    el.addEventListener('touchcancel', onTouchEnd)
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart)
+      el.removeEventListener('touchmove', onTouchMove)
+      el.removeEventListener('touchend', onTouchEnd)
+      el.removeEventListener('touchcancel', onTouchEnd)
+    }
+  }, [preview])
+
   /** 退出预览全屏（关闭预览/切换区域时兜底清理） */
   const exitPreviewFullscreen = (): void => {
     if (document.fullscreenElement) { void document.exitFullscreen().catch(() => {}) }
@@ -2657,9 +2700,9 @@ function FilesView() {
     }
   }
 
-  /** 预览缩放步进（60%–200%，步长 10%） */
+  /** 预览缩放步进（50%–300%，步长 10%） */
   const previewZoomStep = (delta: number): void => {
-    setPreviewZoom((z) => Math.min(2, Math.max(0.6, Math.round((z + delta) * 100) / 100)))
+    setPreviewZoom((z) => Math.min(3, Math.max(0.5, Math.round((z + delta) * 100) / 100)))
   }
 
   const switchZone = (nextZone: 'user' | 'agent'): void => {
@@ -2813,8 +2856,8 @@ function FilesView() {
   const openFile = async (entry: { name: string; type: 'dir' | 'file'; publicUrl?: string }): Promise<void> => {
     if (entry.type !== 'file') return
     const pathName = previewPath(entry.name)
-    // 2026-08-31 每次重新打开都回「源码」模式（展示模式仅在本次预览内记忆）
-    setPreviewMdRendered(false)
+    // 2026-09-04 默认「展示」视图：md 阅读以渲染排版为主（源码可随时用头部按钮切回）
+    setPreviewMdRendered(isMarkdown(entry.name))
     // 2026-09-04 每次打开重置缩放（100%）
     setPreviewZoom(1)
     // 2026-08-21：图片优先用免鉴权公开 URL（App iframe / 生成图参考可直接复用），无则回退带鉴权 raw
@@ -2917,9 +2960,11 @@ function FilesView() {
           {previewLoading ? <div className="empty-file"><LoaderCircle className="spin" size={20} /></div>
             : previewError ? <p className="html-import-error">{previewError}</p>
               : preview.kind === 'image' && preview.url ? <img src={preview.url} alt={preview.name} />
-                : isMarkdown(preview.name) && previewMdRendered && preview.text != null
-                  ? <div className="file-preview-md-body" style={{ fontSize: `${Math.round(13 * previewZoom)}px` }}><MarkdownContent text={preview.text} /></div>
-                  : <pre className="file-preview-text" style={{ fontSize: `${Math.round(11 * previewZoom)}px` }}>{preview.text ?? ''}</pre>}
+                : <div ref={pinchRef} className="file-preview-zoom-wrap" style={{ zoom: previewZoom }}>
+                    {isMarkdown(preview.name) && previewMdRendered && preview.text != null
+                      ? <div className="file-preview-md-body"><MarkdownContent text={preview.text} /></div>
+                      : <pre className="file-preview-text">{preview.text ?? ''}</pre>}
+                  </div>}
         </div>
       </div>
     </div> : null}

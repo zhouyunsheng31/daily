@@ -1248,13 +1248,16 @@ button.file-row-main { cursor: pointer; }
 .file-zone-switch button.active { color: var(--ink); background: #fff; box-shadow: 0 2px 8px rgba(23,25,24,.08); }
 /* 2026-08-18 文件内容预览弹层（AI 工作区只读打开） */
 .file-preview-overlay { position: fixed; inset: 0; z-index: 300; display: grid; place-items: center; padding: 16px; background: rgba(23,25,24,.45); backdrop-filter: blur(2px); }
-.file-preview { width: min(680px, 92vw); max-height: 82vh; display: flex; flex-direction: column; border-radius: 16px; background: #fff; box-shadow: 0 18px 50px rgba(23,25,24,.28); overflow: hidden; }
+.file-preview { width: min(720px, 94vw); max-height: 82vh; display: flex; flex-direction: column; border-radius: 16px; background: #fff; box-shadow: 0 18px 50px rgba(23,25,24,.28); overflow: hidden; }
 .file-preview-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
 .file-preview-head span { min-width: 0; flex: 1; font-size: 12px; font-weight: 650; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-preview-close { width: 28px; height: 28px; display: grid; place-items: center; flex: 0 0 auto; border: 0; border-radius: 8px; color: var(--muted); background: transparent; cursor: pointer; }
 .file-preview-close:hover { background: rgba(23,25,24,.06); }
-.file-preview-body { min-height: 120px; overflow: auto; padding: 10px; display: grid; place-items: start stretch; }
+.file-preview-body { min-height: 120px; flex: 1 1 auto; min-height: 0; overflow: auto; padding: 10px; display: grid; place-items: start stretch; }
 .file-preview-body img { width: 100%; max-height: 60vh; object-fit: contain; border-radius: 8px; }
+/* 2026-09-04 缩放容器：zoom 属性整体缩放布局（代码块/表格/公式全跟随）；单指滚动、双指捏合 */
+.file-preview-zoom-wrap { width: 100%; min-width: 100%; transform-origin: center top; touch-action: pan-x pan-y; }
+.file-preview-zoom-wrap > * { width: 100%; }
 .file-preview-text { margin: 0; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.6; color: var(--ink); background: rgba(23,25,24,.03); border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* 2026-08-31 md 阅读双模式：源码 / 展示 分段切换 + 渲染正文 */
 .file-preview-md-toggle { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; padding: 3px; border-radius: 10px; background: var(--paper-muted); }
@@ -1267,9 +1270,19 @@ button.file-row-main { cursor: pointer; }
 .file-preview-md-controls button:hover { background: rgba(23,25,24,.07); }
 .file-preview-md-controls .zoom-val { min-width: 34px; text-align: center; color: var(--ink-soft); font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .file-preview-md-controls button.fs-active { color: #fff; background: var(--blue); box-shadow: 0 3px 8px rgba(49,91,214,.2); }
-/* 全屏态：弹层铺满 + 卡片加宽（老内核用 width/max-width 等价写法，避免 min() 兼容问题） */
-.file-preview-overlay:fullscreen, .file-preview-overlay:-webkit-full-screen { width: 100vw; height: 100vh; padding: 14px; }
-.file-preview:fullscreen, .file-preview:-webkit-full-screen { width: 96vw; max-width: 1080px; max-height: 94vh; }
+/* 全屏态：弹层铺满 + 卡片填充整个页面（全屏元素是 overlay，用后代选择器放大卡片；
+   老内核用 width/max-width 等价写法，避免 min() 兼容问题） */
+.file-preview-overlay:fullscreen, .file-preview-overlay:-webkit-full-screen { width: 100vw; height: 100vh; padding: 10px; }
+.file-preview-overlay:fullscreen .file-preview, .file-preview-overlay:-webkit-full-screen .file-preview { width: 96vw; max-width: none; height: 96vh; max-height: none; }
+/* 2026-09-04 md 展示视图设备比例自适应：小屏更大字号/更紧凑边距，宽屏正文限宽保可读 */
+.file-preview-md-body { font-size: 14px; }
+.file-preview-md-body .md-content > p, .file-preview-md-body .md-content > h1, .file-preview-md-body .md-content > h2, .file-preview-md-body .md-content > h3, .file-preview-md-body .md-content > h4, .file-preview-md-body .md-content > blockquote { max-width: 68ch; }
+@media (max-width: 480px) {
+  .file-preview-overlay { padding: 10px; }
+  .file-preview { width: 96vw; }
+  .file-preview-md-body { padding: 4px 6px; font-size: 15px; }
+  .file-preview-text { font-size: 12px; }
+}
 /* W2 API 文档/在线调试（2026-08-21）：『我的 API 包』owner 级 */
 .api-list { display: flex; flex-direction: column; gap: 8px; }
 .api-list-row { width: 100%; }
