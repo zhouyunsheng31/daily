@@ -1261,6 +1261,15 @@ button.file-row-main { cursor: pointer; }
 .file-preview-md-toggle button { height: 26px; display: inline-flex; align-items: center; gap: 4px; padding: 0 10px; border: 0; border-radius: 8px; color: var(--muted); background: transparent; font-size: 10px; font-weight: 650; cursor: pointer; }
 .file-preview-md-toggle button.active { color: #fff; background: var(--blue); box-shadow: 0 3px 8px rgba(49,91,214,.2); }
 .file-preview-md-body { width: 100%; max-width: 100%; padding: 8px 10px; font-size: 13px; line-height: 1.65; color: var(--ink); }
+/* 2026-09-04 阅读优化：缩放（60%–200%）+ 网页内全屏（Fullscreen API） */
+.file-preview-md-controls { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px; padding: 3px; border-radius: 10px; background: var(--paper-muted); }
+.file-preview-md-controls button { height: 26px; min-width: 26px; display: inline-flex; align-items: center; justify-content: center; gap: 3px; padding: 0 7px; border: 0; border-radius: 8px; color: var(--muted); background: transparent; font-size: 10px; font-weight: 650; cursor: pointer; }
+.file-preview-md-controls button:hover { background: rgba(23,25,24,.07); }
+.file-preview-md-controls .zoom-val { min-width: 34px; text-align: center; color: var(--ink-soft); font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.file-preview-md-controls button.fs-active { color: #fff; background: var(--blue); box-shadow: 0 3px 8px rgba(49,91,214,.2); }
+/* 全屏态：弹层铺满 + 卡片加宽（老内核用 width/max-width 等价写法，避免 min() 兼容问题） */
+.file-preview-overlay:fullscreen, .file-preview-overlay:-webkit-full-screen { width: 100vw; height: 100vh; padding: 14px; }
+.file-preview:fullscreen, .file-preview:-webkit-full-screen { width: 96vw; max-width: 1080px; max-height: 94vh; }
 /* W2 API 文档/在线调试（2026-08-21）：『我的 API 包』owner 级 */
 .api-list { display: flex; flex-direction: column; gap: 8px; }
 .api-list-row { width: 100%; }

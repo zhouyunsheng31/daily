@@ -55,6 +55,10 @@ import {
   UserRound,
   Video,
   WalletCards,
+  Maximize2,
+  Minimize2,
+  ZoomIn,
+  ZoomOut,
   Search,
   X,
   type LucideIcon,
@@ -2598,6 +2602,10 @@ function FilesView() {
   // 2026-08-31 md 阅读双模式：false=源码（只读原样文本），true=展示（渲染 Markdown 排版）。
   // 仅对 .md/.markdown 文件生效，切换不重新拉取（复用已读文本，渲染纯前端）。
   const [previewMdRendered, setPreviewMdRendered] = useState(false)
+  // 2026-09-04 阅读优化：md/文本预览支持缩放（字号 60%–200%）与「网页内全屏」（Fullscreen API）。
+  const [previewZoom, setPreviewZoom] = useState(1)
+  const [previewFullscreen, setPreviewFullscreen] = useState(false)
+  const previewRef = useRef<HTMLDivElement | null>(null)
 
   const refresh = useCallback(async (nextDir = dir, nextZone = zone): Promise<void> => {
     setLoading(true)
@@ -2622,6 +2630,38 @@ function FilesView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zone])
 
+  // 2026-09-04 阅读优化：监听全屏状态（浏览器/WebView 按 Esc 退出时同步图标）
+  useEffect(() => {
+    const onFsChange = (): void => { setPreviewFullscreen(Boolean(document.fullscreenElement)) }
+    document.addEventListener('fullscreenchange', onFsChange)
+    return () => document.removeEventListener('fullscreenchange', onFsChange)
+  }, [])
+
+  /** 退出预览全屏（关闭预览/切换区域时兜底清理） */
+  const exitPreviewFullscreen = (): void => {
+    if (document.fullscreenElement) { void document.exitFullscreen().catch(() => {}) }
+  }
+
+  /** 预览全屏切换：请求预览弹层全屏（网页内全屏，移动端 WebView 同样可用） */
+  const togglePreviewFullscreen = (): void => {
+    const el = previewRef.current
+    if (!el) return
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => {})
+      return
+    }
+    if (el.requestFullscreen) {
+      void el.requestFullscreen().catch(() => {})
+    } else if ((el as HTMLElement & { webkitRequestFullscreen?: () => void }).webkitRequestFullscreen) {
+      ;(el as HTMLElement & { webkitRequestFullscreen?: () => void }).webkitRequestFullscreen?.()
+    }
+  }
+
+  /** 预览缩放步进（60%–200%，步长 10%） */
+  const previewZoomStep = (delta: number): void => {
+    setPreviewZoom((z) => Math.min(2, Math.max(0.6, Math.round((z + delta) * 100) / 100)))
+  }
+
   const switchZone = (nextZone: 'user' | 'agent'): void => {
     if (nextZone === zone) return
     setZone(nextZone)
@@ -2630,6 +2670,8 @@ function FilesView() {
     setPreview(null)
     setPreviewError(null)
     setPreviewMdRendered(false)
+    setPreviewZoom(1)
+    exitPreviewFullscreen()
   }
 
   const onUpload = async (files: FileList | null): Promise<void> => {
@@ -2773,6 +2815,8 @@ function FilesView() {
     const pathName = previewPath(entry.name)
     // 2026-08-31 每次重新打开都回「源码」模式（展示模式仅在本次预览内记忆）
     setPreviewMdRendered(false)
+    // 2026-09-04 每次打开重置缩放（100%）
+    setPreviewZoom(1)
     // 2026-08-21：图片优先用免鉴权公开 URL（App iframe / 生成图参考可直接复用），无则回退带鉴权 raw
     const url = agentZone
       ? agentWorkspaceFileRawUrl(pathName)
@@ -2846,7 +2890,7 @@ function FilesView() {
           </div>}
       <div className="file-hint"><Sparkles size={14} /> {agentZone ? '目录：home/（用户可见区） agent/（AI 草稿） apps/（App 源码） shared/（跨 App 共享） skills/（记忆技能） system/（系统素材） logs/（执行日志）' : '上传后直接对 AI 说「用我上传的图片做壁纸 / 做个相册 App」，它会自动读取 home/uploads/ 里的文件。'}</div>
     </Surface>
-    {preview ? <div className="file-preview-overlay" role="dialog" aria-modal="true" onClick={() => { setPreview(null); setPreviewError(null); setPreviewMdRendered(false) }}>
+    {preview ? <div ref={previewRef} className="file-preview-overlay" role="dialog" aria-modal="true" onClick={() => { setPreview(null); setPreviewError(null); setPreviewMdRendered(false); setPreviewZoom(1); exitPreviewFullscreen() }}>
       <div className="file-preview" onClick={(event) => event.stopPropagation()}>
         <div className="file-preview-head">
           <span title={preview.name}>{preview.name}</span>
@@ -2857,15 +2901,25 @@ function FilesView() {
               <button type="button" role="tab" aria-selected={previewMdRendered} className={previewMdRendered ? 'active' : ''} onClick={() => setPreviewMdRendered(true)}><Eye size={13} />展示</button>
             </div>
           ) : null}
-          <button type="button" className="file-preview-close" aria-label="关闭预览" onClick={() => { setPreview(null); setPreviewError(null); setPreviewMdRendered(false) }}><X size={16} /></button>
+          {/* 2026-09-04 阅读优化：缩放（60%–200%）+ 网页内全屏（文本/md 预览可用） */}
+          {preview.kind === 'text' ? (
+            <div className="file-preview-md-controls" role="group" aria-label="阅读控制">
+              <button type="button" aria-label="缩小字号" onClick={() => previewZoomStep(-0.1)}><ZoomOut size={13} /></button>
+              <span className="zoom-val" aria-live="polite">{Math.round(previewZoom * 100)}%</span>
+              <button type="button" aria-label="放大字号" onClick={() => previewZoomStep(0.1)}><ZoomIn size={13} /></button>
+              <button type="button" aria-label="重置缩放" onClick={() => setPreviewZoom(1)}><RotateCcw size={13} /></button>
+              <button type="button" className={previewFullscreen ? 'fs-active' : ''} aria-label={previewFullscreen ? '退出全屏' : '网页内全屏'} onClick={togglePreviewFullscreen}>{previewFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>
+            </div>
+          ) : null}
+          <button type="button" className="file-preview-close" aria-label="关闭预览" onClick={() => { setPreview(null); setPreviewError(null); setPreviewMdRendered(false); setPreviewZoom(1); exitPreviewFullscreen() }}><X size={16} /></button>
         </div>
         <div className="file-preview-body">
           {previewLoading ? <div className="empty-file"><LoaderCircle className="spin" size={20} /></div>
             : previewError ? <p className="html-import-error">{previewError}</p>
               : preview.kind === 'image' && preview.url ? <img src={preview.url} alt={preview.name} />
                 : isMarkdown(preview.name) && previewMdRendered && preview.text != null
-                  ? <div className="file-preview-md-body"><MarkdownContent text={preview.text} /></div>
-                  : <pre className="file-preview-text">{preview.text ?? ''}</pre>}
+                  ? <div className="file-preview-md-body" style={{ fontSize: `${Math.round(13 * previewZoom)}px` }}><MarkdownContent text={preview.text} /></div>
+                  : <pre className="file-preview-text" style={{ fontSize: `${Math.round(11 * previewZoom)}px` }}>{preview.text ?? ''}</pre>}
         </div>
       </div>
     </div> : null}
