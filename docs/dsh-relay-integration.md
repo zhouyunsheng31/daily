@@ -115,3 +115,14 @@ dsh/cc/zai-org/GLM-5.3         dsh/cc/tencent/hy4-preview  dsh/cc/deepseek-v4-fl
   system/developer 传至 CC 插件 systemText。**无需改 daily 代码**（若需恢复思考可视化，
   在 dsh 侧设 `CC_BRIDGE_PASSTHROUGH_REASONING=1` 并重启 dsh-cc-bridge）。
 - 验证：生产 webOS 事件流仅 `start/delta/done`（无 thinking）；翻译/角色约束严格遵循。
+
+## 9. 2026-09-05（终）：CC 思考透传策略 + 稳定性
+
+- **思考透传（用户确认策略）**：不截流。模型 reasoning 全部以 thinking 卡片转发给前端
+  （思考推进可见、卡死可感知），最终回答（delta）照常保留。dsh-cc-bridge 默认透传
+  `reasoning_content`，不再吞；长思考期不会因无字节而被 daily 180s 空闲超时误杀。
+- **连接稳定性**：relay→bridge 真流式逐块转发（非缓冲），nginx/relay 超时均 900s；
+  实测本地 max 档 2052 帧/10.9s、公网 302 帧/27s 均完整无断；生产 thinking+delta 正常。
+- **标题生成**：为 dsh provider 补 `server/.env` 的 `DSH_API_KEY=<中转密码>`
+  （仓库既有约定 `<PROVIDER>_API_KEY`，不改代码），消除「No API key for provider: dsh」。
+- 旧模型引用（opencode/glm-5.3 等）已随 Ark 清理 + resolveModel 回退默认而不再触发 401/429。
