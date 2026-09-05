@@ -15,6 +15,7 @@ import { initDb, closeDb, getPool } from './db/connection.js'
 import { getSandboxRoot } from './sandbox/index.js'
 import { initializeSchema } from './db/schema.js'
 import { seedBuiltinTemplates, seedShowcasePanel } from './db/seed.js'
+import { seedModelsIfEmpty, applyEnvProviderKeysIfMissing } from './db/modelCatalog.js'
 import { errorHandler } from './middleware/error.js'
 import { panelsRouter, getDemoPanel } from './routes/panels.js'
 import { widgetsRouter, panelWidgetsRouter } from './routes/widgets.js'
@@ -582,6 +583,16 @@ async function main() {
   logStep('ensureUserIpColumns done')
   await ensureDisplayNameColumn()
   logStep('ensureDisplayNameColumn done')
+  // 2026-08-31 模型目录初始化：空表时按 env 播种默认模型（deepseek zen / chatst），
+  // 再把 env 里的 provider key 补到「未配置 key」的启用模型上（只填空、不覆盖管理后台已配值）。
+  // 之后换 key 直接在管理后台「模型管理」改，无需改部署文件。
+  try {
+    await seedModelsIfEmpty()
+    await applyEnvProviderKeysIfMissing()
+    logStep('modelCatalog seed + env keys done')
+  } catch (err) {
+    console.warn('[Server] modelCatalog seed failed (continuing):', err)
+  }
   // 2026-08-06 服务器负载历史表（旧库幂等补建）
   await ensureServerMetricsTable()
   logStep('ensureServerMetricsTable done')

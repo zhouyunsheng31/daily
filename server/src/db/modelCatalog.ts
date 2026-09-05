@@ -269,3 +269,29 @@ export async function seedModelsIfEmpty(): Promise<void> {
   console.log(`[ModelCatalog] Seeded ${models.length} default models (chatst gemini-3.7-flash + deepseek zen)`)
   void visionKey // 预留：识图功能模型走独立链路，不入目录
 }
+
+// ---------------------------------------------------------------------------
+// 2026-08-31 统一配置引导：把环境变量里的 provider key 填充到模型目录中
+// 「未配置 key」的启用模型。幂等且只填空（绝不覆盖管理后台已配置的值），
+// 使「.env 里配好 DEEPSEEK_* → 部署即直连，前端可用」开箱可用；
+// 之后想换 key 只需在管理后台「模型管理」改，不需要动部署文件。
+// ---------------------------------------------------------------------------
+export async function applyEnvProviderKeysIfMissing(): Promise<void> {
+  const pool = getPool()
+  const result = await pool.query('SELECT id, provider, api_key FROM ai_models WHERE enabled = TRUE')
+  const envKeys: Record<string, string> = {
+    deepseek: process.env.DEEPSEEK_API_KEY?.trim() ?? '',
+    chatst: process.env.CHATST_API_KEY?.trim() ?? '',
+  }
+  let applied = 0
+  for (const row of result.rows as Array<{ id: string; provider: string; api_key: string | null }>) {
+    const envKey = envKeys[row.provider]
+    if (envKey && !(row.api_key || '').trim()) {
+      await pool.query('UPDATE ai_models SET api_key = $1, updated_at = $2 WHERE id = $3', [envKey, Date.now(), row.id])
+      applied += 1
+    }
+  }
+  if (applied > 0) {
+    console.log(`[ModelCatalog] applied env provider keys to ${applied} enabled model(s) with empty key (admin can override)`)
+  }
+}

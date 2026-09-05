@@ -19,6 +19,9 @@ import {
   sanitizeModelName,
   sanitizeEndpointUrl,
 } from '../utils/sanitize.js'
+// 2026-08-31：模型目录是 webOS provider 配置的单一来源；增删改后需失效 pi 共享服务缓存，
+// 否则已缓存的 modelRegistry 会继续用旧配置，管理后台改动无法立即生效。
+import { invalidateWebosServices } from '../piBridge.js'
 
 export const adminRouter = Router()
 
@@ -553,6 +556,7 @@ adminRouter.post('/ai-models', async (req, res, next) => {
       enabled: body.enabled ?? true,
       isDefault: body.isDefault ?? false,
     })
+    invalidateWebosServices() // 目录变化 → 下次会话用新配置
     res.status(201).json(model)
   } catch (e) { next(e) }
 })
@@ -600,6 +604,7 @@ adminRouter.put('/ai-models/:id', async (req, res, next) => {
       isDefault: body.isDefault ?? existing.isDefault,
     })
     if (body.isDefault) await setModelDefault(req.params.id)
+    invalidateWebosServices() // 目录变化 → 下次会话用新配置
     res.json(model)
   } catch (e) { next(e) }
 })
@@ -612,6 +617,7 @@ adminRouter.delete('/ai-models/:id', async (req, res, next) => {
       next(createError(404, 'NOT_FOUND', 'Model not found'))
       return
     }
+    invalidateWebosServices() // 目录变化 → 下次会话用新配置
     res.json({ ok: true })
   } catch (e) { next(e) }
 })
@@ -624,6 +630,7 @@ adminRouter.put('/ai-models/:id/default', async (req, res, next) => {
       next(createError(404, 'NOT_FOUND', 'Model not found'))
       return
     }
+    invalidateWebosServices() // 默认模型变化 → 下次会话用新默认
     res.json(model)
   } catch (e) { next(e) }
 })

@@ -1091,10 +1091,15 @@ function ModelsView() {
     <div className="model-fetch-box" style={{ background: 'var(--bg-soft, #f6f7f9)', borderRadius: 8, padding: '12px 14px', marginBottom: 16, border: '1px solid var(--border, #e5e7eb)' }}>
       <h4 style={{ margin: '0 0 8px' }}><RefreshCw size={13} /> 从 provider 拉取模型列表（自动导入）</h4>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <input placeholder="provider 名（如 chatst / deepseek）" value={fetchInput.provider} onChange={(e) => setFetchInput({ ...fetchInput, provider: e.target.value })} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db' }} />
+        <input placeholder="provider 名（如 dsh / chatst / deepseek）" value={fetchInput.provider} onChange={(e) => setFetchInput({ ...fetchInput, provider: e.target.value })} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db' }} />
         <input placeholder="endpoint（留空自动推断，如 https://api.chatst.org/v1）" value={fetchInput.endpoint} onChange={(e) => setFetchInput({ ...fetchInput, endpoint: e.target.value })} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db', minWidth: 280 }} />
         <input placeholder="API Key（留空用目录里同 provider 的 key）" type="password" value={fetchInput.apiKey} onChange={(e) => setFetchInput({ ...fetchInput, apiKey: e.target.value })} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #d1d5db', minWidth: 240 }} />
         <button className="ghost-btn" onClick={() => void doFetch()} disabled={fetchBusy}><RefreshCw size={13} /> {fetchBusy ? '拉取中…' : '获取模型列表'}</button>
+      </div>
+      <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280', lineHeight: 1.6 }}>
+        💡 <strong>dsh 中转</strong>：endpoint 填 dsh 中转地址（形如 <code>https://154.219.108.99:10443/dsh-relay/v1</code>），
+        API Key 填中转密码（与 Basic 密码同一个），provider 建议 <code>dsh</code>——点击「获取模型列表」即自动导入 dsh 当前可用全部模型；
+        之后 dsh 换套餐/增减模型只需在此重新拉取，无需改 endpoint。也可以照常直连各家服务商（endpoint+key 直填）。
       </div>
       {fetchResult && <div style={{ marginTop: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>

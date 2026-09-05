@@ -53,6 +53,7 @@ import {
 import { persistConversation, restoreSessionContext, persistPiEvent } from './db/aiContext.js'
 import { getAiSettings, getPromptOverrides, clearPromptCache, DEFAULT_PROMPTS } from './db/aiSettingsStore.js'
 import { getPool } from './db/connection.js'
+import type { ModelParams } from './db/modelCatalog.js'
 import { AI_TOOL_MAP, isValidToolName } from './utils/aiTools.js'
 import { searchTools, withSearchUser } from './utils/searchTools.js'
 import { queryCapabilitiesTool } from './utils/capabilityTools.js'
@@ -2338,10 +2339,15 @@ interface SharedWebosServices {
 }
 const sharedWebosServices = new Map<string, SharedWebosServices>()
 
+/** 2026-08-31 统一配置 memo：webOS deepseek/zen 配置与默认模型引用（目录→env→内置）。
+ *  由 invalidateWebosServices() 在模型目录(管理后台「模型管理」)变化时一并失效。 */
+let cachedWebosUnified: { modelRef: string; cfg: WebosDeepseekConfig } | null = null
+
 /** 2026-08-23 失效共享 pi 服务缓存（技能安装/启停后调用）：
  *  新会话创建时将重新扫描 skills，新技能立即被 AI 加载。 */
 export function invalidateWebosServices(): void {
   sharedWebosServices.clear()
+  cachedWebosUnified = null // 模型目录变化 → 统一配置(memo)一并失效，下次会话按新配置
 }
 
 /** 预热 pi 模块（2026-08-10）：server 启动后后台 import pi-coding-agent，
@@ -2355,25 +2361,53 @@ export function preheatPiAgent(): void {
   }, 1500)
 }
 
+/** 该 base URL 指向「不支持 developer 角色」的上游（火山 Ark / dsh 中转 / IP 直连网关）。
+ *  Ark 只接受 system/assistant/user/tool，pi 对未知域名默认判定 supportsDeveloperRole=true
+ *  并发 role=developer → 上游 400。中转/Ark 端点强制关闭该能力，改发 system 角色。 */
+export function endpointRejectsDeveloperRole(baseUrl: string): boolean {
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase()
+    return host.includes('volces.com') ||
+      host.includes('volcengine.com') ||
+      host === '154.219.108.99' ||          // dsh relay 公网地址
+      /^\d+\.\d+\.\d+\.\d+$/.test(host)      // 其它 IP 字面量网关同样保守处理
+  } catch {
+    return false
+  }
+}
+
 /**
  * Operit 式动态注册：从 ai_models 目录读取全部启用模型，按 provider 分组注册。
  * 不依赖硬编码——后台增删改模型后，下次建会话即生效（注册是幂等的，
  * registerProvider 会替换该 provider 的全部模型定义）。
+ *
+ * 2026-09-05（dsh 中转接入）健壮性修复：provider 逐个 try/catch——
+ * 此前整段 try 包裹，任一 provider 配置不合法（如未配 key / endpoint 无效）
+ * 会导致整个目录注册失败 → 回退内置，其余合法 provider（含新加的 dsh 中转
+ * provider）全部不注册，报「model not found in registry」。现在单个 provider
+ * 失败只跳过该 provider，其余照常注册。
  */
 async function registerCatalogModels(modelRegistry: { registerProvider(name: string, config: ProviderConfig): void }): Promise<void> {
+  let catalog: Array<{ id: string; name: string; provider: string; endpoint: string | null; model: string; apiKey: string; params: ModelParams }> = []
   try {
-    const { listEnabledModelsForRegistry } = await import('./db/modelCatalog.js')
-    const catalog = await listEnabledModelsForRegistry()
-    if (catalog.length === 0) return
-    const byProvider = new Map<string, typeof catalog>()
-    for (const m of catalog) {
-      const list = byProvider.get(m.provider) ?? []
-      list.push(m)
-      byProvider.set(m.provider, list)
-    }
-    for (const [provider, models] of byProvider) {
+    const mod = await import('./db/modelCatalog.js')
+    catalog = await mod.listEnabledModelsForRegistry()
+  } catch (err) {
+    console.warn('[PiBridge] registerCatalogModels: 读取模型目录失败（跳过目录注册）:', err instanceof Error ? err.message : String(err))
+    return
+  }
+  if (catalog.length === 0) return
+  const byProvider = new Map<string, typeof catalog>()
+  for (const m of catalog) {
+    const list = byProvider.get(m.provider) ?? []
+    list.push(m)
+    byProvider.set(m.provider, list)
+  }
+  for (const [provider, models] of byProvider) {
+    try {
       const first = models[0]
-      const baseUrl = first.endpoint?.trim() || 'https://api.deepseek.com'
+      // 2026-08-31：deepseek provider 无 endpoint 时回退 zen 网关（与统一配置入口一致）
+      const baseUrl = first.endpoint?.trim() || (first.provider === 'deepseek' ? DEFAULT_WEBOS_BASE_URL : 'https://api.deepseek.com')
       // provider 下各模型可用不同 endpoint：第一种情况全部同 endpoint；
       // 若单个模型有独立 endpoint，注册时以该模型 endpoint 为准（模型级覆盖）。
       const providerModels = models.map((m) => {
@@ -2383,12 +2417,19 @@ async function registerCatalogModels(modelRegistry: { registerProvider(name: str
         // 2026-08-25 恢复推理流：catalog 模型若声明 supportsThinking 则开启推理，
         // 并补全 DeepSeek thinkingLevelMap（reasoning_effort 仅 low/high/max）。
         const supportsThinking = params.supportsThinking === true
+        const noDeveloperRole = endpointRejectsDeveloperRole(effectiveBaseUrl)
         return {
           id: m.model,
           name: m.name,
           api: 'openai-completions' as const,
           baseUrl: effectiveBaseUrl,
-          compat: { requiresReasoningContentOnAssistantMessages: false, thinkingFormat: 'deepseek' as const },
+          compat: {
+            requiresReasoningContentOnAssistantMessages: false,
+            thinkingFormat: 'deepseek' as const,
+            // 2026-09-05（dsh 中转接入）：Ark/中转/IP 网关强制 system 角色，
+            // 否则 pi 默认发 role=developer 被上游 400 拒绝
+            ...(noDeveloperRole ? { supportsDeveloperRole: false } : {}),
+          },
           reasoning: supportsThinking,
           thinkingLevelMap: supportsThinking ? { low: 'low', medium: 'high', high: 'high', xhigh: 'max' } : {},
           input,
@@ -2408,9 +2449,10 @@ async function registerCatalogModels(modelRegistry: { registerProvider(name: str
         models: providerModels,
       })
       console.log(`[PiBridge] catalog provider "${provider}" registered: ${models.map((m) => m.model).join(', ')}`)
+    } catch (err) {
+      // 2026-09-05：单个 provider 失败只跳过它，不影响其它 provider（dsh 中转接入）
+      console.warn(`[PiBridge] catalog provider "${provider}" skipped (bad config):`, err instanceof Error ? err.message : String(err))
     }
-  } catch (err) {
-    console.warn('[PiBridge] registerCatalogModels failed (fallback to builtin):', err instanceof Error ? err.message : String(err))
   }
 }
 
@@ -2484,6 +2526,69 @@ function registerDeepseekModels(
   })
 }
 
+// ============================================================================
+// 2026-08-31 统一配置入口（webOS deepseek/zen provider）
+// 【背景】此前 DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL / DEEPSEEK_MODEL 被散落在
+//   createWebosSession、generateConversationTitle、registerCatalogModels、
+//   webos.ts（available 回退）等多处直接读取；且 registerDeepseekModels 总会在
+//   registerCatalogModels 之后用 env 覆盖目录里的 deepseek 定义——管理后台「模型
+//   管理」里改的 provider/apiKey/endpoint 会被 env 顶掉，是「改了不生效」的根源。
+// 【新规则】所有 webOS 会话统一走本模块解析，单一来源优先级：
+//   ① ai_models 模型目录（管理后台「模型管理」可编辑，改后立即生效）
+//   ② DEEPSEEK_* 环境变量（引导/兜底，如开箱种子数据）
+//   ③ 内置默认（zen 网关 + deepseek-v4-flash）
+// ============================================================================
+const DEFAULT_WEBOS_BASE_URL = 'https://opencode.ai/zen/go/v1'
+const DEFAULT_WEBOS_MODEL_REF = 'deepseek/deepseek-v4-flash'
+
+interface WebosDeepseekConfig {
+  apiKey: string
+  baseUrl: string
+  /** 模型目录是否已注册 deepseek provider（有则不被内置定义覆盖，保留目录参数） */
+  hasCatalogDeepseek: boolean
+}
+
+async function resolveWebosDeepseekConfig(): Promise<WebosDeepseekConfig> {
+  try {
+    const { listEnabledModelsForRegistry } = await import('./db/modelCatalog.js')
+    const catalog = await listEnabledModelsForRegistry()
+    const ds = catalog.find((m) => m.provider === 'deepseek')
+    return {
+      apiKey: (ds?.apiKey || '').trim() || process.env.DEEPSEEK_API_KEY?.trim() || '',
+      baseUrl: (ds?.endpoint || '').trim() || process.env.DEEPSEEK_BASE_URL?.trim() || DEFAULT_WEBOS_BASE_URL,
+      hasCatalogDeepseek: Boolean(ds),
+    }
+  } catch {
+    return {
+      apiKey: process.env.DEEPSEEK_API_KEY?.trim() || '',
+      baseUrl: process.env.DEEPSEEK_BASE_URL?.trim() || DEFAULT_WEBOS_BASE_URL,
+      hasCatalogDeepseek: false,
+    }
+  }
+}
+
+/** webOS 默认模型引用（provider/model）：模型目录默认模型 → DEEPSEEK_MODEL → 内置 */
+async function resolveWebosDefaultModelRef(): Promise<string> {
+  try {
+    const { getDefaultModel } = await import('./db/modelCatalog.js')
+    const dm = await getDefaultModel()
+    if (dm?.provider && dm.model) return `${dm.provider}/${dm.model}`
+  } catch { /* 回退 env/内置 */ }
+  return process.env.DEEPSEEK_MODEL?.trim() || DEFAULT_WEBOS_MODEL_REF
+}
+
+/** 2026-08-31 统一配置（memoized）：
+ *  会话热路径（每条消息）只做一次内存读取；模型目录变化时 invalidateWebosServices 失效。 */
+async function getWebosUnifiedConfig(): Promise<{ modelRef: string; cfg: WebosDeepseekConfig }> {
+  if (cachedWebosUnified) return cachedWebosUnified
+  const [modelRef, cfg] = await Promise.all([
+    resolveWebosDefaultModelRef(),
+    resolveWebosDeepseekConfig(),
+  ])
+  cachedWebosUnified = { modelRef, cfg }
+  return cachedWebosUnified
+}
+
 /**
  * 创建/复用 webOS 的 AgentSession（按 scope + conversationId + thinking 缓存）。
  * scope 建议：对话用 principal.key，App 生成用 `${principal.key}:gen`（固定 'off'）。
@@ -2500,9 +2605,12 @@ export async function createWebosSession(
   options?: { systemPrompt?: string[]; customTools?: ToolDefinition[]; conversationId?: string; modelRef?: string },
 ): Promise<AgentSession> {
   const conversationId = options?.conversationId ?? 'default'
+  // 统一配置入口（2026-08-31，memoized）：目录(管理后台) → env → 内置默认
+  const unified = await getWebosUnifiedConfig()
+  const webosAiCfg = unified.cfg
   // 2026-08-23 模型目录（Operit 式）接入：用户可切换模型，会话按
   // (scope, conversationId, modelRef) 隔离——切模型 = 新上下文，互不串扰
-  const modelRef = options?.modelRef?.trim() || process.env.DEEPSEEK_MODEL?.trim() || 'deepseek/deepseek-v4-flash'
+  const modelRef = options?.modelRef?.trim() || unified.modelRef
   const key = `webos:${scope}:${conversationId}:${modelRef}`
   const existing = webosSessions.get(key)
   if (existing) return existing
@@ -2604,7 +2712,10 @@ export async function createWebosSession(
     // Operit 式：从模型目录（ai_models 表）动态注册全部启用的 provider/模型；
     // 目录为空时回退内置 DeepSeek（zen 网关）定义。
     await registerCatalogModels(modelRegistry)
-    registerDeepseekModels(modelRegistry, process.env.DEEPSEEK_API_KEY?.trim() ?? '', process.env.DEEPSEEK_BASE_URL)
+    // 2026-08-31 统一入口：模型目录已含 deepseek 时不再用内置定义/env 覆盖（管理后台改动生效）
+    if (!webosAiCfg.hasCatalogDeepseek) {
+      registerDeepseekModels(modelRegistry, webosAiCfg.apiKey, webosAiCfg.baseUrl)
+    }
 
     shared = { loader: resourceLoader, authStorage, modelRegistry, agentDir, skillsDir: skillsDirs.join('|') }
     sharedWebosServices.set(systemKey, shared)
@@ -2612,7 +2723,7 @@ export async function createWebosSession(
   }
   const { loader: resourceLoader, authStorage, modelRegistry } = shared
 
-  const deepseekKey = process.env.DEEPSEEK_API_KEY?.trim()
+  const deepseekKey = webosAiCfg.apiKey
   if (deepseekKey) {
     authStorage.setRuntimeApiKey('deepseek', deepseekKey)
   }
@@ -2749,14 +2860,20 @@ export async function generateConversationTitle(texts: string[]): Promise<string
     const { AuthStorage, getAgentDir, ModelRegistry } = await loadPiAgent()
     const agentDir = getAgentDir()
     const authStorage = AuthStorage.create(agentDir ? join(agentDir, 'auth.json') : undefined)
-    const deepseekKey = process.env.DEEPSEEK_API_KEY?.trim()
+    // 统一配置入口（2026-08-31，memoized）：与 createWebosSession 完全同源
+    const unified = await getWebosUnifiedConfig()
+    const webosAiCfg = unified.cfg
+    const deepseekKey = webosAiCfg.apiKey
     if (deepseekKey) {
       authStorage.setRuntimeApiKey('deepseek', deepseekKey)
     }
     const modelRegistry = ModelRegistry.create(authStorage)
-    // 覆盖 pi 内置 DeepSeek 模型定义（与 createWebosSession 一致，四档可用）
-    registerDeepseekModels(modelRegistry, deepseekKey ?? '', process.env.DEEPSEEK_BASE_URL)
-    const modelRef = process.env.DEEPSEEK_MODEL?.trim() || 'deepseek/deepseek-v4-flash'
+    // 与 createWebosSession 一致：目录优先，目录缺 deepseek 时才用内置定义（zen 网关）
+    await registerCatalogModels(modelRegistry)
+    if (!webosAiCfg.hasCatalogDeepseek) {
+      registerDeepseekModels(modelRegistry, deepseekKey, webosAiCfg.baseUrl)
+    }
+    const modelRef = unified.modelRef
     const [providerName = 'deepseek', ...modelParts] = modelRef.split('/')
     const modelName = modelParts.join('/') || 'deepseek-v4-flash'
     const model = modelRegistry.find(providerName, modelName)

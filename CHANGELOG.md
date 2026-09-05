@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-09-05 11:05 · feat(webos+piBridge): 模型目录支持 dsh 中转（OpenAI 兼容多 provider）+ 注册隔离修复 (commit TBD-本地待提交)
+
+**背景/需求**：daily 管理后台「模型管理」要能直接接本机 dsh（DeepSeek Harness）当 LLM 中转站——后台每行 endpoint 填 dsh 中转地址、api_key 填中转密码，dsh 当前可用的模型（火山 Ark glm/kimi/deepseek、opencode 网关等）经「拉取模型列表」自动导入即可选用；dsh 换套餐/增删模型后重新拉取即同步，接口无需重配；同时保留直连各家服务商（endpoint+key 直填）的能力。套餐/额度用尽时上游错误**原样透传报错，绝不自动切模型或套餐**（该语义由 dsh 侧中转实现，本仓库无需兜底切换）。
+
+**改动**：
+- `server/src/piBridge.ts` `registerCatalogModels`：
+  - **逐 provider 隔离注册**：此前整段 try 包裹，任一 provider 配置不合法（如某 provider 未配 key / endpoint 无效）会导致整个目录注册失败并回退内置——新加的 dsh 中转 provider 会因此完全不注册，报 `model not found in registry`。现改为每个 provider 独立 try/catch，单 provider 失败只跳过自己，其余照常注册；
+  - **Ark / 中转端点强制关闭 developer 角色**：pi 对未知域名默认 `supportsDeveloperRole=true` 并发 `role=developer`，火山 Ark 只接受 system/assistant/user/tool → 上游 400。新增 `endpointRejectsDeveloperRole()`：对 volces 域名 / dsh 中转 IP / 其它 IP 字面量端点注册 `compat.supportsDeveloperRole=false`，改发 system 角色；
+  - 类型层面导入 `ModelParams` 修复 tsc 报错。
+- `client/admin-web/src/App.tsx` ModelsView：拉取框下新增「dsh 中转」操作提示（endpoint 填 `https://154.219.108.99:10443/dsh-relay/v1`、API Key 填中转密码、provider 建议 `dsh`，重新拉取即同步 dsh 模型；直连服务商照旧）。
+
+**验证**：
+- `npx tsc --noEmit` 0 错；`test/unit/piBridge.test.ts` 104 用例全过；新增 `test/unit/dshRelayCompat.test.ts` 5 用例过（endpointRejectsDeveloperRole 判定）；
+- 本地 sqlite 起服 E2E：目录加入 `dsh/glm-5.3-flash`（endpoint=dsh relay、key=中转密码）→ `/webos/api/chat/stream` SSE 正常流式返回（delta→done）；`dsh/deepseek-v4-flash`（Ark 路由）同样通过；管理后台拉取 `/models` 走 Bearer 中转密码返回 4 个模型（kimi-k3/glm-5.3/glm-5.3-flash/deepseek-v4-flash）；
+- 回归：目录注册不再被无 key 的 chatst provider 拖垮（本地该 provider 无 key 时其余正常注册）。
+
+
 ### 2026-09-04 17:04 · feat(webos): 工作区文件支持直接下载（行内 + 预览内）+ 缩放可输入精确百分比 (commit 9e424e8)
 
 **背景/用户反馈**：工作区文件点下载只是新开标签浏览 raw 内容（md/文本/图片都在浏览器里显示，不是真下载）；缩放只能步进按钮，希望输入具体百分比（如 150%）。要求验证其他文件类型是否同样不能直接下载。
