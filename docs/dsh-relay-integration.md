@@ -75,3 +75,21 @@ NODE_EXTRA_CA_CERTS=/data/dsh-cert.pem
 | 400 `role: developer ... not valid` | 旧版本未带 supportsDeveloperRole:false；更新到本次代码后重启 |
 | `model not found in registry` | 该 provider 注册失败（看服务端日志 `catalog provider ... skipped`）或模型行未启用 |
 | TLS/CERT 报错 | daily 服务器未设 `NODE_EXTRA_CA_CERTS`（见 §4） |
+
+## 6. Command Code（CC）模型接入（2026-09-05）
+
+dsh 中转现在除 Ark/opencode 外还合并了 **Command Code（CC Go 套餐）** 的 35 个实测可用模型，
+经 dsh 官方插件路径（`/data/cc-bridge`）转发，模型 id 以 `cc/` 前缀出现：
+
+```
+dsh/cc/moonshotai/Kimi-K3      dsh/cc/Qwen/Qwen3.8-Max     dsh/cc/xai/grok-4.5
+dsh/cc/zai-org/GLM-5.3         dsh/cc/tencent/hy4-preview  dsh/cc/deepseek-v4-flash …
+```
+
+接入步骤与 §2 完全相同（同一个 dsh provider、同一 endpoint、同一 key）：
+后台「获取模型列表」会返回全部 `cc/…` 模型 → 逐个导入即可（生产库已预置 35 行）。
+
+注意：
+- **`model` 字段要保留 `cc/` 前缀**（如 `cc/moonshotai/Kimi-K3`），relay 靠此前缀路由到 CC 桥；
+- Claude 系列暂不可用（CC Go 档无权限，需 Pro 档；升档后 dsh 侧 `models.cc.json` 增加即自动可见）；
+- CC 套餐与 Ark 是**独立额度**——Ark 周配额用尽不影响 CC 模型。
