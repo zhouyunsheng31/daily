@@ -126,3 +126,13 @@ dsh/cc/zai-org/GLM-5.3         dsh/cc/tencent/hy4-preview  dsh/cc/deepseek-v4-fl
 - **标题生成**：为 dsh provider 补 `server/.env` 的 `DSH_API_KEY=<中转密码>`
   （仓库既有约定 `<PROVIDER>_API_KEY`，不改代码），消除「No API key for provider: dsh」。
 - 旧模型引用（opencode/glm-5.3 等）已随 Ark 清理 + resolveModel 回退默认而不再触发 401/429。
+
+## 10. 2026-09-05：思考断流重试 + 切片优化（dsh 侧）
+
+- **思考半路停止修复**：dsh-cc-bridge 此前对 CC 上游偶发 TRANSPORT/TIMEOUT 断流直接终止流。
+  现加：连接阶段静默重试（≤3 次）→ 中途断流发「连接波动，自动重连中…」通知并追加重试 1 次
+  → 最终 content 一定完整；客户端断开即中止上游。401/403 等不可重试错误原样返回。
+- **切片优化**：reasoning/text 按 6 字符微片高频转发（中文按码点切）。注：daily 服务端
+  本身有 120ms SSE 合并窗口（防移动端卡顿的设计），故前端感知频率以 daily 窗口为上限；
+  公网实测 87/88 帧 <10ms 到达，已逐块高频推送。
+- 重试算法 4 场景单测 + 生产复杂任务（1863 字完整输出，stop=stop）验证通过。
