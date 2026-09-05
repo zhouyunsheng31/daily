@@ -1,4 +1,4 @@
-const CACHE_NAME = 'daily-webos-shell-v0.1.4'
+const CACHE_NAME = 'daily-webos-shell-v0.1.5'
 // 相对路径：按 sw.js 所在目录（/daily/）解析，兼容子路径部署
 const APP_SHELL = ['./manifest.webmanifest']
 
