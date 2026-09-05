@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
+### 2026-09-05 16:45 · fix(shell-web): AI 正文渲染切流不闪动、不丢尾（ThrottledMarkdown 不卸载直切全量渲染） (commit TBD-提交后回填)
+
+**背景/用户反馈**：CC 接入后 AI 长输出时前端「卡顿闪动」且「最后结果可能不完整——后端已发 done 但前端似乎没输出完」。服务端侧已排查：SSE 数据完整（内容尾部完整、done 在最后，daily 在 done 前强制 flush 挂起 delta）。根因在前端渲染：流式输出时最后一段正文走 `ThrottledMarkdown`（200ms 节流 + 全量 markdown 重解析），done 一到父级把它**卸载**并切换成普通 `MarkdownContent`——若 200ms 节流 interval 尚未 flush 到最新文本，会出现「尾部内容晚一拍才出现/看似没输出完」，组件切换重建 DOM 造成闪动；节流期每 200ms 全量重解析长文本也会让低端 WebView 卡顿。
+
+**改动**（`client/shell-web/src/App.tsx`）：
+- `ThrottledMarkdown`：新增「文本变化即同步」effect（非流式下 text 变化直接把 rendered 同步为最新）；渲染值改为 `streaming ? rendered : text`（非流式直接用最新全文，彻底消除 stale 帧）；streaming 结束（done）时组件不卸载，同一实例把全文渲染到位。
+- `MessageBubble` 文本段渲染：最后一段正文无论 streaming 与否统一走 `ThrottledMarkdown`（仅翻转 `streaming` prop），不再在 done 时切换成另一个组件；历史段（非最后）仍用一次性 `MarkdownContent`。
+
+**验证**：`vite build`（VITE_BASE_PATH=/daily/）通过，产物 `assets/index-BMCQeBGv.js`；已 scp 至生产 `/root/daily/server/public/`（index.html 引用更新 + chmod 644），`/daily/` 200、新 bundle 200。流式→done 转换不再重建组件（消除闪动与尾部滞后观感）。
+
 ### 2026-09-05 11:05 · feat(webos+piBridge): 模型目录支持 dsh 中转（OpenAI 兼容多 provider）+ 注册隔离修复 (commit 82fd3cf)
 
 **背景/需求**：daily 管理后台「模型管理」要能直接接本机 dsh（DeepSeek Harness）当 LLM 中转站——后台每行 endpoint 填 dsh 中转地址、api_key 填中转密码，dsh 当前可用的模型（火山 Ark glm/kimi/deepseek、opencode 网关等）经「拉取模型列表」自动导入即可选用；dsh 换套餐/增删模型后重新拉取即同步，接口无需重配；同时保留直连各家服务商（endpoint+key 直填）的能力。套餐/额度用尽时上游错误**原样透传报错，绝不自动切模型或套餐**（该语义由 dsh 侧中转实现，本仓库无需兜底切换）。

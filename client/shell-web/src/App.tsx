@@ -865,14 +865,23 @@ function MarkdownContent({ text }: { text: string }) {
 }
 
 /** 2026-08-06 流式节流渲染：AI 输出期间每 200ms 合并一次 markdown 渲染
- *  （此前每帧全量解析，长输出/长思考会把浏览器拖垮）。非流式直接渲染。 */
+ *  （此前每帧全量解析，长输出/长思考会把浏览器拖垮）。非流式直接渲染。
+ *
+ *  2026-09-05 修复「卡顿闪动 + 输出尾部不完整观感」：
+ *  - 旧逻辑在 streaming 结束（done）时，父级把本组件**卸载**并切换成另一个
+ *    MarkdownContent 组件 —— 卸载瞬间若 200ms 节流 interval 尚未 flush，用户会看到
+ *    「最后一点没显示就结束」；且组件切换重建 DOM 造成闪动。
+ *  - 现在父级始终用本组件渲染最后一段正文，仅翻转 streaming：结束时组件不卸载，
+ *    effect 把 rendered 同步为最新全文（无旧帧、无切换、无闪动）。
+ */
 function ThrottledMarkdown({ text, streaming }: { text: string; streaming?: boolean }) {
   const [rendered, setRendered] = useState(text)
   const latestRef = useRef(text)
   latestRef.current = text
+  // 始终让「已渲染」跟上最新：streaming 时由 interval 节流，结束时立即同步一次
   useEffect(() => {
     if (!streaming) {
-      setRendered(text)
+      setRendered(latestRef.current)
       return
     }
     const timer = window.setInterval(() => {
@@ -880,7 +889,12 @@ function ThrottledMarkdown({ text, streaming }: { text: string; streaming?: bool
     }, 200)
     return () => window.clearInterval(timer)
   }, [streaming]) // eslint-disable-line react-hooks/exhaustive-deps
-  return <MarkdownContent text={rendered} />
+  // 文本在非流式下变化也同步（历史恢复/编辑重排场景）
+  useEffect(() => {
+    if (!streaming) setRendered(text)
+  }, [text, streaming]) // eslint-disable-line react-hooks/exhaustive-deps
+  // 渲染值：非流式直接用最新 text（彻底消除 stale 帧），流式用节流后的 rendered
+  return <MarkdownContent text={streaming ? rendered : text} />
 }
 
 /** 「粘贴 HTML → 创建 App」弹层（用户直连路径，不依赖 AI） */
@@ -1538,7 +1552,17 @@ const MessageBubble = memo(function MessageBubble({ message, messageIndex, isLas
             }
             if (segment.type === 'text') {
               const generating = isLast && streaming && index === lastTextIndex
-              return <div className="chat-text" key={index}>{generating ? <ThrottledMarkdown text={segment.content} streaming /> : <MarkdownContent text={segment.content} />}</div>
+              // 2026-09-05：最后一段正文统一走 ThrottledMarkdown（不卸载切换组件），
+              // 消除 done 时「尾部未 flush + 组件切换」造成的闪动/不完整观感。
+              // 历史段（非最后）仍用一次性 MarkdownContent。
+              if (generating) {
+                return <div className="chat-text" key={index}><ThrottledMarkdown text={segment.content} streaming /></div>
+              }
+              // streaming 结束瞬间同一组件降级渲染最新全文（不切组件）
+              if (isLast && index === lastTextIndex && streaming === false) {
+                return <div className="chat-text" key={index}><ThrottledMarkdown text={segment.content} streaming={false} /></div>
+              }
+              return <div className="chat-text" key={index}><MarkdownContent text={segment.content} /></div>
             }
             if (segment.type === 'html') {
               return <div className="chat-html-widget" key={index} style={{ height: segment.heightPx ?? 280 }}>
