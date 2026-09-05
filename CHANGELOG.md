@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
-### 2026-09-05 16:45 · fix(shell-web): AI 正文渲染切流不闪动、不丢尾（ThrottledMarkdown 不卸载直切全量渲染） (commit TBD-提交后回填)
+### 2026-09-05 16:45 · fix(shell-web): AI 正文渲染切流不闪动、不丢尾（ThrottledMarkdown 不卸载直切全量渲染） (commit 2153fa1)
 
 **背景/用户反馈**：CC 接入后 AI 长输出时前端「卡顿闪动」且「最后结果可能不完整——后端已发 done 但前端似乎没输出完」。服务端侧已排查：SSE 数据完整（内容尾部完整、done 在最后，daily 在 done 前强制 flush 挂起 delta）。根因在前端渲染：流式输出时最后一段正文走 `ThrottledMarkdown`（200ms 节流 + 全量 markdown 重解析），done 一到父级把它**卸载**并切换成普通 `MarkdownContent`——若 200ms 节流 interval 尚未 flush 到最新文本，会出现「尾部内容晚一拍才出现/看似没输出完」，组件切换重建 DOM 造成闪动；节流期每 200ms 全量重解析长文本也会让低端 WebView 卡顿。
 
