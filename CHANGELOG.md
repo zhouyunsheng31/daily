@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > 版本号说明：0.x 版本与桌面端 roadmap Phase 编号对齐（Phase N → 0.N.0）；**1.0.0 为首个正式发布版本**，自 1.0.0 起遵循语义化版本（MAJOR.MINOR.PATCH），不再与 Phase 编号直接挂钩。
 
-### 2026-09-05 11:05 · feat(webos+piBridge): 模型目录支持 dsh 中转（OpenAI 兼容多 provider）+ 注册隔离修复 (commit TBD-本地待提交)
+### 2026-09-05 11:05 · feat(webos+piBridge): 模型目录支持 dsh 中转（OpenAI 兼容多 provider）+ 注册隔离修复 (commit 82fd3cf)
 
 **背景/需求**：daily 管理后台「模型管理」要能直接接本机 dsh（DeepSeek Harness）当 LLM 中转站——后台每行 endpoint 填 dsh 中转地址、api_key 填中转密码，dsh 当前可用的模型（火山 Ark glm/kimi/deepseek、opencode 网关等）经「拉取模型列表」自动导入即可选用；dsh 换套餐/增删模型后重新拉取即同步，接口无需重配；同时保留直连各家服务商（endpoint+key 直填）的能力。套餐/额度用尽时上游错误**原样透传报错，绝不自动切模型或套餐**（该语义由 dsh 侧中转实现，本仓库无需兜底切换）。
 
