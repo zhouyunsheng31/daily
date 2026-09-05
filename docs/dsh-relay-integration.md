@@ -93,3 +93,14 @@ dsh/cc/zai-org/GLM-5.3         dsh/cc/tencent/hy4-preview  dsh/cc/deepseek-v4-fl
 - **`model` 字段要保留 `cc/` 前缀**（如 `cc/moonshotai/Kimi-K3`），relay 靠此前缀路由到 CC 桥；
 - Claude 系列暂不可用（CC Go 档无权限，需 Pro 档；升档后 dsh 侧 `models.cc.json` 增加即自动可见）；
 - CC 套餐与 Ark 是**独立额度**——Ark 周配额用尽不影响 CC 模型。
+
+## 7. 2026-09-05 更新：清理 Ark + 工具调用修复
+
+- **火山方舟已下线**：生产模型目录删除全部 Ark 行（`dsh/glm-5.3*`、`dsh/kimi-k3` 经 relay→Ark，
+  `opencode/deepseek-v4-flash`×2 直连 Ark），现仅剩 35 行 `dsh/cc/*`（CC 桥）。
+  relay 侧 `RELAYABLE_PROVIDERS` 置空，`/v1/models` 只返回 `cc/*`，后台重新拉列表不会再带 Ark。
+  Ark 周配额 429 报错也随之消除（CC 已成唯一模型源）。
+- **CC 工具调用修复**：bridge 现支持 OpenAI `tools`/`tool_calls`/`tool` 结果完整往返
+  （此前 CC 模型收不到工具定义、只能虚构文本工具调用）。生产 webos 实测：CC 默认模型
+  触发 `agent_fs_list` → `tool_start/tool_end` 实际执行 → 基于结果作答。
+- 生产目录现状：35 行 `dsh/cc/*`，默认 `dsh/cc/deepseek/deepseek-v4-flash`。
