@@ -104,3 +104,14 @@ dsh/cc/zai-org/GLM-5.3         dsh/cc/tencent/hy4-preview  dsh/cc/deepseek-v4-fl
   （此前 CC 模型收不到工具定义、只能虚构文本工具调用）。生产 webos 实测：CC 默认模型
   触发 `agent_fs_list` → `tool_start/tool_end` 实际执行 → 基于结果作答。
 - 生产目录现状：35 行 `dsh/cc/*`，默认 `dsh/cc/deepseek/deepseek-v4-flash`。
+
+## 8. 2026-09-05：CC 中间思考屏蔽 + system 约束修复（dsh 侧）
+
+- **中间思考屏蔽**：CC 网关模型（尤其 deepseek-v4-flash）只支持 high/max 思考档，daily
+  默认档 medium 经 pi 放大为 high 发给 CC → 之前每轮都吐 `thinking` 卡片。现 dsh-cc-bridge
+  默认吞掉全部 `reasoning_content`，只向 daily 转发纯 content 流 —— 与旧直连
+  opencode zen（0 reasoning）表现一致。daily 无需任何改动。
+- **system 忠实传递**：bridge 此前丢弃 system 消息，角色扮演/skill 约束不生效；现已将
+  system/developer 传至 CC 插件 systemText。**无需改 daily 代码**（若需恢复思考可视化，
+  在 dsh 侧设 `CC_BRIDGE_PASSTHROUGH_REASONING=1` 并重启 dsh-cc-bridge）。
+- 验证：生产 webOS 事件流仅 `start/delta/done`（无 thinking）；翻译/角色约束严格遵循。
